@@ -252,6 +252,7 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
 
         if (use_exploration) {
             // Collect EV for all hold masks.
+            double greedy_max_ev = best_ev; // starts as stop_value
             for (int mask = 0; mask < kNumHoldMasks; ++mask) {
                 int held_id = tables.moves[current_id][mask];
                 int count = 0;
@@ -260,6 +261,7 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
                 for (int t = 0; t < count; ++t)
                     ev += tr[t].probability * target_v[tr[t].target_state_id];
                 buffers.mask_evs[mask] = ev;
+                if (ev > greedy_max_ev) greedy_max_ev = ev;
             }
             // Include stop as the 33rd option in the softmax.
             buffers.mask_evs[kNumHoldMasks] = best_ev;
@@ -268,10 +270,11 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
                                           config.hold_temperature, rng);
             if (selected == kNumHoldMasks) {
                 // Stop and place (best_is_place remains true).
+                best_ev = greedy_max_ev; 
             } else {
                 best_mask = static_cast<uint8_t>(selected);
                 best_is_place = false;
-                best_ev = buffers.mask_evs[selected];
+                best_ev = greedy_max_ev; // Use the max EV, not the sampled EV!
             }
         } else {
             // Greedy: find best mask.

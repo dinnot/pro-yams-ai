@@ -89,12 +89,22 @@ void TrainingLoop::run(int num_steps) {
         int collected = collect_completed_games();
 
         if (buffer_->size() >= config_.min_buffer_size) {
-            do_training_step();
-            maybe_swap_model();
-            maybe_checkpoint();
-            maybe_evaluate();
-        } else if (collected == 0) {
-            // Buffer not ready and no new games — yield to avoid busy-spin
+            // Throttled training: 1 gradient step per completed game
+            // Guarantees a perfectly stable Replay Ratio of ~13 (2048 / 156)
+            for (int i = 0; i < collected; ++i) {
+                do_training_step();
+                maybe_swap_model();
+                maybe_checkpoint();
+                maybe_evaluate();
+                if (training_step_ >= num_steps || stop_flag_.load(std::memory_order_relaxed)) {
+                    break;
+
+                }
+            }
+        }
+        
+        // If we haven't reached min_buffer_size, or no games were ready this tick
+        if (collected == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }

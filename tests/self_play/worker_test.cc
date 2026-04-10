@@ -85,6 +85,7 @@ TEST(WorkerTest, NeedResolve_RecordsTrajectory) {
 
     // Force rolls_left=0 so solver must place (short-circuits reroll logic).
     game->state.rolls_left = 0;
+    game->current_turn_start_ev = 0.5; // Simulate EV captured at start of turn
     game->phase = GamePhase::kNeedResolve;
     available.push(game.get());
     available.push(nullptr);  // sentinel
@@ -135,10 +136,15 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
         } else if (game->phase == GamePhase::kNeedResolve) {
             SolverResult res = solver_resolve(game->state, game->ctx, *g_tables,
                                               game->solver_buffers, cfg, game->rng);
+
+            if (game->state.rolls_left == 2) {
+                game->current_turn_start_ev = res.expected_value;
+            }
+
             if (res.should_place) {
                 ASSERT_GE(res.chosen_request_idx, 0);
                 TrajectoryStep& step = game->trajectory[game->trajectory_length];
-                step.value  = res.expected_value;
+                step.value  = game->current_turn_start_ev;
                 step.player = static_cast<int8_t>(game->state.board.current_player);
                 std::memcpy(step.tensor,
                             game->tensor_buffer + res.chosen_request_idx * kTensorSize,

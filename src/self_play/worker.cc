@@ -80,11 +80,18 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                                                   game->solver_buffers, config,
                                                   game->rng);
 
+            // Capture the pure optimal EV at the very first decision point of the turn.
+            if (game->state.rolls_left == 2) {
+                game->current_turn_start_ev = result.expected_value;
+            }
+
             if (result.should_place) {
                 // Record trajectory step before applying placement.
                 assert(game->trajectory_length < GameInstance::kMaxTrajectorySteps);
                 TrajectoryStep& step = game->trajectory[game->trajectory_length];
-                step.value  = result.expected_value;
+                
+                // Use the Q-value from the START of the turn, avoiding dice degradation!
+                step.value  = game->current_turn_start_ev;
                 step.player = static_cast<int8_t>(game->state.board.current_player);
 
                 // Copy the chosen afterstate tensor from tensor_buffer.

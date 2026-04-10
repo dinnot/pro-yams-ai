@@ -61,4 +61,6 @@ struct GameInstance {
 
     // === Game result ===
     double result;  // 1.0 = player 0 wins, 0.0 = player 1 wins, 0.5 = draw
+
+    double current_turn_start_ev = 0.0;
 };

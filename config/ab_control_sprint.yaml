@@ -1,22 +1,22 @@
-num_steps: 250000
+num_steps: 50000
 
 training:
-  replay_capacity: 3000000       # Shrunk from 10M to fit purely in fast RAM
-  min_buffer_size: 500000        
+  replay_capacity: 1000000       # Shrunk from 10M to fit purely in fast RAM
+  min_buffer_size: 200000        
   train_batch_size: 2048
   model_swap_interval: 100
-  checkpoint_interval: 50000
+  checkpoint_interval: 10000
   max_checkpoints: 2
   
-  td_mode: tdlambda
+  td_mode: mc
   td_lambda: 0.8
   
   initial_temperature: 1.0
   min_temperature: 0.1
-  temperature_decay: 0.99999     # Adjusted for 250k steps
+  temperature_decay: 0.99994245     # Adjusted for 40k steps
   
   eval_interval: 10000
-  eval_games: 200
+  eval_games: 500
   
   checkpoint_dir: checkpoints/ab_control
   log_dir: ./logs/ab_control
