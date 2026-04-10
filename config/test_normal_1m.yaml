@@ -1,0 +1,36 @@
+num_steps: 1000000
+
+training:
+  replay_capacity: 3000000
+  min_buffer_size: 500000
+  train_batch_size: 2048
+  model_swap_interval: 100
+  checkpoint_interval: 200000
+  max_checkpoints: 2
+  
+  td_mode: tdlambda
+  td_lambda: 0.95        
+  
+  initial_temperature: 1.0
+  min_temperature: 0.1
+  temperature_decay: 0.999995  # Stretched for 1M steps
+  
+  eval_interval: 25000
+  eval_games: 500              # Bumped to 500 for highly accurate scoring
+  
+  checkpoint_dir: checkpoints/test_normal_1m
+  log_dir: ./logs/test_normal_1m
+  log_path: ./logs/test_normal_1m/training_log.csv
+  
+  self_play:
+    max_inference_batch: 512
+    min_games_per_batch: 2
+    batch_timeout_ms: 5
+    num_workers: 20
+    num_games: 2048
+    
+  model:
+    input_size: 809
+    hidden_layers: 3
+    hidden_width: 256          # Normal Width
+    learning_rate: 0.0005

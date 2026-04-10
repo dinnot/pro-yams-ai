@@ -1,0 +1,6 @@
+build/
+checkpoints/
+logs/
+.git/
+*.o
+*.a

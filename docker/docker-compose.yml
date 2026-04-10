@@ -1,0 +1,41 @@
+services:
+  train:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ../checkpoints:/app/checkpoints
+      - ../config:/app/config
+      - ../logs:/app/logs
+    command: ["--mode", "train", "--config", "/app/config/default.yaml"]
+
+  ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ../checkpoints:/app/checkpoints
+      - ../logs:/app/logs
+    ports:
+      - "8080:8080"
+    entrypoint: ["/usr/local/bin/pro_yams_ui"]
+    command: [
+      "--log_dir", "/app/logs",
+      "--static_dir", "/app/static",
+      "--port", "8080",
+      "--checkpoint", "/app/checkpoints/latest.model"
+    ]

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro Yams AI</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="lib/chart.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>Pro Yams AI</h1>
+  <nav>
+    <button class="tab-btn active" data-tab="game">Game</button>
+    <button class="tab-btn" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="comparison">Run Comparison</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===== GAME VIEW ===== -->
+  <section id="tab-game" class="tab-section active">
+    <div class="game-controls">
+      <button id="btn-new-game">New Game</button>
+      <select id="sel-p0">
+        <option value="heuristic">P0: Heuristic</option>
+        <option value="human">P0: Human</option>
+        <option value="nn">P0: NN</option>
+        <option value="mc">P0: MC Rollout</option>
+      </select>
+      <select id="sel-p1">
+        <option value="heuristic">P1: Heuristic</option>
+        <option value="human">P1: Human</option>
+        <option value="nn">P1: NN</option>
+        <option value="mc">P1: MC Rollout</option>
+      </select>
+      <label class="debug-label" title="Record bot hold/placement evaluations for inspection">
+        <input type="checkbox" id="chk-debug"> Debug mode
+      </label>
+      <button id="btn-step" disabled>Step</button>
+      <button id="btn-play-all" disabled>Play All</button>
+    </div>
+
+    <div id="game-status" class="status-bar"></div>
+
+    <div class="game-layout">
+      <!-- Dice area -->
+      <div class="dice-panel">
+        <div id="dice-display" class="dice-row"></div>
+        <div class="dice-info">
+          Rolls left: <span id="rolls-left">-</span>
+        </div>
+        <button id="btn-reroll" disabled>Reroll</button>
+      </div>
+
+      <!-- Boards -->
+      <div class="boards-area">
+        <div id="board-p0" class="board-container">
+          <h3>Player 0 <span class="player-label" id="p0-type"></span></h3>
+          <div id="board-grid-0" class="board-grid"></div>
+        </div>
+        <div id="board-p1" class="board-container">
+          <h3>Player 1 <span class="player-label" id="p1-type"></span></h3>
+          <div id="board-grid-1" class="board-grid"></div>
+        </div>
+      </div>
+
+      <!-- Human options -->
+      <div class="options-panel" id="options-panel" style="display:none">
+        <h4>Legal Placements</h4>
+        <div id="options-list"></div>
+      </div>
+    </div>
+
+    <!-- Score breakdown (shown on game over) -->
+    <div id="score-breakdown" class="score-breakdown-panel" style="display:none"></div>
+
+    <!-- Turn history -->
+    <div class="history-panel">
+      <h4>Turn History</h4>
+      <div id="history-log" class="history-log"></div>
+    </div>
+  </section>
+
+  <!-- ===== DASHBOARD ===== -->
+  <section id="tab-dashboard" class="tab-section">
+    <div class="dashboard-controls">
+      <label>Log directory: <input id="dash-log-dir" type="text" value="."></label>
+      <button id="btn-load-dash">Load</button>
+      <label><input type="checkbox" id="dash-auto-refresh"> Auto-refresh (5s)</label>
+    </div>
+    <div class="stats-row" id="current-stats"></div>
+    <div class="charts-grid">
+      <div class="chart-box"><canvas id="chart-loss"></canvas></div>
+      <div class="chart-box"><canvas id="chart-winrate"></canvas></div>
+      <div class="chart-box"><canvas id="chart-win-margin"></canvas></div>
+      <div class="chart-box"><canvas id="chart-temperature"></canvas></div>
+      <div class="chart-box"><canvas id="chart-games"></canvas></div>
+      <div class="chart-box"><canvas id="chart-games-per-sec"></canvas></div>
+    </div>
+  </section>
+
+  <!-- ===== RUN COMPARISON ===== -->
+  <section id="tab-comparison" class="tab-section">
+    <div class="comparison-controls">
+      <textarea id="comp-dirs" rows="4" placeholder="One log directory per line"></textarea>
+      <button id="btn-load-comparison">Load Runs</button>
+    </div>
+    <div class="chart-box-full">
+      <canvas id="chart-comparison-loss"></canvas>
+    </div>
+    <div class="chart-box-full">
+      <canvas id="chart-comparison-wr"></canvas>
+    </div>
+  </section>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/board.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/game.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/comparison.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

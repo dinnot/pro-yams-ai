@@ -1,0 +1,328 @@
+/* Pro Yams AI — UI Stylesheet */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+}
+
+header {
+  background: #16213e;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border-bottom: 2px solid #0f3460;
+}
+
+header h1 { font-size: 1.4rem; color: #e94560; }
+
+nav { display: flex; gap: 8px; }
+
+.tab-btn {
+  background: #0f3460;
+  color: #ccc;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+.tab-btn:hover { background: #e94560; color: #fff; }
+.tab-btn.active { background: #e94560; color: #fff; }
+
+main { padding: 16px 24px; }
+
+.tab-section { display: none; }
+.tab-section.active { display: block; }
+
+/* Controls */
+.game-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+button {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+button:hover:not(:disabled) { background: #e94560; }
+button:disabled { opacity: 0.4; cursor: default; }
+select, input[type="text"] {
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #0f3460;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.status-bar {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  min-height: 36px;
+  color: #aaa;
+}
+.status-bar.win { color: #4caf50; }
+.status-bar.draw { color: #ffc107; }
+
+/* Game layout */
+.game-layout {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+/* Dice */
+.dice-panel { display: flex; flex-direction: column; gap: 8px; min-width: 140px; }
+.dice-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.die {
+  width: 44px; height: 44px;
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s;
+}
+.die.held { border-color: #e94560; background: #2a1040; }
+.die.inactive { cursor: default; }
+.dice-info { font-size: 0.85rem; color: #aaa; }
+
+/* Boards */
+.boards-area { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
+.board-container { min-width: 260px; }
+.board-container h3 { font-size: 0.95rem; margin-bottom: 6px; color: #e0e0e0; }
+.player-label { font-size: 0.75rem; color: #aaa; }
+
+.board-grid {
+  display: grid;
+  grid-template-columns: 60px repeat(6, 36px);
+  gap: 2px;
+  font-size: 0.75rem;
+}
+.board-grid .row-label { color: #aaa; display: flex; align-items: center; }
+.board-grid .col-header {
+  text-align: center; font-size: 0.7rem; color: #9ab;
+  padding: 2px 0;
+  line-height: 1.3;
+}
+.col-coeff { color: #667; font-size: 0.65rem; }
+.board-cell {
+  width: 36px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  cursor: default;
+  border: 1px solid #222;
+  font-weight: 500;
+}
+.board-cell.empty { background: #1e1e30; color: #555; }
+.board-cell.scored { background: #1e3a1e; color: #4caf50; }
+.board-cell.scratched { background: #2a1a1a; color: #e94560; }
+.board-cell.legal { background: #1a2a3a; border-color: #4a8; cursor: pointer; }
+.board-cell.legal:hover { background: #2a3a2a; border-color: #5bf; }
+
+/* Options panel */
+.options-panel {
+  min-width: 200px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 10px;
+}
+.options-panel h4 { margin-bottom: 8px; font-size: 0.9rem; color: #aaa; }
+.option-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+}
+.option-item:hover { background: #0f3460; }
+.option-item .opt-score { color: #4caf50; font-weight: bold; }
+
+/* History */
+.history-panel { margin-top: 12px; }
+.history-panel h4 { font-size: 0.9rem; color: #aaa; margin-bottom: 6px; }
+.history-log {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+.history-entry-wrapper { border-bottom: 1px solid #222; }
+.history-entry { padding: 3px 0; color: #bbb; }
+.history-entry .p0 { color: #64b5f6; }
+.history-entry .p1 { color: #ef9a9a; }
+.debug-toggle {
+  font-size: 0.7rem;
+  color: #888;
+  cursor: pointer;
+  margin-left: 4px;
+  user-select: none;
+}
+.debug-toggle:hover { color: #e94560; }
+
+/* Debug label in controls */
+.debug-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #aaa;
+  cursor: pointer;
+}
+
+/* Debug panel */
+.debug-panel {
+  background: #111828;
+  border: 1px solid #1e3a5f;
+  border-radius: 4px;
+  margin: 4px 0 4px 12px;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+.debug-section-title {
+  color: #7aabcc;
+  font-size: 0.72rem;
+  margin: 6px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.debug-section-title:first-child { margin-top: 0; }
+
+.debug-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.debug-table th {
+  background: #16213e;
+  color: #9ab;
+  padding: 3px 6px;
+  text-align: left;
+  font-weight: normal;
+  font-size: 0.7rem;
+}
+.debug-table td {
+  padding: 2px 6px;
+  color: #bbb;
+  border-bottom: 1px solid #1a1a2e;
+}
+.debug-table .debug-best-row td { color: #4caf50; background: #0d1f0d; }
+
+.debug-held-die { color: #e94560; }
+.debug-free-die { color: #555; }
+
+/* Score breakdown */
+.score-breakdown-panel {
+  margin-top: 16px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+}
+.score-breakdown-panel h4 {
+  font-size: 0.9rem;
+  color: #aaa;
+  margin-bottom: 10px;
+}
+.score-table {
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  width: 100%;
+  white-space: nowrap;
+}
+.score-table th {
+  background: #0f3460;
+  color: #9ab;
+  padding: 4px 10px;
+  font-weight: normal;
+  text-align: center;
+}
+.score-table td {
+  padding: 4px 10px;
+  text-align: center;
+  border-bottom: 1px solid #222;
+  color: #ccc;
+}
+.score-table tbody tr:hover { background: #1a2a40; }
+.score-table .col-name { text-align: left; color: #e0e0e0; font-weight: 500; }
+.score-table .col-mult { color: #667; font-size: 0.7rem; }
+.score-table .bonus-val { color: #ffc107; }
+.score-table .adj-val { font-weight: 600; color: #e0e0e0; }
+.score-table .crush-val { color: #ab47bc; font-weight: 600; }
+.score-table .pts-pos { color: #4caf50; font-weight: 700; }
+.score-table .pts-neg { color: #e94560; font-weight: 700; }
+.score-table tfoot .score-total td {
+  font-weight: 700;
+  border-top: 2px solid #0f3460;
+  border-bottom: none;
+  padding-top: 8px;
+}
+
+/* Dashboard */
+.dashboard-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.stats-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.stat-card {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 10px 16px;
+  min-width: 120px;
+}
+.stat-card .stat-label { font-size: 0.75rem; color: #aaa; }
+.stat-card .stat-value { font-size: 1.3rem; font-weight: bold; color: #e94560; }
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.chart-box {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 12px;
+  height: 280px;
+}
+.chart-box canvas { max-height: 250px; }
+
+/* Run comparison */
+.comparison-controls { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.comparison-controls textarea {
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  padding: 8px;
+  width: 400px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+.chart-box-full {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 12px;
+  height: 300px;
+  margin-bottom: 16px;
+}
+.chart-box-full canvas { max-height: 270px; }

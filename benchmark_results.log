@@ -1,0 +1,102 @@
+================================================================================
+  PRO YAMS AI — Benchmark Results
+  Date: 2026-04-09 14:50 BST
+  Host: sorin-pc
+  CPU:  AMD Ryzen 9 9900X 12-Core Processor (24 logical cores)
+  L3 Cache: 32768 KiB x2
+================================================================================
+
+--- ENGINE BENCHMARKS ----------------------------------------------------------
+
+  Placeholder                     0.090 ns
+  InitSolverTables               12684 ns       (12.7 µs)
+  CalculateScore                  5.54 ns
+  ApplyPlacement                   128 ns
+  RebuildLegalPlacements          53.3 ns
+  ComputeDuel                     37.5 ns
+  BoardStateCopy                 0.763 ns
+
+--- EVAL BENCHMARKS ------------------------------------------------------------
+
+  SingleEvalGame                  82.5 ms
+  FullEvaluation/10 games          808 ms       12.4 games/s
+  FullEvaluation/50 games         4034 ms       12.4 games/s
+  FullEvaluation/200 games       16015 ms       12.5 games/s
+
+--- MODEL BENCHMARKS -----------------------------------------------------------
+
+  ForwardPass (GPU)
+    batch=1                       32.3 µs       30.9k samples/s
+    batch=64                      46.9 µs        1.37M samples/s
+    batch=256                     54.0 µs        4.74M samples/s
+    batch=512                     75.2 µs        6.81M samples/s
+    batch=1024                     123 µs        8.34M samples/s
+
+  ForwardPass (CPU)
+    batch=1                       19.8 µs       50.5k samples/s
+    batch=64                      88.4 µs      724.2k samples/s
+    batch=256                      235 µs        1.09M samples/s
+    batch=512                      382 µs        1.34M samples/s
+
+  BatchInference
+    batch=1                       40.7 µs       24.6k samples/s
+    batch=64                      68.9 µs      928.4k samples/s
+    batch=256                      116 µs        2.21M samples/s
+    batch=512                      162 µs        3.16M samples/s
+    batch=1024                     281 µs        3.64M samples/s
+
+  TrainStep
+    batch=32                       378 µs      123.8k samples/s
+    batch=128                      393 µs      464.5k samples/s
+    batch=512                      471 µs        1.43M samples/s
+
+  ModelClone                     0.751 ms
+  CheckpointSave                 0.435 ms
+  CheckpointLoad                 0.311 ms
+
+--- SELF-PLAY BENCHMARKS -------------------------------------------------------
+
+  WorkerIteration                  519 µs        1.93k iter/s
+  TrainingDataExtraction
+    mode=0                        5.00 µs       31.2M items/s
+    mode=1                        12.3 µs       12.7M items/s
+    mode=2                        5.00 µs       31.2M items/s
+  QueueThroughput                 17.6 ns       56.9M items/s
+
+--- SOLVER BENCHMARKS ----------------------------------------------------------
+
+  InitPrecomputedTables            340 ms
+  GetDiceStateId                  4.00 ns
+  TransitionIteration              108 ns
+  GetFilteredScores               11.7 ns
+  SolverGetRequests                110 ns
+  SolverResolve                155445 ns       (155 µs)
+  HeuristicEvaluate               98.7 ns
+  HeuristicPlayTurn            342214 ns       (342 µs)
+  HeuristicFullGame             47.7 ms
+  SoftmaxSample/2                 40.3 ns
+  SoftmaxSample/8                 70.7 ns
+  SoftmaxSample/32                 189 ns
+
+--- TENSOR BENCHMARKS ----------------------------------------------------------
+
+  ProbabilityTableInit             344 ms
+  ProbabilityLookup                446 ns
+  GenerateTensor                  1245 ns       (1.25 µs)
+  GenerateTensorBatch
+    batch=10                      12.5 µs      801.0k items/s
+    batch=50                      63.2 µs      790.8k items/s
+    batch=100                      112 µs      785.5k items/s
+
+--- TRAINING BENCHMARKS --------------------------------------------------------
+
+  ReplayBuffer_Add                 116 ns        8.63M items/s
+  ReplayBuffer_AddBatch          28756 ns        8.90M items/s
+  ReplayBuffer_SampleBatch       97955 ns        5.23M items/s
+  ReplayBuffer_Save               51.3 ms        5.91 GiB/s
+  ReplayBuffer_Load              113.8 ms        2.66 GiB/s
+  LogMetrics                      2269 ns
+
+================================================================================
+  End of benchmark report
+================================================================================

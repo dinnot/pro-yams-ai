@@ -1,0 +1,36 @@
+num_steps: 250000
+
+training:
+  replay_capacity: 3000000       # Shrunk from 10M to fit purely in fast RAM
+  min_buffer_size: 500000        
+  train_batch_size: 2048
+  model_swap_interval: 100
+  checkpoint_interval: 50000
+  max_checkpoints: 2
+  
+  td_mode: mc
+  td_lambda: 0.8
+  
+  initial_temperature: 1.0
+  min_temperature: 0.1
+  temperature_decay: 0.99999     # Adjusted for 250k steps
+  
+  eval_interval: 10000
+  eval_games: 200
+  
+  checkpoint_dir: checkpoints/ab_mc
+  log_dir: ./logs/ab_mc
+  log_path: ./logs/ab_mc/training_log.csv
+  
+  self_play:
+    max_inference_batch: 512     # Uncapped timeout!
+    min_games_per_batch: 2
+    batch_timeout_ms: 5
+    num_workers: 20
+    num_games: 2048              # Uncapped queue!
+    
+  model:
+    input_size: 809
+    hidden_layers: 3
+    hidden_width: 256
+    learning_rate: 0.0005
