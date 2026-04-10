@@ -68,9 +68,28 @@ json game_state_to_json(const GameSession& session) {
             json da = json::array();
             json hf = json::array();
             if (hi < turn.dice_after_hold.size()) {
+                const int8_t* prev_dice = (hi == 0) ? turn.initial_dice : turn.dice_after_hold[hi - 1].data();
+                
+                int8_t held_values[kNumDice];
+                int held_count = 0;
+                for (int i = 0; i < kNumDice; ++i) {
+                    if ((mask >> i) & 1) {
+                        held_values[held_count++] = prev_dice[i];
+                    }
+                }
+
+                bool mapped[kNumDice] = {false};
                 for (int i = 0; i < kNumDice; ++i) {
                     da.push_back(static_cast<int>(turn.dice_after_hold[hi][i]));
-                    hf.push_back(static_cast<bool>((mask >> i) & 1));
+                    bool is_held = false;
+                    for (int j = 0; j < held_count; ++j) {
+                        if (!mapped[j] && held_values[j] == turn.dice_after_hold[hi][i]) {
+                            mapped[j] = true;
+                            is_held = true;
+                            break;
+                        }
+                    }
+                    hf.push_back(is_held);
                 }
             }
             h["dice_after"]  = da;
