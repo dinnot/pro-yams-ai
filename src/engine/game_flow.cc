@@ -56,8 +56,12 @@ const LegalPlacementCache& get_legal_placements(const GameState& gs, const GameC
     return ctx.legal_no_turbo[p];
 }
 
-int perform_placement(GameState& gs, GameContext& ctx, int column, int row, int score, RNG& rng) {
+int perform_placement(GameState& gs, GameContext& ctx, int column, int row, RNG& rng) {
     int p = gs.board.current_player;
+    
+    // The Engine acts as the absolute authority again!
+    int score = calculate_score(row, gs.dice, p, column, gs.board, ctx);
+    
     apply_placement(p, column, row, score, gs.board, ctx);
     if (!is_terminal(gs.board)) {
         gs.board.current_player = static_cast<int8_t>(1 - p);

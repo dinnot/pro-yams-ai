@@ -39,7 +39,7 @@ void heuristic_play_turn(GameState& state, GameContext& ctx,
 
         if (result.should_place) {
             perform_placement(state, ctx, result.placement.column,
-                              result.placement.row, result.score, rng);
+                              result.placement.row, rng);
             return;
         }
 

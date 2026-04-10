@@ -38,9 +38,10 @@ bool can_reroll(const GameState& gs, const GameContext& ctx);
 const LegalPlacementCache& get_legal_placements(const GameState& gs, const GameContext& ctx);
 
 /// Apply placement for the current player.
-/// Uses the caller-supplied score (0 = scratch), calls apply_placement,
-/// switches player, and (if game not over) calls start_turn for the next player.
-int perform_placement(GameState& gs, GameContext& ctx, int column, int row, int score, RNG& rng);
+/// Calculates the score from gs.dice, calls apply_placement, switches player,
+/// and (if game not over) calls start_turn for the next player.
+/// Returns the score placed.
+int perform_placement(GameState& gs, GameContext& ctx, int column, int row, RNG& rng);
 
 /// Compute the final duel result. Only valid when is_terminal(gs.board).
 int get_game_result(const GameState& gs, const GameContext& ctx);

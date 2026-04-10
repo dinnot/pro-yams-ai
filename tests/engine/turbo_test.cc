@@ -81,7 +81,7 @@ TEST(Turbo, TurboPlacement_ValidEarly) {
     perform_reroll(gs, 0, rng);
     ASSERT_EQ(gs.rolls_left, 1);
     int sc = calculate_score(0, gs.dice, p, kColTurbo, gs.board, ctx);
-    perform_placement(gs, ctx, kColTurbo, 0, sc, rng);
+    perform_placement(gs, ctx, kColTurbo, 0, rng);
     EXPECT_NE(gs.board.cells[p][kColTurbo][0], kCellEmpty);
 }
 
@@ -108,7 +108,7 @@ TEST(Turbo, TurboColumn_NotIn_LegalNoTurbo_AfterPlacements) {
         int p = gs.board.current_player;
         int sc = calculate_score(i, gs.dice, gs.board.current_player,
                                  kColFree, gs.board, ctx);
-        perform_placement(gs, ctx, kColFree, i, sc, rng);
+        perform_placement(gs, ctx, kColFree, i, rng);
         (void)p;
     }
     for (int pl = 0; pl < kNumPlayers; ++pl)

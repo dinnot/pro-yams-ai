@@ -21,7 +21,7 @@ static void play_full_game(GameState& gs, GameContext& ctx, RNG& rng) {
         int score = calculate_score(pl.row, gs.dice,
                                     gs.board.current_player, pl.column,
                                     gs.board, ctx);
-        perform_placement(gs, ctx, pl.column, pl.row, score, rng);
+        perform_placement(gs, ctx, pl.column, pl.row, rng);
     }
 }
 
@@ -94,7 +94,7 @@ TEST(FullGame, Deterministic_SameSeedSameResult) {
             int sc = calculate_score(pl.row, gs.dice,
                                      gs.board.current_player, pl.column,
                                      gs.board, ctx);
-            perform_placement(gs, ctx, pl.column, pl.row, sc, rng);
+            perform_placement(gs, ctx, pl.column, pl.row, rng);
         }
         return get_game_result(gs, ctx);
     };
@@ -118,7 +118,7 @@ TEST(FullGame, DifferentSeeds_TypicallyDifferentResult) {
             int sc = calculate_score(pl.row, gs.dice,
                                      gs.board.current_player, pl.column,
                                      gs.board, ctx);
-            perform_placement(gs, ctx, pl.column, pl.row, sc, rng);
+            perform_placement(gs, ctx, pl.column, pl.row, rng);
         }
         return get_game_result(gs, ctx);
     };

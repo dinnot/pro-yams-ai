@@ -34,7 +34,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                     if (all.count > 0) {
                         perform_placement(game->state, game->ctx,
                                           all.placements[0].column,
-                                          all.placements[0].row, 0, game->rng);
+                                          all.placements[0].row, game->rng);
                         if (is_terminal(game->state.board)) {
                             int duel = get_game_result(game->state, game->ctx);
                             game->result = (duel > 0) ? 1.0 : (duel < 0) ? 0.0 : 0.5;
@@ -105,8 +105,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
 
                 // Apply placement (switches player, rolls dice for next turn).
                 perform_placement(game->state, game->ctx,
-                                  result.placement.column, result.placement.row,
-                                  result.score, game->rng);
+                                  result.placement.column, result.placement.row, game->rng);
 
                 if (is_terminal(game->state.board)) {
                     int duel = get_game_result(game->state, game->ctx);

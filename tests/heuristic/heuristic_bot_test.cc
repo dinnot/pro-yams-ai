@@ -129,7 +129,7 @@ TEST_F(HeuristicBotTest, HeuristicBeatsRandom_90Percent) {
                     int sc = calculate_score(pl.row, state.dice,
                                              state.board.current_player, pl.column,
                                              state.board, ctx2);
-                    perform_placement(state, ctx2, pl.column, pl.row, sc, rng);
+                    perform_placement(state, ctx2, pl.column, pl.row, rng);
                 }
             }
         }

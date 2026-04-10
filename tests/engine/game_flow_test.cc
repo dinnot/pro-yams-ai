@@ -179,7 +179,7 @@ TEST(GameFlow, PerformPlacement_SwitchesPlayer) {
     int first_player = gs.board.current_player;
     int sc = calculate_score(0, gs.dice, first_player, kColDown, gs.board, ctx);
     // Place in Down column, row 0 (always legal on fresh board)
-    perform_placement(gs, ctx, kColDown, 0, sc, rng);
+    perform_placement(gs, ctx, kColDown, 0, rng);
     EXPECT_NE(gs.board.current_player, first_player);
 }
 
@@ -189,7 +189,7 @@ TEST(GameFlow, PerformPlacement_CellFilled) {
     init_game(gs, ctx, rng);
     int p = gs.board.current_player;
     int sc = calculate_score(0, gs.dice, p, kColDown, gs.board, ctx);
-    perform_placement(gs, ctx, kColDown, 0, sc, rng);
+    perform_placement(gs, ctx, kColDown, 0, rng);
     EXPECT_NE(gs.board.cells[p][kColDown][0], kCellEmpty);
 }
 
@@ -199,7 +199,7 @@ TEST(GameFlow, PerformPlacement_CellsFilledIncremented) {
     init_game(gs, ctx, rng);
     EXPECT_EQ(gs.board.cells_filled, 0);
     int sc = calculate_score(0, gs.dice, gs.board.current_player, kColDown, gs.board, ctx);
-    perform_placement(gs, ctx, kColDown, 0, sc, rng);
+    perform_placement(gs, ctx, kColDown, 0, rng);
     EXPECT_EQ(gs.board.cells_filled, 1);
 }
 
@@ -208,7 +208,7 @@ TEST(GameFlow, PerformPlacement_NewDiceRolled) {
     GameState gs; GameContext ctx;
     init_game(gs, ctx, rng);
     int sc = calculate_score(0, gs.dice, gs.board.current_player, kColDown, gs.board, ctx);
-    perform_placement(gs, ctx, kColDown, 0, sc, rng);
+    perform_placement(gs, ctx, kColDown, 0, rng);
     // After placement, new player's dice should be valid and rolls_left==2
     EXPECT_TRUE(dice_valid(gs.dice));
     EXPECT_EQ(gs.rolls_left, 2);
@@ -220,6 +220,6 @@ TEST(GameFlow, PerformPlacement_ReturnsScore) {
     GameState gs; GameContext ctx;
     init_game(gs, ctx, rng);
     int sc = calculate_score(0, gs.dice, gs.board.current_player, kColDown, gs.board, ctx);
-    int score = perform_placement(gs, ctx, kColDown, 0, sc, rng);
+    int score = perform_placement(gs, ctx, kColDown, 0, rng);
     EXPECT_GE(score, 0);
 }

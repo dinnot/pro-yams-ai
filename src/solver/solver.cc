@@ -23,10 +23,6 @@ void solver_get_requests(const GameState& state, const GameContext& ctx,
         int col = legal.placements[i].column;
         int row = legal.placements[i].row;
 
-        // Always include the scratch option.
-        assert(buffers.request_count < kMaxAfterstateRequests);
-        buffers.requests[buffers.request_count++] = {{(int8_t)col, (int8_t)row}, 0};
-
         // Determine Golden Rule minimum for this cell.
         int min_threshold = ctx.golden_max[col][row];
 
@@ -40,35 +36,36 @@ void solver_get_requests(const GameState& state, const GameContext& ctx,
             // If SS is already scratched, LS must also scratch.
             if (ctx.ss_scratched[p][col]) forced_scratch = true;
         }
-
+        
         if (forced_scratch) {
-            // Only scratch is valid — already added above.
+            assert(buffers.request_count < kMaxAfterstateRequests);
+            buffers.requests[buffers.request_count++] = {{(int8_t)col, (int8_t)row}, 0};
             continue;
         }
 
-        // Get filtered scores >= min_threshold.
         int count = 0;
         const int8_t* scores = get_filtered_scores(row, min_threshold, count, tables);
 
-        for (int j = 0; j < count; ++j) {
+        // FIX 1: Iterate BACKWARDS so the highest valid scores are evaluated FIRST.
+        // This acts as a "Greedy Max" tiebreaker for untrained networks and heuristic bots.
+        for (int j = count - 1; j >= 0; --j) {
             int score = scores[j];
 
-            // SS/LS ordering constraint (when the other row is already filled).
             if (row == kRowSS) {
-                // SS must be < LS if LS is already filled.
                 int8_t ls_val = state.board.cells[p][col][kRowLS];
-                if (ls_val != kCellEmpty && ls_val > 0 && score >= ls_val)
-                    continue;
+                if (ls_val != kCellEmpty && ls_val > 0 && score >= ls_val) continue;
             } else if (row == kRowLS) {
-                // LS must be strictly greater than highest SS recorded by anyone.
                 int max_ss = ctx.golden_max[col][kRowSS];
-                if (max_ss > 0 && score <= max_ss)
-                    continue;
+                if (max_ss > 0 && score <= max_ss) continue;
             }
 
             assert(buffers.request_count < kMaxAfterstateRequests);
             buffers.requests[buffers.request_count++] = {{(int8_t)col, (int8_t)row}, (int8_t)score};
         }
+        
+        // FIX 2: Append the scratch option LAST so it loses all EV ties against valid scores.
+        assert(buffers.request_count < kMaxAfterstateRequests);
+        buffers.requests[buffers.request_count++] = {{(int8_t)col, (int8_t)row}, 0};
     }
 }
 
@@ -120,6 +117,40 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
     const int p = state.board.current_player;
     const int rolls_left = state.rolls_left;
 
+    // Helper to perfectly emulate calculate_score, locking the solver to reality
+    auto check_achievable = [&](int sid, int req_idx) -> bool {
+        const AfterstateRequest& req = buffers.requests[req_idx];
+        int col = req.placement.column;
+        int row = req.placement.row;
+
+        int raw = tables.score_tables.dice_score[sid][row];
+        bool is_valid = false;
+
+        // Exact mirror of the engine's calculate_score rules
+        if (raw > 0 && raw >= ctx.golden_max[col][row]) {
+            is_valid = true;
+            if (row == kRowSS) {
+                if (ctx.ls_scratched[p][col]) is_valid = false;
+                else {
+                    int8_t ls_val = state.board.cells[p][col][kRowLS];
+                    if (ls_val != kCellEmpty && ls_val != 0 && raw >= ls_val) is_valid = false;
+                }
+            } else if (row == kRowLS) {
+                if (ctx.ss_scratched[p][col]) is_valid = false;
+                else {
+                    int max_ss = ctx.golden_max[col][kRowSS];
+                    if (max_ss > 0 && raw <= max_ss) is_valid = false;
+                }
+            }
+        }
+
+        if (is_valid) {
+            return req.score == raw; // Must take the points
+        } else {
+            return req.score == 0;   // Must scratch
+        }
+    };
+
     // -----------------------------------------------------------------------
     // Build V0: for each dice state, find the best placement given buffers.evs.
     // -----------------------------------------------------------------------
@@ -130,21 +161,13 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         int16_t best_req_no_turbo = -1;
 
         for (int i = 0; i < buffers.request_count; ++i) {
-            const AfterstateRequest& req = buffers.requests[i];
-            bool achievable;
-
-            if (req.score == 0) {
-                achievable = true;
-            } else {
-                achievable = (tables.score_tables.dice_score[sid][req.placement.row] == req.score);
-            }
-
-            if (achievable) {
+            // Replaced the flawed req.score == 0 check with the absolute truth:
+            if (check_achievable(sid, i)) {
                 if (buffers.evs[i] > best_ev_stop) {
                     best_ev_stop = buffers.evs[i];
                     best_req_stop = static_cast<int16_t>(i);
                 }
-                if (req.placement.column != kColTurbo) {
+                if (buffers.requests[i].placement.column != kColTurbo) {
                     if (buffers.evs[i] > best_ev_no_turbo) {
                         best_ev_no_turbo = buffers.evs[i];
                         best_req_no_turbo = static_cast<int16_t>(i);
@@ -172,10 +195,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
             int   place_idx[kMaxAfterstateRequests];
             int   place_count = 0;
             for (int i = 0; i < buffers.request_count; ++i) {
-                const AfterstateRequest& req = buffers.requests[i];
-                bool achievable = (req.score == 0) ||
-                    (tables.score_tables.dice_score[current_id][req.placement.row] == req.score);
-                if (achievable) {
+                // Use the new helper here as well!
+                if (check_achievable(current_id, i)) {
                     place_evs[place_count] = buffers.evs[i];
                     place_idx[place_count] = i;
                     ++place_count;
@@ -327,10 +348,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         int   place_idx[kMaxAfterstateRequests];
         int   place_count = 0;
         for (int i = 0; i < buffers.request_count; ++i) {
-            const AfterstateRequest& req = buffers.requests[i];
-            bool achievable = (req.score == 0) ||
-                (tables.score_tables.dice_score[current_id][req.placement.row] == req.score);
-            if (achievable) {
+            // Use the new helper here as well!
+            if (check_achievable(current_id, i)) {
                 place_evs[place_count] = buffers.evs[i];
                 place_idx[place_count] = i;
                 ++place_count;

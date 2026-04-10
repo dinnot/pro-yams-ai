@@ -226,7 +226,7 @@ TEST_F(TensorTest, MidGame_NoCrash) {
             int sc = calculate_score(pl.row, gs.dice,
                                      gs.board.current_player, pl.column,
                                      gs.board, ctx);
-            perform_placement(gs, ctx, pl.column, pl.row, sc, rng);
+            perform_placement(gs, ctx, pl.column, pl.row, rng);
         }
     }
     float out[kTensorSize] = {};

@@ -152,8 +152,7 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
                 ++game->trajectory_length;
 
                 perform_placement(game->state, game->ctx,
-                                  res.placement.column, res.placement.row,
-                                  res.score, game->rng);
+                                  res.placement.column, res.placement.row, game->rng);
                 if (is_terminal(game->state.board)) {
                     int duel = get_game_result(game->state, game->ctx);
                     game->result = (duel > 0) ? 1.0 : (duel < 0) ? 0.0 : 0.5;

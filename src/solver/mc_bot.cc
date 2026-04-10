@@ -303,8 +303,7 @@ void mc_play_turn(GameState& state, GameContext& ctx,
             SolverResult result = solver_resolve_greedy(state, ctx, tables, buffers);
             if (result.should_place) {
                 perform_placement(state, ctx,
-                                  result.placement.column, result.placement.row,
-                                  result.score, rng);
+                                  result.placement.column, result.placement.row, rng);
                 return;
             }
             perform_reroll(state, result.hold_mask, rng);
@@ -319,8 +318,7 @@ void mc_play_turn(GameState& state, GameContext& ctx,
             auto& best = candidates[0];
             if (best.is_placement) {
                 perform_placement(state, ctx,
-                                  best.placement.column, best.placement.row,
-                                  best.score, rng);
+                                  best.placement.column, best.placement.row, rng);
                 return;
             }
             perform_reroll(state, best.hold_mask, rng);
@@ -411,8 +409,7 @@ void mc_play_turn(GameState& state, GameContext& ctx,
         const auto& best = candidates[best_idx];
         if (best.is_placement) {
             perform_placement(state, ctx,
-                              best.placement.column, best.placement.row,
-                              best.score, rng);
+                              best.placement.column, best.placement.row, rng);
             return;
         }
 

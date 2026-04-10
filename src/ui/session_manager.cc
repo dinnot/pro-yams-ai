@@ -135,8 +135,7 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
             record.placement = result.placement;
             record.score     = result.score;
             perform_placement(session.state, session.ctx,
-                              result.placement.column, result.placement.row,
-                              result.score, session.rng);
+                              result.placement.column, result.placement.row, session.rng);
             break;
         }
 
@@ -230,8 +229,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
             record.placement = result.placement;
             record.score     = result.score;
             perform_placement(session.state, session.ctx,
-                              result.placement.column, result.placement.row,
-                              result.score, session.rng);
+                              result.placement.column, result.placement.row, session.rng);
             break;
         }
 
@@ -438,7 +436,7 @@ bool SessionManager::human_place(int session_id, int column, int row) {
         s->history.push_back(s->current_turn);
         s->current_turn = {};
 
-        perform_placement(s->state, s->ctx, column, row, score, s->rng);
+        perform_placement(s->state, s->ctx, column, row, s->rng);
         s->waiting_for_human = false;
 
         if (is_terminal(s->state.board)) {

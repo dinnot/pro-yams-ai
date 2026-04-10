@@ -72,8 +72,7 @@ void nn_play_turn(ProYamsNet& model, torch::Device device,
 
         if (result.should_place) {
             perform_placement(state, ctx,
-                              result.placement.column, result.placement.row,
-                              result.score, rng);
+                              result.placement.column, result.placement.row, rng);
             return;
         } else {
             assert(can_reroll(state, ctx));
