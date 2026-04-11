@@ -13,6 +13,12 @@
 
 void log_metrics(const std::string& path, const TrainingMetrics& metrics) {
     namespace fs = std::filesystem;
+    
+    // Ensure parent directory exists
+    auto parent = fs::path(path).parent_path();
+    if (!parent.empty() && !fs::exists(parent)) {
+        fs::create_directories(parent);
+    }
 
     bool write_header = !fs::exists(path) || fs::file_size(path) == 0;
 

@@ -85,8 +85,17 @@ TrainingMetrics TrainingLoop::metrics() const {
 // ---------------------------------------------------------------------------
 
 void TrainingLoop::run(int num_steps) {
-    // Ensure checkpoint dir exists
+    // Ensure checkpoint and log dirs exist
     std::filesystem::create_directories(config_.checkpoint_dir);
+    if (!config_.log_dir.empty()) {
+        std::filesystem::create_directories(config_.log_dir);
+    }
+    if (!config_.log_path.empty()) {
+        auto log_parent = std::filesystem::path(config_.log_path).parent_path();
+        if (!log_parent.empty()) {
+            std::filesystem::create_directories(log_parent);
+        }
+    }
 
     orchestrator_->start();
 

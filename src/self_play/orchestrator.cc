@@ -4,6 +4,7 @@
 #include "self_play/worker.h"
 #include "engine/game_flow.h"
 #include "engine/tensor.h"
+#include <filesystem>
 #include <fstream>
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,13 @@ void SelfPlayOrchestrator::start() {
         if (i == 0 && solver_config_.debug_mode) {
             game->is_debug_game = true;
             game->debug_log_path = solver_config_.debug_log_path;
+
+            // Ensure parent directory exists
+            auto parent = std::filesystem::path(game->debug_log_path).parent_path();
+            if (!parent.empty()) {
+                std::filesystem::create_directories(parent);
+            }
+
             std::ofstream f(game->debug_log_path, std::ios::trunc);
             f << "=== PRO YAMS AI DEBUG LOG ===\n";
         }
@@ -113,6 +121,12 @@ void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed) {
     game->phase = GamePhase::kNeedRequests;
 
     if (game->is_debug_game) {
+        // Ensure parent directory exists
+        auto parent = std::filesystem::path(game->debug_log_path).parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+
         std::ofstream f(game->debug_log_path, std::ios::trunc);
         f << "=== PRO YAMS AI DEBUG LOG ===\n";
     }
