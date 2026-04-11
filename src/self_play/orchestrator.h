@@ -43,6 +43,10 @@ public:
     /// Update the solver config used by worker threads (e.g. temperature decay).
     void update_solver_config(const SolverConfig& config) { solver_config_ = config; }
 
+    int available_queue_size() const { return available_queue_.size(); }
+    int pending_queue_size() const { return pending_queue_.size(); }
+    int completed_queue_size() const { return completed_queue_.size(); }
+
 private:
     SelfPlayConfig           config_;
     const PrecomputedTables& tables_;

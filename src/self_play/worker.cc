@@ -89,22 +89,13 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                                    game->solver_buffers.request_count,
                                    heuristic_evs);
 
-                // Normalize heuristic EVs to [0, 1] before blending with NN outputs.
-                // Heuristic returns raw score × coefficient (up to ~100), while NN
-                // outputs sigmoid values in [0, 1]. Without normalization, blended EVs
-                // are >> 1 and softmax_sample clamps them all to the same logit,
-                // making exploration completely random and destroying the training signal.
+                // Normalize heuristic EVs to [0, 1] using a fixed global maximum (1800.0).
+                // This preserves absolute scale, which is critical for TD learning. 
+                // Dynamic normalization (min/max of current list) would map every "best"
+                // move to 1.0, poisoning the value trajectory and destroying the signal.
                 int n = game->solver_buffers.request_count;
-                double h_min = heuristic_evs[0], h_max = heuristic_evs[0];
-                for (int i = 1; i < n; i++) {
-                    if (heuristic_evs[i] < h_min) h_min = heuristic_evs[i];
-                    if (heuristic_evs[i] > h_max) h_max = heuristic_evs[i];
-                }
-                double h_range = h_max - h_min;
                 for (int i = 0; i < n; i++) {
-                    heuristic_evs[i] = (h_range > 1e-8)
-                        ? (heuristic_evs[i] - h_min) / h_range
-                        : 0.5;
+                    heuristic_evs[i] = std::max(0.0, std::min(1.0, heuristic_evs[i] / 1800.0));
                 }
 
                 for (int i = 0; i < n; i++) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // ---------------------------------------------------------------------------
 // ModelConfig — hyperparameters for ProYamsNet construction.
 // ---------------------------------------------------------------------------
@@ -9,4 +11,5 @@ struct ModelConfig {
     int    hidden_width   = 256;    // Neurons per hidden layer
     double learning_rate  = 0.001;  // Adam optimizer learning rate
     bool   debug_mode     = false;  // Print sample tensor health
+    std::string debug_log_path = "";
 };

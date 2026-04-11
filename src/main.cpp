@@ -127,6 +127,9 @@ static int mode_eval(const AppConfig& cfg) {
 // main
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
+    torch::set_num_threads(1);
+    at::set_num_interop_threads(1);
+
     AppConfig config;
     try {
         config = load_config(argc, argv);

@@ -1,4 +1,4 @@
-num_steps: 50000
+num_steps: 10000
 
 training:
   replay_capacity: 1000000       # Shrunk from 10M to fit purely in fast RAM
@@ -18,24 +18,27 @@ training:
   eval_interval: 10000
   eval_games: 500
   
-  checkpoint_dir: checkpoints/ab_control
-  log_dir: ./logs/ab_control
-  log_path: ./logs/ab_control/training_log.csv
+  checkpoint_dir: checkpoints/ab_control4
+  log_dir: ./logs/ab_control4
+  log_path: ./logs/ab_control4/training_log.csv
   
   self_play:
-    max_inference_batch: 512     # Uncapped timeout!
+    max_inference_batch: 4096     # Uncapped timeout!
     min_games_per_batch: 2
     batch_timeout_ms: 5
-    num_workers: 20
-    num_games: 2048              # Uncapped queue!
+    num_workers: 40
+    num_games: 4096              # Uncapped queue!
     
   model:
     input_size: 809
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.0005
+    debug_mode: true,
+    debug_log_path: "./logs/ab_control4/debug_batch.log"
 
-  debug:
-    enabled: true
-    dump_interval_steps: 1000      # Dump batch statistics every 1000 steps
-    dump_game_traces: 2            # Dump the first 2 self-play games to text
+
+
+
+
+    
