@@ -127,8 +127,8 @@ void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed) {
             std::filesystem::create_directories(parent);
         }
 
-        std::ofstream f(game->debug_log_path, std::ios::trunc);
-        f << "=== PRO YAMS AI DEBUG LOG ===\n";
+        std::ofstream f(game->debug_log_path, std::ios::app);
+        f << "\n=== NEW GAME STARTED ===\n";
     }
 
     available_queue_.push(game);

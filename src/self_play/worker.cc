@@ -130,7 +130,11 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 
                 std::vector<std::pair<double, int>> ranked_reqs;
                 for(int i = 0; i < game->solver_buffers.request_count; i++) {
-                    ranked_reqs.push_back({game->solver_buffers.evs[i], i});
+                    auto req = game->solver_buffers.requests[i];
+                    int calc = calculate_score(req.placement.row, game->state.dice, game->state.board.current_player, req.placement.column, game->state.board, game->ctx);
+                    if (req.score == calc) {
+                        ranked_reqs.push_back({game->solver_buffers.evs[i], i});
+                    }
                 }
                 std::sort(ranked_reqs.rbegin(), ranked_reqs.rend());
                 
@@ -139,6 +143,26 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                     dbg << "  Col: " << (int)req.placement.column << " Row: " << (int)req.placement.row 
                         << " Score: " << (int)req.score 
                         << " | NN EV: " << std::fixed << std::setprecision(4) << ranked_reqs[i].first << "\n";
+                }
+
+                if (game->state.rolls_left >= 1 && game->state.rolls_left <= 2) {
+                    std::vector<std::pair<double, int>> ranked_masks;
+                    for (int m = 0; m <= 32; ++m) {
+                        ranked_masks.push_back({game->solver_buffers.mask_evs[m], m});
+                    }
+                    std::sort(ranked_masks.rbegin(), ranked_masks.rend());
+                    
+                    dbg << "Top 3 Hold Masks:\n";
+                    for (int m = 0; m < std::min(3, (int)ranked_masks.size()); ++m) {
+                        int mask_id = ranked_masks[m].second;
+                        double ev = ranked_masks[m].first;
+                        if (mask_id == 32) {
+                            dbg << "  Mask: STOP | EV: " << std::fixed << std::setprecision(4) << ev << "\n";
+                        } else {
+                            // To print nicely formatted, could use std::setw but let's keep it simple.
+                            dbg << "  Mask: " << std::setw(2) << mask_id << "   | EV: " << std::fixed << std::setprecision(4) << ev << "\n";
+                        }
+                    }
                 }
 
                 if (result.should_place) {
