@@ -6,7 +6,6 @@
 - C++20 compiler (GCC 12+ or Clang 15+)
 - CUDA toolkit (12.x recommended)
 - libtorch (matching your CUDA version)
-- Docker + NVIDIA Container Toolkit (for containerised workflows)
 
 ## Building
 
@@ -30,11 +29,6 @@ This produces two binaries:
 - `build/pro_yams_ai` — main executable (training, eval, info)
 - `build/src/ui/pro_yams_ui` — web UI server
 
-### Docker build
-
-```bash
-docker build -f docker/Dockerfile -t pro_yams_ai .
-```
 
 ## Running
 
@@ -65,6 +59,19 @@ Resume from a checkpoint:
 ```
 
 Training supports graceful shutdown with `Ctrl+C` (SIGINT/SIGTERM) — it finishes the current step and saves a checkpoint.
+
+### Training Debug Mode
+
+Run training with instrumentation to diagnose convergence issues (e.g., "Softmax Scratch Avalanche").
+
+```bash
+./build/pro_yams_ai --mode train --config config/default.yaml --debug_mode 1
+```
+
+Debug mode enables:
+- **Solver Logging:** Decisions for the first active game are logged to `logs/debug_game_0.log`.
+- **Heuristic Bootstrapping:** Adds a decaying heuristic weight (initial: 1.0) to the win probability to guide the network during early training.
+- **Tensor Health:** Monitors for NaN/Inf values in input features and gradients.
 
 ### Evaluation
 
@@ -116,6 +123,9 @@ All flags can override values from the YAML config file.
 | `--num_games` | Self-play games per batch | 512 |
 | `--eval_games` | Evaluation games per round | 200 |
 | `--eval_interval` | Steps between evaluations (0=off) | 1000 |
+| `--debug_mode` | Enable debug logging & bootstrapping (0/1) | 0 |
+| `--initial_heuristic_weight` | Heuristic bootstrapping strength | 1.0 |
+| `--heuristic_decay_steps` | Steps to decay heuristic to zero | 50000 |
 
 ## Tests
 
@@ -161,37 +171,6 @@ Filter specific benchmark cases with `--benchmark_filter`:
 ./build/tests/benchmarks/model_bench --benchmark_filter=BM_ForwardPass
 ```
 
-## Docker Workflows
-
-### Training (Docker)
-
-```bash
-scripts/train.sh                                  # default config
-scripts/train.sh config/default.yaml              # explicit config
-scripts/train.sh config/default.yaml step_5000.pt # resume from checkpoint
-```
-
-### Evaluation (Docker)
-
-```bash
-scripts/eval.sh step_5000.pt       # 200 games (default)
-scripts/eval.sh step_5000.pt 500   # 500 games
-```
-
-### Web UI (Docker)
-
-```bash
-scripts/ui.sh step_5000.pt        # port 8080 (default)
-scripts/ui.sh step_5000.pt 9090   # custom port
-```
-
-### Docker Compose
-
-```bash
-cd docker
-docker compose up train   # start training
-docker compose up ui      # start web UI on port 8080
-```
 
 ## Project Layout
 
@@ -209,7 +188,5 @@ src/
 config/         YAML configuration files
 checkpoints/    Saved model checkpoints
 logs/           Training logs and game logs
-scripts/        Docker convenience scripts (train, eval, ui)
-docker/         Dockerfile and docker-compose.yml
 tests/          Unit tests and benchmarks (Google Test / Google Benchmark)
 ```

@@ -183,15 +183,13 @@ pro_yams_ai/
 │   ├── training/            # Training loop, replay buffer, TD targets
 │   ├── heuristic/           # Heuristic bot for bootstrapping & evaluation
 │   └── main.cpp             # Entry point, mode selection (train/eval/play)
-├── docker/
-│   └── Dockerfile           # Training container (NVIDIA base image)
 ├── checkpoints/             # Saved models and training state
 └── logs/                    # Training metrics, evaluation results
 ```
 
-### Development vs Training
-- **Development:** Native compilation on Ubuntu 25.10, fast compile-run-debug cycles
-- **Training:** Docker container based on NVIDIA's official PyTorch/libtorch image (pre-configured CUDA, cuDNN, NCCL). Dockerfile adds CMake build on top. Ensures reproducible training runs.
+### Development & Training
+- Native compilation on Ubuntu 25.10, fast compile-run-debug cycles.
+- Direct use of libtorch and CUDA for training.
 
 ---
 
@@ -470,31 +468,6 @@ max_checkpoints: 5
 
 ---
 
-## 14. Docker Configuration
-
-### Base Image
-`nvcr.io/nvidia/pytorch:XX.XX-py3` (provides CUDA, cuDNN, NCCL, libtorch)
-
-### Dockerfile Outline
-```dockerfile
-FROM nvcr.io/nvidia/pytorch:XX.XX-py3
-RUN apt-get update && apt-get install -y cmake build-essential
-COPY . /app
-WORKDIR /app/build
-RUN cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
-ENTRYPOINT ["/app/build/pro_yams_ai"]
-```
-
-### Runtime
-```bash
-docker run --gpus all \
-  -v ./checkpoints:/app/checkpoints \
-  -v ./config:/app/config \
-  -v ./logs:/app/logs \
-  pro_yams_ai --config /app/config/train.yaml --mode train
-```
-
-Checkpoints, configs, and logs are mounted as volumes for persistence across container restarts.
 
 ---
 
@@ -586,5 +559,4 @@ This document covers the high-level architecture. The detailed implementation pl
 | 10 | `10_evaluation_system.md` | Periodic NN vs heuristic benchmark games, win rate tracking |
 | 11 | `11_configuration_management.md` | YAML config, CLI overrides, wired main.cpp, signal handling |
 | 12 | `12_ui.md` | Web UI: bot vs bot viewer, human vs bot play, training dashboard |
-| 13 | `13_docker_deployment.md` | Dockerfile, docker-compose, volume mounts, helper scripts |
-| 14 | `14_mc_rollout_bot.md` | MC rollout-enhanced bot with time-budgeted search (nice-to-have) |
+| 13 | `14_mc_rollout_bot.md` | MC rollout-enhanced bot with time-budgeted search (nice-to-have) |
