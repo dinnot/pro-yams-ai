@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <string>
 
 #include "engine/constants.h"
 #include "engine/game_context.h"
@@ -37,6 +38,9 @@ struct SolverConfig {
     double placement_temperature;  // 0.0 = greedy, >0 = softmax exploration
     double hold_temperature;       // 0.0 = greedy, >0 = softmax exploration
     bool   exploration_enabled;    // Master switch (false = always greedy)
+    bool   debug_mode = false;
+    double heuristic_weight = 0.0;
+    std::string debug_log_path;
 };
 
 // ---------------------------------------------------------------------------

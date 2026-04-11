@@ -3,7 +3,13 @@
 #include <cassert>
 #include <cstring>
 
+#include <fstream>
+#include <iomanip>
+#include <vector>
+#include <algorithm>
+
 #include "self_play/game_instance.h"
+#include "heuristic/heuristic_bot.h"
 #include "engine/game_flow.h"
 #include "engine/scoring.h"
 #include "engine/tensor.h"
@@ -76,9 +82,72 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // -----------------------------------------------------------
             // Step 3: solver resolution with pre-populated EVs.
             // -----------------------------------------------------------
+            if (config.heuristic_weight > 0.0) {
+                double heuristic_evs[GameInstance::kMaxAfterstates];
+                heuristic_evaluate(game->state.board, game->ctx,
+                                   game->solver_buffers.requests,
+                                   game->solver_buffers.request_count,
+                                   heuristic_evs);
+
+                // Normalize heuristic EVs to [0, 1] before blending with NN outputs.
+                // Heuristic returns raw score × coefficient (up to ~100), while NN
+                // outputs sigmoid values in [0, 1]. Without normalization, blended EVs
+                // are >> 1 and softmax_sample clamps them all to the same logit,
+                // making exploration completely random and destroying the training signal.
+                int n = game->solver_buffers.request_count;
+                double h_min = heuristic_evs[0], h_max = heuristic_evs[0];
+                for (int i = 1; i < n; i++) {
+                    if (heuristic_evs[i] < h_min) h_min = heuristic_evs[i];
+                    if (heuristic_evs[i] > h_max) h_max = heuristic_evs[i];
+                }
+                double h_range = h_max - h_min;
+                for (int i = 0; i < n; i++) {
+                    heuristic_evs[i] = (h_range > 1e-8)
+                        ? (heuristic_evs[i] - h_min) / h_range
+                        : 0.5;
+                }
+
+                for (int i = 0; i < n; i++) {
+                    game->solver_buffers.evs[i] =
+                        (1.0 - config.heuristic_weight) * game->solver_buffers.evs[i] +
+                        config.heuristic_weight * heuristic_evs[i];
+                }
+            }
+
             SolverResult result = solver_resolve(game->state, game->ctx, tables,
                                                   game->solver_buffers, config,
                                                   game->rng);
+
+            // Log Game 0, limit to first 5 turns of the game to avoid spam
+            if (config.debug_mode && game->is_debug_game && game->trajectory_length < 5) {
+                std::ofstream dbg(game->debug_log_path, std::ios::app);
+                dbg << "\n[Turn " << game->trajectory_length << " | P" << (int)game->state.board.current_player 
+                    << " | Rolls Left: " << (int)game->state.rolls_left << "]\n";
+                
+                dbg << "Dice: [ ";
+                for (int d = 0; d < 5; ++d) dbg << (int)game->state.dice[d] << " ";
+                dbg << "]\nTop 5 Evaluated Placements:\n";
+                
+                std::vector<std::pair<double, int>> ranked_reqs;
+                for(int i = 0; i < game->solver_buffers.request_count; i++) {
+                    ranked_reqs.push_back({game->solver_buffers.evs[i], i});
+                }
+                std::sort(ranked_reqs.rbegin(), ranked_reqs.rend());
+                
+                for(int i = 0; i < std::min(5, (int)ranked_reqs.size()); i++) {
+                    auto req = game->solver_buffers.requests[ranked_reqs[i].second];
+                    dbg << "  Col: " << (int)req.placement.column << " Row: " << (int)req.placement.row 
+                        << " Score: " << (int)req.score 
+                        << " | NN EV: " << std::fixed << std::setprecision(4) << ranked_reqs[i].first << "\n";
+                }
+
+                if (result.should_place) {
+                    dbg << ">>> ACTION: PLACED Score " << (int)result.score 
+                        << " at Col " << (int)result.placement.column << " Row " << (int)result.placement.row << "\n";
+                } else {
+                    dbg << ">>> ACTION: REROLL (Mask: " << (int)result.hold_mask << ")\n";
+                }
+            }
 
             // Capture the pure optimal EV at the very first decision point of the turn.
             if (game->state.rolls_left == 2) {

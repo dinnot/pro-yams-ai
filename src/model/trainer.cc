@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <sstream>
 #include <vector>
+#include <iostream>
 
 #include "engine/tensor.h"  // kTensorSize
 
@@ -47,6 +48,16 @@ double ModelTrainer::train_step(const float* states, const double* targets,
 
     // Forward pass
     auto prediction = model_->forward(state_tensor);
+
+    if (config_.debug_mode && training_step_ % 1000 == 0) {
+        auto pred_cpu = prediction.to(torch::kCPU);
+        auto targ_cpu = target_tensor.to(torch::kCPU);
+        std::cout << "\n--- Debug Batch @ Step " << training_step_ << " ---\n";
+        for (int i = 0; i < std::min(batch_size, 5); ++i) {
+            std::cout << "Target: " << targ_cpu[i].item<float>() 
+                      << " | Pred: " << pred_cpu[i].item<float>() << "\n";
+        }
+    }
 
     // BCE loss — sigmoid output with binary targets; avoids vanishing gradients
     // that MSE causes when the sigmoid is saturated.

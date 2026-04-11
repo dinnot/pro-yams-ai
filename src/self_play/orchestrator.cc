@@ -4,6 +4,7 @@
 #include "self_play/worker.h"
 #include "engine/game_flow.h"
 #include "engine/tensor.h"
+#include <fstream>
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -38,6 +39,14 @@ void SelfPlayOrchestrator::start() {
         game->result           = 0.0;
         init_game(game->state, game->ctx, game->rng);
         game->phase = GamePhase::kNeedRequests;
+
+        if (i == 0 && solver_config_.debug_mode) {
+            game->is_debug_game = true;
+            game->debug_log_path = solver_config_.debug_log_path;
+            std::ofstream f(game->debug_log_path, std::ios::trunc);
+            f << "=== PRO YAMS AI DEBUG LOG ===\n";
+        }
+
         available_queue_.push(game.get());
         games_.push_back(std::move(game));
     }
@@ -102,5 +111,11 @@ void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed) {
     game->result           = 0.0;
     init_game(game->state, game->ctx, game->rng);
     game->phase = GamePhase::kNeedRequests;
+
+    if (game->is_debug_game) {
+        std::ofstream f(game->debug_log_path, std::ios::trunc);
+        f << "=== PRO YAMS AI DEBUG LOG ===\n";
+    }
+
     available_queue_.push(game);
 }

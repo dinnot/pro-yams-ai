@@ -8,4 +8,5 @@ struct ModelConfig {
     int    hidden_layers  = 3;      // Number of hidden layers
     int    hidden_width   = 256;    // Neurons per hidden layer
     double learning_rate  = 0.001;  // Adam optimizer learning rate
+    bool   debug_mode     = false;  // Print sample tensor health
 };

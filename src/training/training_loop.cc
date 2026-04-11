@@ -28,12 +28,15 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
       infer_device_(inference_device),
       temperature_(config.initial_temperature),
       epsilon_(config.initial_epsilon),
+      heuristic_weight_(config.initial_heuristic_weight),
       sample_rng_(0xDEADBEEF12345678ULL) {
     // Replay buffer
     buffer_ = std::make_unique<ReplayBuffer>(config_.replay_capacity);
 
     // Trainer (creates fresh model on training device)
-    trainer_ = std::make_unique<ModelTrainer>(config_.model, train_device_);
+    ModelConfig mc = config_.model;
+    mc.debug_mode = config_.debug_mode;
+    trainer_ = std::make_unique<ModelTrainer>(mc, train_device_);
 
     // Clone model for inference engine
     auto inf_model = trainer_->clone_for_inference(infer_device_);
@@ -44,6 +47,9 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     solver_config_.placement_temperature = temperature_;
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
+    solver_config_.debug_mode            = config_.debug_mode;
+    solver_config_.heuristic_weight      = heuristic_weight_;
+    solver_config_.debug_log_path        = config_.log_dir + "/debug_game_0.log";
 
     // Orchestrator (does NOT start threads yet — call run() for that)
     orchestrator_ = std::make_unique<SelfPlayOrchestrator>(
@@ -169,10 +175,19 @@ void TrainingLoop::do_training_step() {
     temperature_ = std::max(config_.min_temperature,
                             temperature_ * config_.temperature_decay);
 
+    // Decay heuristic weight linearly
+    if (training_step_ < config_.heuristic_decay_steps) {
+        heuristic_weight_ = config_.initial_heuristic_weight * 
+            (1.0 - static_cast<double>(training_step_) / config_.heuristic_decay_steps);
+    } else {
+        heuristic_weight_ = 0.0;
+    }
+
     // Push updated config to self-play workers
     solver_config_.placement_temperature = temperature_;
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
+    solver_config_.heuristic_weight      = heuristic_weight_;
     orchestrator_->update_solver_config(solver_config_);
 }
 

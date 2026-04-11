@@ -70,6 +70,7 @@ private:
     SolverConfig  solver_config_;
     double        temperature_     = 1.0;
     double        epsilon_         = 0.0;
+    double        heuristic_weight_= 1.0;
     int           training_step_   = 0;
     int           games_played_    = 0;
     double        last_loss_       = 0.0;

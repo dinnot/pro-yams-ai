@@ -7,4 +7,4 @@ add_library(self_play STATIC
     training_data.cc
 )
 target_include_directories(self_play PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(self_play PUBLIC engine solver model)
+target_link_libraries(self_play PUBLIC engine solver model heuristic)

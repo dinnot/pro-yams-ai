@@ -45,6 +45,9 @@ struct GameInstance {
     int         game_id;
     GamePhase   phase;
 
+    bool        is_debug_game = false;
+    std::string debug_log_path;
+
     // === Solver buffers (reused across turns) ===
     SolverBuffers solver_buffers;
 
