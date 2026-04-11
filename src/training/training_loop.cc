@@ -29,7 +29,8 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
       temperature_(config.initial_temperature),
       epsilon_(config.initial_epsilon),
       heuristic_weight_(config.initial_heuristic_weight),
-      sample_rng_(0xDEADBEEF12345678ULL) {
+      sample_rng_(0xDEADBEEF12345678ULL),
+      start_time_(std::chrono::steady_clock::now()) {
     // Replay buffer
     buffer_ = std::make_unique<ReplayBuffer>(config_.replay_capacity);
 
@@ -76,6 +77,17 @@ TrainingMetrics TrainingLoop::metrics() const {
     m.loss              = last_loss_;
     m.temperature            = temperature_;
     m.epsilon                = epsilon_;
+    
+    // Compute games per second (cumulative since start)
+    auto now = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(now - start_time_).count();
+    if (seconds > 0.001) {
+        m.games_per_second = static_cast<double>(games_played_) / seconds;
+    } else {
+        m.games_per_second = 0.0;
+    }
+    m.total_samples_trained = total_samples_trained_;
+
     m.latest_eval_win_rate   = last_eval_win_rate_;
     return m;
 }
@@ -179,6 +191,7 @@ void TrainingLoop::do_training_step() {
 
     last_loss_ = trainer_->train_step(states.data(), targets.data(), n);
     ++training_step_;
+    total_samples_trained_ += n;
 
     // Decay temperature
     temperature_ = std::max(config_.min_temperature,

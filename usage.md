@@ -13,7 +13,7 @@
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/libtorch -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_PREFIX_PATH=/home/sorin/dev/libs/libtorch -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
@@ -22,7 +22,7 @@ Build types: `Release` (default, `-O3 -march=native`), `Debug` (`-O0 -g`, ASan+U
 To skip tests and benchmarks:
 
 ```bash
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/libtorch -DBUILD_TESTS=OFF
+cmake .. -DCMAKE_PREFIX_PATH=/home/sorin/dev/libs/libtorch -DBUILD_TESTS=OFF
 ```
 
 This produces two binaries:

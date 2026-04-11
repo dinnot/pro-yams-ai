@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -73,7 +74,10 @@ private:
     double        heuristic_weight_= 1.0;
     int           training_step_   = 0;
     int           games_played_    = 0;
+    long          total_samples_trained_ = 0;
     double        last_loss_       = 0.0;
+    
+    std::chrono::steady_clock::time_point start_time_;
 
     RNG           sample_rng_;
 

@@ -26,7 +26,7 @@ void log_metrics(const std::string& path, const TrainingMetrics& metrics) {
     if (!f) throw std::runtime_error("log_metrics: cannot open " + path);
 
     if (write_header) {
-        f << "step,games_played,buffer_size,loss,temperature,epsilon\n";
+        f << "step,games_played,buffer_size,loss,temperature,epsilon,gps,total_samples\n";
     }
 
     f << metrics.training_step     << ','
@@ -34,7 +34,9 @@ void log_metrics(const std::string& path, const TrainingMetrics& metrics) {
       << metrics.samples_in_buffer << ','
       << metrics.loss              << ','
       << metrics.temperature       << ','
-      << metrics.epsilon           << '\n';
+      << metrics.epsilon           << ','
+      << metrics.games_per_second   << ','
+      << metrics.total_samples_trained << '\n';
 }
 
 // ---------------------------------------------------------------------------

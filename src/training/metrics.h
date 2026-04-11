@@ -10,5 +10,7 @@ struct TrainingMetrics {
     double loss                   = 0.0;
     double temperature            = 1.0;
     double epsilon                = 0.0;
+    double games_per_second       = 0.0;
+    long   total_samples_trained  = 0;
     double latest_eval_win_rate   = 0.0;
 };

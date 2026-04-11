@@ -35,6 +35,8 @@ const Dashboard = {
         const lossCol  = headers.find(h => /loss/i.test(h));
         const tempCol  = headers.find(h => /temp/i.test(h));
         const gamesCol = headers.find(h => /games/i.test(h) || /completed/i.test(h));
+        const gpsCol   = headers.find(h => /^gps$/i.test(h) || /games_per_second/i.test(h));
+        const samplesCol = headers.find(h => /total_samples/i.test(h) || /samples_trained/i.test(h));
 
         if (stepCol && lossCol) {
             Dashboard.updateChart('chart-loss', 'Training Loss',
@@ -56,9 +58,16 @@ const Dashboard = {
                 rows.map(r => parseFloat(r[gamesCol])),
                 '#64b5f6');
         }
+        
+        if (stepCol && gpsCol) {
+            Dashboard.updateChart('chart-games-per-sec', 'Simulated Games / sec',
+                rows.map(r => r[stepCol]),
+                rows.map(r => parseFloat(r[gpsCol])),
+                '#26c6da');
+        }
 
         // Update stat cards.
-        Dashboard.updateStats(rows, lossCol, tempCol, gamesCol, stepCol);
+        Dashboard.updateStats(rows, lossCol, tempCol, gamesCol, stepCol, samplesCol);
     },
 
     renderEvalLog(evalCSV, trainCSV) {
@@ -87,59 +96,10 @@ const Dashboard = {
                 '#ab47bc');
         }
 
-        // Games/sec: use training log's cumulative games_played matched by step,
-        // combined with eval log timestamps (training log has no timestamps).
-        if (tsCol && stepCol && trainCSV && evalRows.length >= 2) {
-            const trainRows = Dashboard.parseCSV(trainCSV);
-            const th = trainRows.length > 0 ? Object.keys(trainRows[0]) : [];
-            const tStepCol  = th.find(h => /step/i.test(h));
-            const tGamesCol = th.find(h => /games/i.test(h) || /completed/i.test(h));
-
-            if (tStepCol && tGamesCol) {
-                // Build step -> games_played lookup, sorted for nearest-step search.
-                const gamesByStep = new Map();
-                for (const r of trainRows) {
-                    gamesByStep.set(parseInt(r[tStepCol], 10), parseFloat(r[tGamesCol]));
-                }
-                const sortedSteps = [...gamesByStep.keys()].sort((a, b) => a - b);
-
-                const nearestGames = (targetStep) => {
-                    let lo = 0, hi = sortedSteps.length - 1;
-                    while (lo < hi) {
-                        const mid = (lo + hi) >> 1;
-                        if (sortedSteps[mid] < targetStep) lo = mid + 1;
-                        else hi = mid;
-                    }
-                    if (lo > 0 && Math.abs(sortedSteps[lo - 1] - targetStep) <
-                                  Math.abs(sortedSteps[lo]    - targetStep)) lo--;
-                    return gamesByStep.get(sortedSteps[lo]);
-                };
-
-                const labels = [];
-                const rates  = [];
-                for (let i = 1; i < evalRows.length; i++) {
-                    const t1 = new Date(evalRows[i - 1][tsCol]).getTime();
-                    const t2 = new Date(evalRows[i][tsCol]).getTime();
-                    const dt = (t2 - t1) / 1000; // seconds
-                    if (dt <= 0 || sortedSteps.length === 0) continue;
-
-                    const g1 = nearestGames(parseInt(evalRows[i - 1][stepCol], 10));
-                    const g2 = nearestGames(parseInt(evalRows[i][stepCol], 10));
-                    if (g1 == null || g2 == null || g2 <= g1) continue;
-
-                    labels.push(evalRows[i][stepCol]);
-                    rates.push((g2 - g1) / dt);
-                }
-
-                if (rates.length > 0) {
-                    Dashboard.updateChart('chart-games-per-sec', 'Simulated Games / sec',
-                        labels, rates, '#26c6da');
-                }
-            }
-        }
+        // (GPS derivation removed — now using dedicated field in training log)
     },
 
-    updateStats(rows, lossCol, tempCol, gamesCol, stepCol) {
+    updateStats(rows, lossCol, tempCol, gamesCol, stepCol, samplesCol) {
         const container = document.getElementById('current-stats');
         container.innerHTML = '';
         if (rows.length === 0) return;
@@ -150,6 +110,7 @@ const Dashboard = {
         if (lossCol) stats.push({ label: 'Loss', value: parseFloat(last[lossCol]).toFixed(6) });
         if (tempCol) stats.push({ label: 'Temp', value: parseFloat(last[tempCol]).toFixed(4) });
         if (gamesCol) stats.push({ label: 'Games', value: last[gamesCol] });
+        if (samplesCol) stats.push({ label: 'Samples', value: parseInt(last[samplesCol], 10).toLocaleString() });
 
         for (const s of stats) {
             const card = document.createElement('div');
