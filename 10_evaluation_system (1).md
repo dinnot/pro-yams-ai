@@ -40,7 +40,7 @@ struct EvalResult {
     int nn_wins_as_p1;      // NN wins when playing as player 1
     int games_as_p0;         // Total games where NN was player 0
     int games_as_p1;         // Total games where NN was player 1
-    double avg_duel_margin;  // Average duel point margin when NN wins
+    double avg_duel_margin;  // Average duel point margin across all games
 
     double nn_win_rate() const {
         return total_games > 0
@@ -200,7 +200,6 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
     model.eval();  // Set to evaluation mode (disables dropout if any)
 
     double margin_sum = 0.0;
-    int margin_count = 0;
 
     for (int i = 0; i < num_games; ++i) {
         RNG rng(base_seed + i);
@@ -213,12 +212,12 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
         double outcome = play_eval_game(model, device, tables,
                                          nn_player, rng, duel_margin);
 
+        margin_sum += duel_margin;
+
         if (outcome == 1.0) {
             result.nn_wins++;
             if (nn_player == 0) result.nn_wins_as_p0++;
             else result.nn_wins_as_p1++;
-            margin_sum += duel_margin;
-            margin_count++;
         } else if (outcome == 0.0) {
             result.heuristic_wins++;
         } else {
@@ -226,8 +225,8 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
         }
     }
 
-    result.avg_duel_margin = margin_count > 0
-        ? margin_sum / margin_count : 0.0;
+    result.avg_duel_margin = num_games > 0
+        ? margin_sum / num_games : 0.0;
 
     return result;
 }
@@ -410,7 +409,7 @@ This task is complete when:
 2. `nn_play_turn` performs synchronous NN inference without using the async queue.
 3. `run_evaluation` plays the configured number of games, alternating which side the NN plays.
 4. Win rates are computed correctly overall and per-side (player 0 vs player 1).
-5. Average duel margin is tracked for NN wins.
+5. Average duel margin is tracked across all games.
 6. Evaluation results are logged to a separate CSV file.
 7. `maybe_evaluate` integrates correctly with the training loop at configured intervals.
 8. A randomly initialized NN loses most eval games against the heuristic (sanity check).

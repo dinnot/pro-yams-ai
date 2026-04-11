@@ -119,7 +119,7 @@ static int mode_eval(const AppConfig& cfg) {
               << "  NN win rate:      " << result.nn_win_rate() << "\n"
               << "  NN win rate as P0: " << result.nn_win_rate_as_p0() << "\n"
               << "  NN win rate as P1: " << result.nn_win_rate_as_p1() << "\n"
-              << "  Avg duel margin:  " << result.avg_duel_margin << "\n";
+              << "  Avg duel margin (all): " << result.avg_duel_margin << "\n";
     return 0;
 }
 

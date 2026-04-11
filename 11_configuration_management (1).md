@@ -430,7 +430,7 @@ int main(int argc, char* argv[]) {
                   << ", Draws: " << result.draws << "\n";
         std::cout << "  As P0: " << result.nn_win_rate_as_p0()
                   << ", As P1: " << result.nn_win_rate_as_p1() << "\n";
-        std::cout << "  Avg margin (NN wins): " << result.avg_duel_margin << "\n";
+        std::cout << "  Avg margin (all games): " << result.avg_duel_margin << "\n";
         return 0;
     }
 

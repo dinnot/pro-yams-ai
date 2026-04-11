@@ -24,7 +24,7 @@ struct EvalResult {
     int    nn_wins_as_p1   = 0;   // NN wins when playing as player 1
     int    games_as_p0     = 0;   // Total games where NN was player 0
     int    games_as_p1     = 0;   // Total games where NN was player 1
-    double avg_duel_margin = 0.0; // Average duel point margin when NN wins
+    double avg_duel_margin = 0.0; // Average duel point margin across all games
 
     double nn_win_rate() const {
         return total_games > 0

@@ -34,3 +34,8 @@ training:
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.0005
+
+  debug:
+    enabled: true
+    dump_interval_steps: 1000      # Dump batch statistics every 1000 steps
+    dump_game_traces: 2            # Dump the first 2 self-play games to text

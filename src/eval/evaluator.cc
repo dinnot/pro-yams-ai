@@ -131,8 +131,7 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
 
     model.eval();
 
-    double margin_sum  = 0.0;
-    int    margin_count = 0;
+    double margin_sum = 0.0;
 
     for (int i = 0; i < num_games; ++i) {
         RNG rng(base_seed + static_cast<uint64_t>(i));
@@ -145,12 +144,12 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
         double outcome = play_eval_game(model, device, tables,
                                          nn_player, rng, duel_margin);
 
+        margin_sum += duel_margin;
+
         if (outcome == 1.0) {
             result.nn_wins++;
             if (nn_player == 0) result.nn_wins_as_p0++;
             else                result.nn_wins_as_p1++;
-            margin_sum += duel_margin;
-            ++margin_count;
         } else if (outcome == 0.0) {
             result.heuristic_wins++;
         } else {
@@ -158,8 +157,8 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
         }
     }
 
-    result.avg_duel_margin = margin_count > 0
-        ? margin_sum / margin_count : 0.0;
+    result.avg_duel_margin = num_games > 0
+        ? margin_sum / num_games : 0.0;
 
     return result;
 }
