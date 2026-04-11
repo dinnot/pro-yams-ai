@@ -57,6 +57,11 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     solver_config_.debug_log_path        = config_.log_dir + "/debug_game_0.log";
 
     // Orchestrator (does NOT start threads yet — call run() for that)
+    config_.self_play.debug_mode = config_.debug_mode;
+    if (config_.debug_mode) {
+        config_.self_play.debug_log_path = config_.log_dir + "/debug_coordinator.log";
+    }
+
     orchestrator_ = std::make_unique<SelfPlayOrchestrator>(
         config_.self_play, tables_, *inference_, solver_config_);
 }
@@ -117,24 +122,34 @@ void TrainingLoop::run(int num_steps) {
 
     while (!stop_flag_.load(std::memory_order_relaxed) &&
            training_step_ < num_steps) {
+        // ---------------------------------------------------------------
+        // Phase 1: ALWAYS drain and recycle completed games.
+        // This is decoupled from training so games return to the pool ASAP
+        // and don't pile up in the completed queue.
+        // ---------------------------------------------------------------
         int collected = collect_completed_games();
 
+        // ---------------------------------------------------------------
+        // Phase 2: Train if the buffer has enough data.
+        // train_steps_per_collect > 0: fixed number of steps per tick
+        // train_steps_per_collect = 0: legacy 1:1 with completed games
+        // ---------------------------------------------------------------
         if (buffer_->size() >= config_.min_buffer_size) {
-            // Throttled training: 1 gradient step per completed game
-            // Guarantees a perfectly stable Replay Ratio of ~13 (2048 / 156)
-            for (int i = 0; i < collected; ++i) {
+            int steps_to_do = (config_.train_steps_per_collect > 0)
+                              ? config_.train_steps_per_collect
+                              : collected;
+            for (int i = 0; i < steps_to_do; ++i) {
                 do_training_step();
                 maybe_swap_model();
                 maybe_checkpoint();
                 maybe_evaluate();
                 if (training_step_ >= num_steps || stop_flag_.load(std::memory_order_relaxed)) {
                     break;
-
                 }
             }
         }
         
-        // If we haven't reached min_buffer_size, or no games were ready this tick
+        // If no games were ready this tick, avoid busy-spinning
         if (collected == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

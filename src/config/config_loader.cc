@@ -28,6 +28,7 @@ void load_self_play_config(const YAML::Node& n, SelfPlayConfig& sp) {
     maybe_assign(n, "batch_timeout_ms",    sp.batch_timeout_ms);
     maybe_assign(n, "num_workers",         sp.num_workers);
     maybe_assign(n, "num_games",           sp.num_games);
+    maybe_assign(n, "num_coordinators",    sp.num_coordinators);
 }
 
 void load_model_config(const YAML::Node& n, ModelConfig& m) {
@@ -41,6 +42,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "replay_capacity",     tc.replay_capacity);
     maybe_assign(n, "min_buffer_size",     tc.min_buffer_size);
     maybe_assign(n, "train_batch_size",    tc.train_batch_size);
+    maybe_assign(n, "train_steps_per_collect", tc.train_steps_per_collect);
     maybe_assign(n, "model_swap_interval", tc.model_swap_interval);
     maybe_assign(n, "checkpoint_interval", tc.checkpoint_interval);
     maybe_assign(n, "max_checkpoints",     tc.max_checkpoints);
@@ -83,10 +85,12 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
             config.training.td_mode = parse_td_mode(argv[++i]);
         }
         else if (arg == "--batch_size" && i + 1 < argc) config.training.train_batch_size = std::stoi(argv[++i]);
+        else if (arg == "--train_steps_per_collect" && i + 1 < argc) config.training.train_steps_per_collect = std::stoi(argv[++i]);
         else if (arg == "--replay_buffer_size" && i + 1 < argc) config.training.replay_capacity = std::stoi(argv[++i]);
         else if (arg == "--placement_temperature" && i + 1 < argc) config.training.initial_temperature = std::stod(argv[++i]);
         else if (arg == "--num_workers" && i + 1 < argc) config.training.self_play.num_workers = std::stoi(argv[++i]);
         else if (arg == "--num_games" && i + 1 < argc) config.training.self_play.num_games = std::stoi(argv[++i]);
+        else if (arg == "--num_coordinators" && i + 1 < argc) config.training.self_play.num_coordinators = std::stoi(argv[++i]);
         else if (arg == "--eval_games" && i + 1 < argc) config.training.eval_games = std::stoi(argv[++i]);
         else if (arg == "--eval_interval" && i + 1 < argc) config.training.eval_interval = std::stoi(argv[++i]);
         else if (arg == "--debug_mode" && i + 1 < argc) config.training.debug_mode = (std::stoi(argv[++i]) != 0);

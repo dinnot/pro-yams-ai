@@ -85,6 +85,6 @@ private:
 
     double last_eval_win_rate_ = 0.0;
 
-    static constexpr int kMaxCollectBatch = 64;
+    static constexpr int kMaxCollectBatch = 512;
     GameInstance* collect_buf_[kMaxCollectBatch];
 };

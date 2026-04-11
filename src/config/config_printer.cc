@@ -25,6 +25,7 @@ void print_config(const AppConfig& cfg, std::ostream& out) {
     out << "  replay_capacity: "      << tc.replay_capacity     << "\n";
     out << "  min_buffer_size: "      << tc.min_buffer_size      << "\n";
     out << "  train_batch_size: "     << tc.train_batch_size     << "\n";
+    out << "  train_steps_per_collect: " << tc.train_steps_per_collect << "\n";
     out << "  model_swap_interval: "  << tc.model_swap_interval  << "\n";
     out << "  checkpoint_interval: "  << tc.checkpoint_interval  << "\n";
     out << "  max_checkpoints: "      << tc.max_checkpoints      << "\n";
@@ -45,6 +46,7 @@ void print_config(const AppConfig& cfg, std::ostream& out) {
     out << "    batch_timeout_ms: "    << sp.batch_timeout_ms    << "\n";
     out << "    num_workers: "         << sp.num_workers         << "\n";
     out << "    num_games: "           << sp.num_games           << "\n";
+    out << "    num_coordinators: "    << sp.num_coordinators    << "\n";
     out << "  model:\n";
     out << "    input_size: "    << m.input_size    << "\n";
     out << "    hidden_layers: " << m.hidden_layers << "\n";

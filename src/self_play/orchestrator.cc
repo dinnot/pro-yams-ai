@@ -69,11 +69,14 @@ void SelfPlayOrchestrator::start() {
             std::ref(shutdown_));
     }
 
-    // Launch coordinator thread.
-    coordinator_ = std::thread(coordinator_thread,
-        std::ref(pending_queue_), std::ref(available_queue_),
-        std::ref(inference_), std::ref(config_),
-        std::ref(shutdown_));
+    // Launch coordinator threads.
+    coordinators_.reserve(config_.num_coordinators);
+    for (int i = 0; i < config_.num_coordinators; ++i) {
+        coordinators_.emplace_back(coordinator_thread,
+            std::ref(pending_queue_), std::ref(available_queue_),
+            std::ref(inference_), std::ref(config_),
+            std::ref(shutdown_), i);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -87,8 +90,9 @@ void SelfPlayOrchestrator::stop() {
     for (int i = 0; i < static_cast<int>(workers_.size()); ++i)
         available_queue_.push(nullptr);
 
-    // Join coordinator (it checks shutdown_ and uses collect() with timeout).
-    if (coordinator_.joinable()) coordinator_.join();
+    // Join coordinators (they check shutdown_ and use pop_with_timeout).
+    for (auto& c : coordinators_)
+        if (c.joinable()) c.join();
 
     // Join workers.
     for (auto& w : workers_)

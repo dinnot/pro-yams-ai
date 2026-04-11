@@ -13,6 +13,9 @@ struct SelfPlayConfig {
     int batch_timeout_ms    = 5;      // Max wait time for batch assembly (ms)
     int num_workers         = 16;     // Number of worker threads
     int num_games           = 512;    // Total concurrent game instances
+    int num_coordinators    = 1;      // Coordinator threads (each gets a CUDA stream)
+    bool debug_mode         = false;
+    std::string debug_log_path = "";
 };
 
 // ---------------------------------------------------------------------------
@@ -27,4 +30,5 @@ struct SelfPlayConfig {
 void coordinator_thread(GameQueue& pending, GameQueue& available,
                         InferenceEngine& inference,
                         const SelfPlayConfig& config,
-                        std::atomic<bool>& shutdown);
+                        std::atomic<bool>& shutdown,
+                        int coordinator_id);

@@ -11,6 +11,8 @@
 #include <cstring>
 #include <thread>
 #include <vector>
+#include <filesystem>
+#include <fstream>
 
 // ---------------------------------------------------------------------------
 // Shared small model for coordinator tests (CPU only for speed)
@@ -61,7 +63,7 @@ TEST(CoordinatorTest, BatchAssembly_DistributesEVs) {
     std::thread ct(coordinator_thread,
                    std::ref(pending), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown));
+                   std::ref(shutdown), 0);
 
     // Wait until all 3 games are in available queue.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -108,7 +110,7 @@ TEST(CoordinatorTest, BatchOverflow_ExcessGoesBackToPending) {
     std::thread ct(coordinator_thread,
                    std::ref(pending), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown));
+                   std::ref(shutdown), 0);
 
     // Wait for at least one game to flow through.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -147,7 +149,7 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
     std::thread ct(coordinator_thread,
                    std::ref(pending), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown));
+                   std::ref(shutdown), 0);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 1 &&
@@ -159,3 +161,62 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
 
     EXPECT_GE(available.size(), 1) << "Game should have been processed after timeout";
 }
+
+// ---------------------------------------------------------------------------
+// Logging — respects debug_mode and debug_log_path settings
+// ---------------------------------------------------------------------------
+TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
+    auto engine = make_inference_cpu();
+    SelfPlayConfig cfg;
+    cfg.max_inference_batch = 1000;
+    cfg.min_games_per_batch = 1;
+    cfg.batch_timeout_ms    = 1;
+    cfg.debug_mode          = true;
+    cfg.debug_log_path      = "test_coordinator_metrics.log";
+
+    // Clean up any stale log
+    std::filesystem::remove(cfg.debug_log_path);
+
+    GameQueue pending, available;
+    std::atomic<bool> shutdown{false};
+
+    std::thread ct(coordinator_thread,
+                   std::ref(pending), std::ref(available),
+                   std::ref(*engine), std::ref(cfg),
+                   std::ref(shutdown), 0);
+
+    // Pump 1001 games through to trigger the % 1000 reporting.
+    // Each game will be a tiny batch.
+    for (int i = 0; i < 1005; ++i) {
+        auto g = make_fake_game(1, i);
+        pending.push(g.get());
+        
+        // Block until it pops out to avoid flooding the queue too much
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (available.size() == 0 && std::chrono::steady_clock::now() < deadline) {
+             std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        available.try_pop(); // clear it
+    }
+
+    shutdown = true;
+    ct.join();
+
+    // Verify file exists and has content
+    EXPECT_TRUE(std::filesystem::exists(cfg.debug_log_path));
+    
+    std::ifstream f(cfg.debug_log_path);
+    std::string line;
+    bool found = false;
+    while (std::getline(f, line)) {
+        if (line.find("[Coordinator 0 @ iter 1000]") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found) << "Log file should contain reporting for iteration 1000";
+
+    // Clean up
+    std::filesystem::remove(cfg.debug_log_path);
+}
+

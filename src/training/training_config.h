@@ -18,9 +18,10 @@ struct TrainingConfig {
     double td_lambda = 0.0;           // Used only for kTDLambda
 
     // --- Replay buffer ---
-    int replay_capacity  = 2'000'000; // Maximum samples stored
-    int min_buffer_size  = 10'000;    // Don't train until buffer reaches this size
-    int train_batch_size = 512;       // Samples per gradient step
+    int replay_capacity       = 2'000'000; // Maximum samples stored
+    int min_buffer_size       = 10'000;    // Don't train until buffer reaches this size
+    int train_batch_size      = 512;       // Samples per gradient step
+    int train_steps_per_collect = 0;       // Gradient steps per collection tick (0 = 1:1 with completed games)
 
     // --- Model swap and checkpointing ---
     int model_swap_interval   = 100;  // Training steps between inference model updates

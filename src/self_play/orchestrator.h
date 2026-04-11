@@ -60,6 +60,6 @@ private:
     GameQueue completed_queue_;
 
     std::vector<std::thread> workers_;
-    std::thread              coordinator_;
+    std::vector<std::thread> coordinators_;
     std::atomic<bool>        shutdown_{false};
 };
