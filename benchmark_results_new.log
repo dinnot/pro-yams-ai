@@ -1,0 +1,100 @@
+================================================================================
+  PRO YAMS AI — Benchmark Results
+  Date: 2026-04-11 15:31 BST
+  Host: sorin-pc
+  CPU:  AMD Ryzen 9 9900X 12-Core Processor (24 logical cores)
+  L3 Cache: 32768 KiB x2
+================================================================================
+
+--- ENGINE BENCHMARKS -------------------------------------------------
+
+  Placeholder                       0.09 ns
+  InitSolverTables               13034 ns       (13.0 µs)
+  CalculateScore                     5.6 ns
+  ApplyPlacement                 1.3e+02 ns
+  RebuildLegalPlacements              53 ns
+  ComputeDuel                         38 ns
+  BoardStateCopy                    0.77 ns
+
+--- EVAL BENCHMARKS ---------------------------------------------------
+
+  SingleEvalGame                    81.8 ms
+  FullEvaluation
+    batch=10                     793.2 ms       12.6 games/s
+    batch=50                       4.02 s       12.5 games/s
+    batch=200                     15.98 s       12.5 games/s
+
+--- MODEL BENCHMARKS --------------------------------------------------
+
+  ForwardPass
+    batch=1                    31781 ns       (31.8 µs)       31.5k samples/s
+    batch=64                   46574 ns       (46.6 µs)       1.37M samples/s
+    batch=256                  53435 ns       (53.4 µs)       4.79M samples/s
+    batch=512                  74775 ns       (74.8 µs)       6.85M samples/s
+    batch=1024                 121839 ns       (121.8 µs)       8.41M samples/s
+  ForwardPassCPU
+    batch=1                    19888 ns       (19.9 µs)       50.3k samples/s
+    batch=64                   85633 ns       (85.6 µs)       747.4k samples/s
+    batch=256                  226954 ns       (227.0 µs)       1.13M samples/s
+    batch=512                  378729 ns       (378.7 µs)       1.35M samples/s
+  BatchInference
+    batch=1                    44162 ns       (44.2 µs)       22.8k samples/s
+    batch=64                   68792 ns       (68.8 µs)       930.3k samples/s
+    batch=256                  114723 ns       (114.7 µs)       2.23M samples/s
+    batch=512                  162689 ns       (162.7 µs)       3.15M samples/s
+    batch=1024                 283831 ns       (283.8 µs)       3.61M samples/s
+  TrainStep
+    batch=32                   364458 ns       (364.5 µs)       128.7k samples/s
+    batch=128                  415628 ns       (415.6 µs)       445.0k samples/s
+    batch=512                  490250 ns       (490.2 µs)       1.39M samples/s
+  ModelClone                     751667 ns       (751.7 µs)
+  CheckpointSave                 428290 ns       (428.3 µs)
+  CheckpointLoad                 308272 ns       (308.3 µs)
+
+--- SELF-PLAY BENCHMARKS ----------------------------------------------
+
+  WorkerIteration                518673 ns       (518.7 µs)       1.9k items/s
+  TrainingDataExtraction
+    mode=0                     4873 ns       (4.9 µs)       32.01M items/s
+    mode=1                     11874 ns       (11.9 µs)       13.14M items/s
+    mode=2                     4852 ns       (4.9 µs)       32.15M items/s
+  QueueThroughput                     18 ns       56.20M items/s
+
+--- SOLVER BENCHMARKS -------------------------------------------------
+
+  InitPrecomputedTables            318.3 ms
+  GetDiceStateId                       4 ns
+  TransitionIteration            1.1e+02 ns
+  GetFilteredScores                   12 ns
+  SolverGetRequests                1e+02 ns
+  SolverResolve                  167071 ns       (167.1 µs)
+  HeuristicEvaluate                   78 ns
+  HeuristicPlayTurn              406012 ns       (406.0 µs)
+  HeuristicFullGame                 51.0 ms
+  SoftmaxSample
+  SoftmaxSample/2                     40 ns
+  SoftmaxSample/8                     70 ns
+  SoftmaxSample/32               1.9e+02 ns
+
+--- TENSOR BENCHMARKS -------------------------------------------------
+
+  ProbabilityTableInit             317.7 ms
+  ProbabilityLookup              4.4e+02 ns
+  GenerateTensor                 1245 ns       (1.2 µs)
+  GenerateTensorBatch
+    batch=10                   12529 ns       (12.5 µs)       798.2k items/s
+    batch=50                   63615 ns       (63.6 µs)       786.0k items/s
+    batch=100                  79901 ns       (79.9 µs)       788.5k items/s
+
+--- TRAINING BENCHMARKS -----------------------------------------------
+
+  ReplayBuffer_Add               1.2e+02 ns       8.49M items/s
+  ReplayBuffer_AddBatch          29077 ns       (29.1 µs)       8.81M items/s
+  ReplayBuffer_SampleBatch       101526 ns       (101.5 µs)       5.04M items/s
+  ReplayBuffer_Save                 49.3 ms       6.15 GiB/s
+  ReplayBuffer_Load                115.1 ms       2.63 GiB/s
+  LogMetrics                     2637 ns       (2.6 µs)
+
+================================================================================
+  End of benchmark report
+================================================================================
