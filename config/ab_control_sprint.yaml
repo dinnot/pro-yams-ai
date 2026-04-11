@@ -1,11 +1,12 @@
-num_steps: 10000
+num_steps: 2000
 
 training:
-  replay_capacity: 1000000       # Shrunk from 10M to fit purely in fast RAM
-  min_buffer_size: 200000        
-  train_batch_size: 2048
-  model_swap_interval: 100
-  checkpoint_interval: 10000
+  replay_capacity: 500000       # Shrunk from 10M to fit purely in fast RAM
+  min_buffer_size: 5000        
+  train_batch_size: 4096
+  train_steps_per_collect: 4
+  model_swap_interval: 10000
+  checkpoint_interval: 2000
   max_checkpoints: 2
   
   td_mode: mc
@@ -15,22 +16,22 @@ training:
   min_temperature: 0.1
   temperature_decay: 0.99994245     # Adjusted for 40k steps
   
-  eval_interval: 10000
-  eval_games: 500
+  eval_interval: 2000
+  eval_games: 1
   
-  checkpoint_dir: checkpoints/ab_control11
-  log_dir: ./logs/ab_control11
-  log_path: ./logs/ab_control11/training_log.csv
+  checkpoint_dir: checkpoints/ab_control13
+  log_dir: ./logs/ab_control13
+  log_path: ./logs/ab_control13/training_log.csv
   
   self_play:
-    max_inference_batch: 8192     # Uncapped timeout!
-    min_games_per_batch: 2
+    max_inference_batch: 16384     # Uncapped timeout!
+    min_games_per_batch: 3
     batch_timeout_ms: 5
     num_workers: 20
     num_games: 4096              # Uncapped queue!
     num_coordinators: 3
     debug_mode: true
-    debug_log_path: "./logs/ab_control11/debug_coordinator.log"
+    debug_log_path: "./logs/ab_control13/debug_coordinator.log"
     
   model:
     input_size: 809
@@ -38,7 +39,7 @@ training:
     hidden_width: 256
     learning_rate: 0.0005
     debug_mode: true
-    debug_log_path: "./logs/ab_control11/debug_batch.log"
+    debug_log_path: "./logs/ab_control13/debug_batch.log"
 
 
 

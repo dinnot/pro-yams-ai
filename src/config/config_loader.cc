@@ -29,6 +29,8 @@ void load_self_play_config(const YAML::Node& n, SelfPlayConfig& sp) {
     maybe_assign(n, "num_workers",         sp.num_workers);
     maybe_assign(n, "num_games",           sp.num_games);
     maybe_assign(n, "num_coordinators",    sp.num_coordinators);
+    maybe_assign(n, "debug_mode",          sp.debug_mode);
+    maybe_assign(n, "debug_log_path",      sp.debug_log_path);
 }
 
 void load_model_config(const YAML::Node& n, ModelConfig& m) {
