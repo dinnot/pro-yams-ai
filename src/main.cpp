@@ -1,6 +1,7 @@
 #include <csignal>
 #include <iostream>
 #include <string>
+#include <filesystem>
 
 #include <torch/torch.h>
 
@@ -71,6 +72,11 @@ static int mode_train(const AppConfig& cfg) {
     init_precomputed_tables(tables);
 
     TrainingLoop loop(cfg.training, tables, train_device, infer_device);
+
+    if (!cfg.training.log_dir.empty()) {
+        std::filesystem::create_directories(cfg.training.log_dir);
+        save_config(cfg, cfg.training.log_dir + "/config.yaml");
+    }
 
     if (!cfg.checkpoint_path.empty()) {
         std::cout << "Resuming from checkpoint dir: " << cfg.checkpoint_path << "\n";
