@@ -1,13 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Pro Yams AI — Learning Rate & TD Mode Grid Search
+# Pro Yams AI — Learning Rate & TD Mode Sweep
 #
-# Investigates interaction between:
-#   - TD Mode (mc, td0, tdlambda 0.8, tdlambda 0.95)
-#   - Learning Rate (0.0001, 0.0005, 0.001)
-#   - Train Batch Size (4096, 8192, 16384)
-#
-# Metrics: Win Rate, Avg Margin, Loss
+# Investigates selected configurations of TD modes and learning rates.
+# Format: "td_mode td_lambda lr tbs label"
 # =============================================================================
 
 set -uo pipefail
@@ -38,6 +34,18 @@ BATCH_TIMEOUT_MS=5
 NW=24
 NG=2048
 NC=2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CURATED CONFIGS
+# ─────────────────────────────────────────────────────────────────────────────
+
+CONFIGS=(
+    # Mode     Lambda   LR        Batch   Label
+    "mc        0.8      0.00001   4096    mc_lr1e-5"
+    "td0       0.8      0.00001   4096    td0_lr1e-5"
+    "tdlambda  0.8      0.00001   4096    tdl0.8_lr1e-5"
+    "tdlambda  0.95     0.00001   4096    tdl0.95_lr1e-5"
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG REGENERATION
@@ -128,17 +136,6 @@ extract_loss() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GRID DEFINITION
-# ─────────────────────────────────────────────────────────────────────────────
-
-TD_MODES=("mc" "td0" "tdlambda" "tdlambda")
-TD_LAMBDAS=(0.8 0.8 0.8 0.95)
-LRS=(0.00001)
-BS=(4096)
-
-TOTAL_RUNS=$(( ${#TD_MODES[@]} * ${#LRS[@]} * ${#BS[@]} ))
-
-# ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -151,54 +148,49 @@ mkdir -p "${BASE_LOG_DIR}"
 
 # Header for summary
 if [[ "$START_RUN" -le 1 ]]; then
-    echo "run_id,td_mode,td_lambda,lr,batch_size,win_rate,avg_margin,loss" > "$SUMMARY_FILE"
+    echo "run_id,label,td_mode,td_lambda,lr,batch_size,win_rate,avg_margin,loss" > "$SUMMARY_FILE"
 fi
 
-run_count=0
-for (( i=0; i<${#TD_MODES[@]}; i++ )); do
-    for lr in "${LRS[@]}"; do
-        for bs in "${BS[@]}"; do
-            run_count=$((run_count + 1))
-            
-            if [[ $run_count -lt $START_RUN ]]; then
-                continue
-            fi
+total_configs=${#CONFIGS[@]}
 
-            td_mode="${TD_MODES[$i]}"
-            td_lambda="${TD_LAMBDAS[$i]}"
-            
-            run_id="run_$(printf '%02d' $run_count)"
-            run_dir="${BASE_LOG_DIR}/${run_id}"
-            mkdir -p "${run_dir}"
+for (( i=0; i<total_configs; i++ )); do
+    run_num=$((i + 1))
+    
+    if [[ $run_num -lt $START_RUN ]]; then
+        continue
+    fi
 
-            label="${td_mode}_L${td_lambda}_LR${lr}_BS${bs}"
-            
-            echo "────────────────────────────────────────────────────────────"
-            echo "[${run_count}/${TOTAL_RUNS}] ${run_id}: ${label}"
-            echo "────────────────────────────────────────────────────────────"
+    read -r td_mode td_lambda lr tbs label <<< "${CONFIGS[$i]}"
+    
+    run_id="run_$(printf '%02d' $run_num)"
+    run_dir="${BASE_LOG_DIR}/${run_id}"
+    mkdir -p "${run_dir}"
 
-            generate_config "$run_dir" "$td_mode" "$td_lambda" "$lr" "$bs"
+    echo "────────────────────────────────────────────────────────────"
+    echo "[${run_num}/${total_configs}] ${run_id}: ${label}"
+    echo "  ${td_mode}(λ=${td_lambda}) LR=${lr} BS=${tbs}"
+    echo "────────────────────────────────────────────────────────────"
 
-            start_time=$(date +%s)
-            if "${BINARY}" --mode train --debug_mode 1 --config "${run_dir}/config.yaml" 2>"${run_dir}/stderr.log"; then
-                end_time=$(date +%s)
-                elapsed=$(( end_time - start_time ))
-                
-                wr=$(extract_win_rate "${run_dir}/eval_log.csv")
-                am=$(extract_avg_margin "${run_dir}/eval_log.csv")
-                loss=$(extract_loss "${run_dir}/training_log.csv")
-                
-                echo "  ✓ Win Rate: ${wr}  Margin: ${am}  Loss: ${loss}  Time: ${elapsed}s"
-                echo "${run_id},${td_mode},${td_lambda},${lr},${bs},${wr},${am},${loss}" >> "$SUMMARY_FILE"
-            else
-                end_time=$(date +%s)
-                elapsed=$(( end_time - start_time ))
-                echo "  ✗ FAILED after ${elapsed}s. Check ${run_dir}/stderr.log"
-                echo "${run_id},${td_mode},${td_lambda},${lr},${bs},FAILED,FAILED,FAILED" >> "$SUMMARY_FILE"
-            fi
-            echo ""
-        done
-    done
+    generate_config "$run_dir" "$td_mode" "$td_lambda" "$lr" "$tbs"
+
+    start_time=$(date +%s)
+    if "${BINARY}" --mode train --debug_mode 1 --config "${run_dir}/config.yaml" 2>"${run_dir}/stderr.log"; then
+        end_time=$(date +%s)
+        elapsed=$(( end_time - start_time ))
+        
+        wr=$(extract_win_rate "${run_dir}/eval_log.csv")
+        am=$(extract_avg_margin "${run_dir}/eval_log.csv")
+        loss=$(extract_loss "${run_dir}/training_log.csv")
+        
+        echo "  ✓ Win Rate: ${wr}  Margin: ${am}  Loss: ${loss}  Time: ${elapsed}s"
+        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},${wr},${am},${loss}" >> "$SUMMARY_FILE"
+    else
+        end_time=$(date +%s)
+        elapsed=$(( end_time - start_time ))
+        echo "  ✗ FAILED after ${elapsed}s. Check ${run_dir}/stderr.log"
+        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},FAILED,FAILED,FAILED" >> "$SUMMARY_FILE"
+    fi
+    echo ""
 done
 
 echo "============================================================"
@@ -206,8 +198,8 @@ echo "  Grid Search Complete. Results: ${SUMMARY_FILE}"
 echo "============================================================"
 echo ""
 echo "Top 10 by Win Rate:"
-printf "%-10s %-10s %-8s %-8s %-10s %-10s %-10s\n" "RUN" "MODE" "LAMBDA" "LR" "BATCH" "WIN_RATE" "MARGIN"
-echo "──────────────────────────────────────────────────────────────────────────────────────────────"
-tail -n +2 "$SUMMARY_FILE" | grep -v "FAILED" | sort -t',' -k6 -rn | head -n 10 | while IFS=',' read -r rid tdm tdl lr bs wr am ls; do
-    printf "%-10s %-10s %-8s %-8s %-10s %-10s %-10s\n" "$rid" "$tdm" "$tdl" "$lr" "$bs" "$wr" "$am"
+printf "%-10s %-15s %-10s %-8s %-8s %-10s %-10s\n" "RUN" "LABEL" "MODE" "LAMBDA" "LR" "WIN_RATE" "MARGIN"
+echo "────────────────────────────────────────────────────────────────────────────────────────────────"
+tail -n +2 "$SUMMARY_FILE" | grep -v "FAILED" | sort -t',' -k7 -rn | head -n 10 | while IFS=',' read -r rid lbl tdm tdl lr bs wr am ls; do
+    printf "%-10s %-15s %-10s %-8s %-8s %-10s %-10s\n" "$rid" "$lbl" "$tdm" "$tdl" "$lr" "$wr" "$am"
 done
