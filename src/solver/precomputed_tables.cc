@@ -206,6 +206,14 @@ static void build_probability_tables(PrecomputedTables& t) {
 
             t.prob_tables.prob_2rolls[row][threshold] = p2;
             t.prob_tables.prob_3rolls[row][threshold] = p3;
+
+            // --- ADD PRE-COMPOUNDING CALCULATION ---
+            for (int tr = 0; tr <= 78; ++tr) {
+                t.prob_tables.prob_2rolls_compound[row][threshold][tr] = 
+                    (tr == 0) ? 0.0f : static_cast<float>(1.0 - std::pow(1.0 - p2, static_cast<double>(tr)));
+                t.prob_tables.prob_3rolls_compound[row][threshold][tr] = 
+                    (tr == 0) ? 0.0f : static_cast<float>(1.0 - std::pow(1.0 - p3, static_cast<double>(tr)));
+            }
         }
     }
 }

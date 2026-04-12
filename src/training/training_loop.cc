@@ -131,13 +131,15 @@ void TrainingLoop::run(int num_steps) {
 
         // ---------------------------------------------------------------
         // Phase 2: Train if the buffer has enough data.
-        // Always do at least 1 training step per completed game,
-        // with a minimum floor of train_steps_per_collect.
         // ---------------------------------------------------------------
         if (buffer_->size() >= config_.min_buffer_size) {
-            int steps_to_do = (config_.train_steps_per_collect > 0)
-                              ? std::max(config_.train_steps_per_collect, collected)
-                              : collected;
+            
+            // FIX: Accumulate fractional steps based on completed games
+            double ratio = config_.train_steps_per_collect > 0.0 ? config_.train_steps_per_collect : 1.0;
+            pending_train_steps_ += static_cast<double>(collected) * ratio;
+            int steps_to_do = static_cast<int>(pending_train_steps_);
+            pending_train_steps_ -= steps_to_do;
+
             for (int i = 0; i < steps_to_do; ++i) {
                 do_training_step();
                 maybe_swap_model();

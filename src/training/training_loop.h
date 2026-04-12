@@ -83,6 +83,8 @@ private:
 
     std::atomic<bool> stop_flag_{false};
 
+    double pending_train_steps_ = 0.0;
+
     double last_eval_win_rate_ = 0.0;
 
     static constexpr int kMaxCollectBatch = 512;

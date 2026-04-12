@@ -35,6 +35,10 @@ void nn_play_turn(ProYamsNet& model, torch::Device device,
                    std::vector<float>& tensor_buffer,
                    const SolverConfig& config, RNG& rng) {
     while (true) {
+        // --- ADD THESE CACHE RESETS ---
+        buffers.dp_computed = false;
+        buffers.evs_blended = false;
+
         // Step 1: get afterstate requests
         solver_get_requests(state, ctx, tables, buffers);
 

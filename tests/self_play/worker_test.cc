@@ -176,3 +176,42 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
     EXPECT_TRUE(r == 0.0 || r == 0.5 || r == 1.0)
         << "Invalid result: " << r;
 }
+
+TEST(WorkerTest, Caching_PreventsDoubleBlending) {
+    ensure_tables();
+    GameQueue available, pending, completed;
+    std::atomic<bool> shutdown{false};
+
+    auto game = make_game(42);
+    SolverConfig config = greedy_config();
+    config.heuristic_weight = 0.5;
+
+    // Step 1: kNeedRequests sets flags
+    game->phase = GamePhase::kNeedRequests;
+    available.push(game.get());
+    available.push(nullptr);
+    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+    
+    EXPECT_FALSE(game->solver_buffers.dp_computed);
+    EXPECT_FALSE(game->solver_buffers.evs_blended);
+
+    // Step 2: kNeedResolve blends first time
+    game->phase = GamePhase::kNeedResolve;
+    for (int i = 0; i < game->solver_buffers.request_count; ++i) game->solver_buffers.evs[i] = 0.6;
+    available.push(game.get());
+    available.push(nullptr);
+    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+
+    EXPECT_TRUE(game->solver_buffers.evs_blended);
+    double blended_ev = game->solver_buffers.evs[0];
+
+    // Step 3: kNeedResolve again (simulating reroll) should NOT blend again
+    game->phase = GamePhase::kNeedResolve;
+    game->solver_buffers.dp_computed = true; // Pretend we already solved once
+    // If it blends again, the EV will change. If it doesn't, it stays same.
+    available.push(game.get());
+    available.push(nullptr);
+    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+
+    EXPECT_EQ(game->solver_buffers.evs[0], blended_ev) << "EV should not change on second resolve (reroll)";
+}

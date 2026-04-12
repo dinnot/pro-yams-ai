@@ -254,6 +254,10 @@ void mc_play_turn(GameState& state, GameContext& ctx,
         static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
 
     while (true) {
+        // --- ADD THESE CACHE RESETS ---
+        buffers.dp_computed = false;
+        buffers.evs_blended = false;
+        
         using Clock = std::chrono::high_resolution_clock;
         auto decision_start = Clock::now();
         double decision_budget = time_alloc.budget_for_current_decision(

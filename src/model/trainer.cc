@@ -50,31 +50,41 @@ double ModelTrainer::train_step(const float* states, const double* targets,
     // Forward pass
     auto prediction = model_->forward(state_tensor);
 
+    // BCE loss — sigmoid output with binary targets; avoids vanishing gradients
+    // that MSE causes when the sigmoid is saturated.
+    auto loss = torch::binary_cross_entropy(prediction, target_tensor);
+
     if (config_.debug_mode && training_step_ % 1000 == 0) {
         auto pred_cpu = prediction.to(torch::kCPU);
         auto targ_cpu = target_tensor.to(torch::kCPU);
         
+        double sum_win = 0.0, sum_loss = 0.0;
+        int count_win = 0, count_loss = 0;
+        
+        const float* p_ptr = pred_cpu.data_ptr<float>();
+        const float* t_ptr = targ_cpu.data_ptr<float>();
+        
+        for (int i = 0; i < batch_size; ++i) {
+            if (t_ptr[i] > 0.5f) { sum_win += p_ptr[i]; count_win++; }
+            else                 { sum_loss += p_ptr[i]; count_loss++; }
+        }
+        
+        double avg_win = count_win > 0 ? sum_win / count_win : 0.0;
+        double avg_loss = count_loss > 0 ? sum_loss / count_loss : 0.0;
+
+        std::stringstream ss;
+        ss << "\n--- Debug Batch @ Step " << training_step_ << " ---\n"
+           << "BCE Loss:        " << loss.item<double>() << "\n"
+           << "Avg Pred (Win):  " << avg_win << " (" << count_win << " samples)\n"
+           << "Avg Pred (Loss): " << avg_loss << " (" << count_loss << " samples)\n";
+
         if (!config_.debug_log_path.empty()) {
             std::ofstream f(config_.debug_log_path, std::ios::app);
-            if (f.is_open()) {
-                f << "\n--- Debug Batch @ Step " << training_step_ << " ---\n";
-                for (int i = 0; i < std::min(batch_size, 5); ++i) {
-                    f << "Target: " << targ_cpu[i].item<float>() 
-                      << " | Pred: " << pred_cpu[i].item<float>() << "\n";
-                }
-            }
+            if (f.is_open()) f << ss.str();
         } else {
-            std::cout << "\n--- Debug Batch @ Step " << training_step_ << " ---\n";
-            for (int i = 0; i < std::min(batch_size, 5); ++i) {
-                std::cout << "Target: " << targ_cpu[i].item<float>() 
-                          << " | Pred: " << pred_cpu[i].item<float>() << "\n";
-            }
+            std::cout << ss.str();
         }
     }
-
-    // BCE loss — sigmoid output with binary targets; avoids vanishing gradients
-    // that MSE causes when the sigmoid is saturated.
-    auto loss = torch::binary_cross_entropy(prediction, target_tensor);
 
     // Backward + update
     optimizer_->zero_grad();

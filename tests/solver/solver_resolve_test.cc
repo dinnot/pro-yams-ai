@@ -207,3 +207,32 @@ TEST_F(SolverResolveTest, RerollEvaluatesV0NoTurbo) {
     EXPECT_TRUE(result.should_place);
     EXPECT_EQ(result.placement.column, kColTurbo);
 }
+
+TEST_F(SolverResolveTest, RollsLeft0_ProhibitsTurbo) {
+    // When rolls_left == 0, Turbo columns are strictly illegal even if they have high EV.
+    // Crucially, the solver-resolve must handle this even if the request buffer 
+    // was generated when Turbo was still legal (e.g. rolls_left == 2).
+    gs.rolls_left = 2;
+    solver_get_requests(gs, ctx, tables, buffers);
+
+    // Ensure we HAVE a Turbo request in the list.
+    bool has_turbo = false;
+    for (int i = 0; i < buffers.request_count; ++i) {
+        if (buffers.requests[i].placement.column == kColTurbo) {
+            has_turbo = true;
+            buffers.evs[i] = 1000.0; // Excellent EV for Turbo
+        } else {
+            buffers.evs[i] = 0.0;    // Terrible EV for others
+        }
+    }
+    ASSERT_TRUE(has_turbo);
+
+    // Now pretend we are at rolls_left == 0
+    gs.rolls_left = 0;
+    SolverResult result = solver_resolve_greedy(gs, ctx, tables, buffers);
+
+    // Should place, but NOT in Turbo.
+    EXPECT_TRUE(result.should_place);
+    EXPECT_NE(result.placement.column, kColTurbo);
+    EXPECT_EQ(result.expected_value, 0.0); // Should match the best non-Turbo EV
+}

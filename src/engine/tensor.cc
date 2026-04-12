@@ -233,17 +233,14 @@ void generate_tensor(const BoardState& board, const GameContext& ctx,
                 // Clamp threshold to [0, 100] (table range)
                 int thresh = std::min(golden_min, 100);
 
-                // Lookup single-turn probability
-                double p_single = (col == kColTurbo)
-                    ? tables.prob_tables.prob_2rolls[row][thresh]
-                    : tables.prob_tables.prob_3rolls[row][thresh];
+                // --- REPLACE EXPENSIVE POW WITH LOOKUP ---
+                int safe_turns = std::max(0, std::min(78, turns_remaining));
+                
+                float p_compound = (col == kColTurbo)
+                    ? tables.prob_tables.prob_2rolls_compound[row][thresh][safe_turns]
+                    : tables.prob_tables.prob_3rolls_compound[row][thresh][safe_turns];
 
-                // Compound over remaining turns
-                double p_compound = (turns_remaining <= 0)
-                    ? 0.0
-                    : 1.0 - std::pow(1.0 - p_single, static_cast<double>(turns_remaining));
-
-                out[idx++] = static_cast<float>(p_compound);
+                out[idx++] = p_compound;
             }
         }
     }

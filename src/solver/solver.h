@@ -55,6 +55,8 @@ struct SolverBuffers {
 
     double evs[kMaxAfterstateRequests];
     
+    double raw_nn_evs[kMaxAfterstateRequests]; // Saves raw NN outputs for logging
+    bool   evs_blended = false;                // Prevents double-blending heuristic
     bool   dp_computed = false;                // Layer 0 and Layer 1 DP cached flag
 
     // Internal DP tables

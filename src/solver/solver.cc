@@ -189,7 +189,9 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         SolverResult result;
         result.should_place = true;
         result.hold_mask = 0;
-        result.expected_value = buffers.stop_value[current_id];
+        
+        // FIX: Use V0's non-Turbo EV, not stop_value
+        result.expected_value = buffers.v0[current_id]; 
 
         // Apply placement temperature if exploration enabled.
         if (config.exploration_enabled && config.placement_temperature > 0.0) {
@@ -197,8 +199,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
             int   place_idx[kMaxAfterstateRequests];
             int   place_count = 0;
             for (int i = 0; i < buffers.request_count; ++i) {
-                // Use the new helper here as well!
-                if (check_achievable(current_id, i)) {
+                // FIX: Must explicitly exclude Turbo when rolls_left == 0
+                if (check_achievable(current_id, i) && buffers.requests[i].placement.column != kColTurbo) {
                     place_evs[place_count] = buffers.evs[i];
                     place_idx[place_count] = i;
                     ++place_count;
@@ -210,19 +212,19 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
                 int req_i = place_idx[sel];
                 result.placement = buffers.requests[req_i].placement;
                 result.score = buffers.requests[req_i].score;
-                // Keep expected_value as greedy max (not sampled action's value)
-                // so TD bootstrap targets stay off-policy-correct with replay.
                 result.chosen_request_idx = static_cast<int16_t>(req_i);
                 return result;
             }
         }
 
-        int16_t req_idx = buffers.stop_request_idx[current_id];
+        // FIX: Use best_request_idx (which ignores Turbo), NOT stop_request_idx!
+        int16_t req_idx = buffers.best_request_idx[current_id];
         if (req_idx >= 0) {
             result.placement = buffers.requests[req_idx].placement;
             result.score = buffers.requests[req_idx].score;
             result.chosen_request_idx = req_idx;
         } else {
+            // Failsafe scratch
             result.placement = buffers.requests[0].placement;
             result.score = 0;
             result.chosen_request_idx = 0;

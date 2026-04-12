@@ -21,7 +21,7 @@ struct TrainingConfig {
     int replay_capacity       = 2'000'000; // Maximum samples stored
     int min_buffer_size       = 10'000;    // Don't train until buffer reaches this size
     int train_batch_size      = 512;       // Samples per gradient step
-    int train_steps_per_collect = 0;       // Gradient steps per collection tick (0 = 1:1 with completed games)
+    double train_steps_per_collect = 0.5; // E.g., 0.5 means 1 step per 2 games
 
     // --- Model swap and checkpointing ---
     int model_swap_interval   = 100;  // Training steps between inference model updates

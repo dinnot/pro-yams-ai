@@ -28,6 +28,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // Step 1: generate afterstate requests.
             // -----------------------------------------------------------
             game->solver_buffers.dp_computed = false;
+            game->solver_buffers.evs_blended = false;
             solver_get_requests(game->state, game->ctx, tables,
                                 game->solver_buffers);
 
@@ -80,10 +81,14 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             pending.push(game);
 
         } else if (game->phase == GamePhase::kNeedResolve) {
-            // -----------------------------------------------------------
-            // Step 3: solver resolution with pre-populated EVs.
-            // -----------------------------------------------------------
-            if (config.heuristic_weight > 0.0) {
+            // Capture if this is the first resolve of the turn BEFORE we run solver_resolve
+            bool is_first_resolve = !game->solver_buffers.dp_computed;
+
+            if (config.heuristic_weight > 0.0 && !game->solver_buffers.evs_blended) {
+                // Save raw NN EVs for debugging
+                std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs, 
+                            game->solver_buffers.request_count * sizeof(double));
+
                 double heuristic_evs[GameInstance::kMaxAfterstates];
                 heuristic_evaluate(game->state.board, game->ctx,
                                    game->solver_buffers.requests,
@@ -97,13 +102,11 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {
                     heuristic_evs[i] = std::max(0.0, std::min(1.0, heuristic_evs[i] / 1800.0));
-                }
-
-                for (int i = 0; i < n; i++) {
                     game->solver_buffers.evs[i] =
-                        (1.0 - config.heuristic_weight) * game->solver_buffers.evs[i] +
+                        (1.0 - config.heuristic_weight) * game->solver_buffers.raw_nn_evs[i] +
                         config.heuristic_weight * heuristic_evs[i];
                 }
+                game->solver_buffers.evs_blended = true; // Mark as blended!
             }
 
             SolverResult result = solver_resolve(game->state, game->ctx, tables,
@@ -166,7 +169,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             }
 
             // Capture the pure optimal EV at the very first decision point of the turn.
-            if (game->state.rolls_left == 2) {
+            if (is_first_resolve) {
                 game->current_turn_start_ev = result.expected_value;
             }
 

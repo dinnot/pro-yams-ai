@@ -87,7 +87,7 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
             config.training.td_mode = parse_td_mode(argv[++i]);
         }
         else if (arg == "--batch_size" && i + 1 < argc) config.training.train_batch_size = std::stoi(argv[++i]);
-        else if (arg == "--train_steps_per_collect" && i + 1 < argc) config.training.train_steps_per_collect = std::stoi(argv[++i]);
+        else if (arg == "--train_steps_per_collect" && i + 1 < argc) config.training.train_steps_per_collect = std::stod(argv[++i]);
         else if (arg == "--replay_buffer_size" && i + 1 < argc) config.training.replay_capacity = std::stoi(argv[++i]);
         else if (arg == "--placement_temperature" && i + 1 < argc) config.training.initial_temperature = std::stod(argv[++i]);
         else if (arg == "--num_workers" && i + 1 < argc) config.training.self_play.num_workers = std::stoi(argv[++i]);
