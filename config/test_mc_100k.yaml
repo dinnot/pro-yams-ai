@@ -23,6 +23,9 @@ training:
   log_dir: ./logs/test_mc_100k
   log_path: ./logs/test_mc_100k/training_log.csv
 
+  initial_heuristic_weight: 1.0
+  heuristic_decay_steps: 50000
+
   self_play:
     max_inference_batch: 4096
     min_games_per_batch: 2

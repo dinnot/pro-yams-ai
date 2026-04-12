@@ -65,7 +65,7 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
         int num_entries    = 0;
         int total_tensors  = 0;
 
-        auto t_assembly_start = Clock::now();
+        auto t_assembly_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
         // ----------------------------------------------------------------
         // Phase 1: assemble a batch of up to min_games_per_batch games.
@@ -131,7 +131,7 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
 
         if (total_tensors == 0) continue;
 
-        auto t_inference_start = Clock::now();
+        auto t_inference_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
         // ----------------------------------------------------------------
         // Phase 3: GPU inference.
@@ -139,7 +139,7 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
         inference.batch_inference(batch_tensors.data(), total_tensors,
                                   batch_results.data());
 
-        auto t_distribute_start = Clock::now();
+        auto t_distribute_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
         // ----------------------------------------------------------------
         // Phase 4: distribute EVs back to each game and release to workers.
@@ -159,47 +159,48 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
                                  static_cast<int>(resolved_games.size()));
         }
 
-        auto t_end = Clock::now();
+        // --- Accumulate timing and log ---
+        if (config.debug_mode) {
+            auto t_end = Clock::now();
+            accum_assembly_us += std::chrono::duration<double, std::micro>(
+                t_inference_start - t_assembly_start).count();
+            accum_inference_us += std::chrono::duration<double, std::micro>(
+                t_distribute_start - t_inference_start).count();
+            accum_distribute_us += std::chrono::duration<double, std::micro>(
+                t_end - t_distribute_start).count();
+            accum_tensors += total_tensors;
+            accum_games += num_entries;
+            ++loop_count;
 
-        // --- Accumulate timing ---
-        accum_assembly_us += std::chrono::duration<double, std::micro>(
-            t_inference_start - t_assembly_start).count();
-        accum_inference_us += std::chrono::duration<double, std::micro>(
-            t_distribute_start - t_inference_start).count();
-        accum_distribute_us += std::chrono::duration<double, std::micro>(
-            t_end - t_distribute_start).count();
-        accum_tensors += total_tensors;
-        accum_games += num_entries;
-        ++loop_count;
+            if (loop_count % 1000 == 0) {
+                double total_us = accum_assembly_us + accum_inference_us + accum_distribute_us;
+                
+                std::stringstream ss;
+                ss << "[Coordinator " << coordinator_id << " @ iter " << loop_count << "] "
+                   << "Assembly: " << static_cast<int>(accum_assembly_us) << " µs ("
+                   << static_cast<int>(100.0 * accum_assembly_us / total_us) << "%) | "
+                   << "Inference: " << static_cast<int>(accum_inference_us) << " µs ("
+                   << static_cast<int>(100.0 * accum_inference_us / total_us) << "%) | "
+                   << "Distribute: " << static_cast<int>(accum_distribute_us) << " µs ("
+                   << static_cast<int>(100.0 * accum_distribute_us / total_us) << "%) | "
+                   << "Tensors: " << accum_tensors << " Games: " << accum_games
+                   << " AvgBatch: " << (accum_tensors / 1000) << "\n";
 
-        if (loop_count % 1000 == 0) {
-            double total_us = accum_assembly_us + accum_inference_us + accum_distribute_us;
-            
-            std::stringstream ss;
-            ss << "[Coordinator " << coordinator_id << " @ iter " << loop_count << "] "
-               << "Assembly: " << static_cast<int>(accum_assembly_us) << " µs ("
-               << static_cast<int>(100.0 * accum_assembly_us / total_us) << "%) | "
-               << "Inference: " << static_cast<int>(accum_inference_us) << " µs ("
-               << static_cast<int>(100.0 * accum_inference_us / total_us) << "%) | "
-               << "Distribute: " << static_cast<int>(accum_distribute_us) << " µs ("
-               << static_cast<int>(100.0 * accum_distribute_us / total_us) << "%) | "
-               << "Tensors: " << accum_tensors << " Games: " << accum_games
-               << " AvgBatch: " << (accum_tensors / 1000) << "\n";
-
-            if (config.debug_mode && !config.debug_log_path.empty()) {
-                std::ofstream f(config.debug_log_path, std::ios::app);
-                if (f.is_open()) {
-                    f << ss.str();
+                if (!config.debug_log_path.empty()) {
+                    std::ofstream f(config.debug_log_path, std::ios::app);
+                    if (f.is_open()) {
+                        f << ss.str();
+                    }
+                } else {
+                    std::cerr << ss.str();
                 }
-            } else {
-                std::cerr << ss.str();
-            }
 
-            accum_assembly_us = 0.0;
-            accum_inference_us = 0.0;
-            accum_distribute_us = 0.0;
-            accum_tensors = 0;
-            accum_games = 0;
+                accum_assembly_us = 0.0;
+                accum_inference_us = 0.0;
+                accum_distribute_us = 0.0;
+                accum_tensors = 0;
+                accum_games = 0;
+            }
         }
     }
 }
