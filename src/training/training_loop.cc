@@ -131,12 +131,12 @@ void TrainingLoop::run(int num_steps) {
 
         // ---------------------------------------------------------------
         // Phase 2: Train if the buffer has enough data.
-        // train_steps_per_collect > 0: fixed number of steps per tick
-        // train_steps_per_collect = 0: legacy 1:1 with completed games
+        // Always do at least 1 training step per completed game,
+        // with a minimum floor of train_steps_per_collect.
         // ---------------------------------------------------------------
         if (buffer_->size() >= config_.min_buffer_size) {
             int steps_to_do = (config_.train_steps_per_collect > 0)
-                              ? config_.train_steps_per_collect
+                              ? std::max(config_.train_steps_per_collect, collected)
                               : collected;
             for (int i = 0; i < steps_to_do; ++i) {
                 do_training_step();

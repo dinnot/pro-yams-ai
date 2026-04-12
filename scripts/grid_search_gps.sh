@@ -15,7 +15,7 @@
 # Pass a start_run number to resume from a specific run (1-indexed).
 # =============================================================================
 
-set -euo pipefail
+set -uo pipefail
 
 BINARY="./build/pro_yams_ai"
 BASE_LOG_DIR="./logs"
@@ -30,7 +30,7 @@ NUM_STEPS=2000
 REPLAY_CAPACITY=500000
 MIN_BUFFER_SIZE=5000
 MODEL_SWAP_INTERVAL=99999
-CHECKPOINT_INTERVAL=99999
+CHECKPOINT_INTERVAL=2000       # Must match NUM_STEPS so training_log.csv gets written
 MAX_CHECKPOINTS=1
 TD_MODE="mc"
 TD_LAMBDA=0.8
@@ -132,6 +132,34 @@ CONFIGS=(
     "512  16 4096  2 20 2 2048  P5_512_x16"
     "1024  8 4096  2 20 2 2048  P5_1k_x8"
     "256  16 4096  2 20 2 2048  P5_256_x16"
+
+    # ── Phase 6: Refinement around 24-worker sweet spot ───────────────────
+    # Round 1 showed 24w+2c = 58.4 GPS and tbs=4096 = 55.3 GPS
+    # These configs test their combination and nearby variations
+
+    # The recommended combo (never tested directly!)
+    "4096  2 4096  2 24 2 2048  R2_24w_tbs4k"
+    "4096  4 4096  2 24 2 2048  R2_24w_tbs4k_t4"
+
+    # 24w: does 1 coordinator suffice? (it beat 2c at 20w)
+    "4096  2 4096  2 24 1 2048  R2_24w_1c"
+    "4096  2 4096  2 24 3 2048  R2_24w_3c"
+
+    # 24w: game pool sizing (512 was great with 20w)
+    "4096  2 4096  2 24 2  512  R2_24w_512g"
+    "4096  2 4096  2 24 2 1024  R2_24w_1kg"
+    "4096  2 4096  2 24 2 4096  R2_24w_4kg"
+
+    # 24w: inference batch sizing
+    "4096  2 8192  2 24 2 2048  R2_24w_mib8k"
+
+    # 22 vs 24 vs 26 workers (find the exact cliff)
+    "4096  2 4096  2 22 2 2048  R2_22w"
+    "4096  2 4096  2 26 2 2048  R2_26w"
+
+    # tspc sweep at 24w (does training cadence matter more with faster pipeline?)
+    "4096  1 4096  2 24 2 2048  R2_24w_tspc1"
+    "4096  8 4096  2 24 2 2048  R2_24w_tspc8"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,7 +270,7 @@ for (( i=0; i<total; i++ )); do
 
     start_time=$(date +%s)
 
-    if "${BINARY}" --mode train --config "${run_dir}/config.yaml" 2>"${run_dir}/stderr.log"; then
+    if "${BINARY}" --mode train --debug_mode 1 --config "${run_dir}/config.yaml" 2>"${run_dir}/stderr.log"; then
         end_time=$(date +%s)
         elapsed=$(( end_time - start_time ))
         gps=$(extract_gps "${run_dir}/training_log.csv")
@@ -272,7 +300,7 @@ echo ""
 printf "%-10s %-18s %5s %5s %6s %4s %3s %3s %5s %8s\n" \
        "RUN" "LABEL" "TBS" "TSPC" "MIB" "MGPB" "NW" "NC" "NG" "GPS"
 echo "───────────────────────────────────────────────────────────────────────────────"
-tail -n +2 "$SUMMARY_FILE" | grep -v "FAILED" | sort -t',' -k10 -rn | while IFS=',' read -r rid lbl tbs tspc mib mgpb nw nc ng gps gp; do
+tail -n +2 "$SUMMARY_FILE" | (grep -v "FAILED" || true) | sort -t',' -k10 -rn | while IFS=',' read -r rid lbl tbs tspc mib mgpb nw nc ng gps gp; do
     printf "%-10s %-18s %5s %5s %6s %4s %3s %3s %5s %8s\n" \
            "$rid" "$lbl" "$tbs" "$tspc" "$mib" "$mgpb" "$nw" "$nc" "$ng" "$gps"
 done
