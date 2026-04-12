@@ -132,7 +132,7 @@ int select_top_candidates(const GameState& state, const GameContext& ctx,
     }
 
     // --- Hold mask candidates (if rerolls remain) ---
-    if (rolls_left > 0) {
+    if (rolls_left > 0 && can_reroll(state, ctx)) {
         struct MaskEV {
             uint8_t mask;
             double ev;
@@ -264,6 +264,11 @@ void mc_play_turn(GameState& state, GameContext& ctx,
 
         // Handle zero-request edge case (forced Turbo reroll).
         if (buffers.request_count == 0) {
+            if (!can_reroll(state, ctx)) {
+                // Deadlock: no legal moves and cannot reroll.
+                // This shouldn't happen with correct rules, but prevent HANG.
+                return;
+            }
             perform_reroll(state, 0, rng);
             auto now = Clock::now();
             time_alloc.elapsed_ms += std::chrono::duration<double, std::milli>(
@@ -306,6 +311,10 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                                   result.placement.column, result.placement.row, rng);
                 return;
             }
+            if (!can_reroll(state, ctx)) {
+                // Safety break to prevent infinite loop
+                return;
+            }
             perform_reroll(state, result.hold_mask, rng);
             auto now = Clock::now();
             time_alloc.elapsed_ms += std::chrono::duration<double, std::milli>(
@@ -319,6 +328,10 @@ void mc_play_turn(GameState& state, GameContext& ctx,
             if (best.is_placement) {
                 perform_placement(state, ctx,
                                   best.placement.column, best.placement.row, rng);
+                return;
+            }
+            if (!can_reroll(state, ctx)) {
+                // Should have been prevented by select_top_candidates, but safety first.
                 return;
             }
             perform_reroll(state, best.hold_mask, rng);

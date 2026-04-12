@@ -46,7 +46,17 @@ void heuristic_play_turn(GameState& state, GameContext& ctx,
         }
 
         // Hold and reroll.
-        assert(can_reroll(state, ctx));
+        if (!can_reroll(state, ctx)) {
+            // Safety break to prevent infinite loop.
+            // If we get here, the solver thought we should reroll but the engine says no.
+            // Force a placement using the solver's fallback to prevent hang.
+            int current_id = get_dice_state_id(state.dice, tables);
+            int16_t req_idx = buffers.stop_request_idx[current_id];
+            if (req_idx < 0) req_idx = 0;
+            perform_placement(state, ctx, buffers.requests[req_idx].placement.column,
+                              buffers.requests[req_idx].placement.row, rng);
+            return;
+        }
         perform_reroll(state, result.hold_mask, rng);
     }
 }

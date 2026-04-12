@@ -51,7 +51,7 @@ bool can_reroll(const GameState& gs, const GameContext& ctx) {
 
 const LegalPlacementCache& get_legal_placements(const GameState& gs, const GameContext& ctx) {
     int p = gs.board.current_player;
-    if (gs.rolls_left > 0)
+    if (gs.rolls_left > 0 || ctx.legal_no_turbo[p].count == 0)
         return ctx.legal_all[p];
     return ctx.legal_no_turbo[p];
 }

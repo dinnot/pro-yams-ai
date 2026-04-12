@@ -19,9 +19,9 @@ training:
   eval_interval: 10000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/ab_control_sprint
-  log_dir: ./logs/ab_control_sprint
-  log_path: ./logs/ab_control_sprint/training_log.csv
+  checkpoint_dir: checkpoints/ab_control_sprint2
+  log_dir: ./logs/ab_control_sprint2
+  log_path: ./logs/ab_control_sprint2/training_log.csv
 
   self_play:
     max_inference_batch: 4096
@@ -31,7 +31,7 @@ training:
     num_games: 2048
     num_coordinators: 2
     debug_mode: true
-    debug_log_path: "./logs/ab_control_sprint/debug_coordinator.log"
+    debug_log_path: "./logs/ab_control_sprint2/debug_coordinator.log"
 
   model:
     input_size: 809
@@ -39,4 +39,4 @@ training:
     hidden_width: 256
     learning_rate: 0.0005
     debug_mode: true
-    debug_log_path: "./logs/ab_control_sprint/debug_batch.log"
+    debug_log_path: "./logs/ab_control_sprint2/debug_batch.log"
