@@ -6,7 +6,7 @@ training:
   train_batch_size: 8192
   train_steps_per_collect: 0.125
   model_swap_interval: 10
-  checkpoint_interval: 1000
+  checkpoint_interval: 2000
   max_checkpoints: 2
 
   td_mode: mc
