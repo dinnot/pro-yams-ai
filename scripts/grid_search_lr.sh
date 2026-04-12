@@ -3,7 +3,7 @@
 # Pro Yams AI — Learning Rate & TD Mode Sweep
 #
 # Investigates selected configurations of TD modes and learning rates.
-# Format: "td_mode td_lambda lr tbs label"
+# Format: "td_mode td_lambda lr tbs replay_cap min_buffer label"
 # =============================================================================
 
 set -uo pipefail
@@ -15,8 +15,6 @@ START_RUN="${1:-1}"
 
 # --- FIXED PARAMETERS (from ab_control_sprint.yaml or user request) ---
 NUM_STEPS=6000
-REPLAY_CAPACITY=1000000
-MIN_BUFFER_SIZE=200000
 TRAIN_STEPS_PER_COLLECT=0.125
 MODEL_SWAP_INTERVAL=10
 CHECKPOINT_INTERVAL=2000
@@ -40,11 +38,17 @@ NC=2
 # ─────────────────────────────────────────────────────────────────────────────
 
 CONFIGS=(
-    # Mode     Lambda   LR        Batch   Label
-    "mc        0.8      0.00001   4096    mc_lr1e-5"
-    "td0       0.8      0.00001   4096    td0_lr1e-5"
-    "tdlambda  0.8      0.00001   4096    tdl0.8_lr1e-5"
-    "tdlambda  0.95     0.00001   4096    tdl0.95_lr1e-5"
+    # Mode     Lambda   LR        Batch   Cap      MinBuf  Label
+    "mc        0.8      0.00001    4096    1000000  200000  mc_lr1e-5"
+    "td0       0.8      0.00001    4096    50000    20000   td0_lr1e-5"
+    "tdlambda  0.8      0.00001    4096    50000    20000   tdl0.8_lr1e-5"
+    "tdlambda  0.95     0.00001    4096    50000    20000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.00001    4096    30000    10000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.00001    4096    70000    30000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.00002    4096    50000    20000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.000005   4096    50000    20000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.00004    4096    50000    20000   tdl0.95_lr1e-5"
+    "tdlambda  0.95     0.00008    4096    50000    20000   tdl0.95_lr1e-5"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,13 +61,15 @@ generate_config() {
     local td_lambda="$3"
     local lr="$4"
     local tbs="$5"
+    local replay_cap="$6"
+    local min_buf="$7"
 
     cat > "${run_dir}/config.yaml" <<EOF
 num_steps: ${NUM_STEPS}
 
 training:
-  replay_capacity: ${REPLAY_CAPACITY}
-  min_buffer_size: ${MIN_BUFFER_SIZE}
+  replay_capacity: ${replay_cap}
+  min_buffer_size: ${min_buf}
   train_batch_size: ${tbs}
   train_steps_per_collect: ${TRAIN_STEPS_PER_COLLECT}
   model_swap_interval: ${MODEL_SWAP_INTERVAL}
@@ -148,7 +154,7 @@ mkdir -p "${BASE_LOG_DIR}"
 
 # Header for summary
 if [[ "$START_RUN" -le 1 ]]; then
-    echo "run_id,label,td_mode,td_lambda,lr,batch_size,win_rate,avg_margin,loss" > "$SUMMARY_FILE"
+    echo "run_id,label,td_mode,td_lambda,lr,batch_size,replay_cap,min_buffer,win_rate,avg_margin,loss" > "$SUMMARY_FILE"
 fi
 
 total_configs=${#CONFIGS[@]}
@@ -160,7 +166,7 @@ for (( i=0; i<total_configs; i++ )); do
         continue
     fi
 
-    read -r td_mode td_lambda lr tbs label <<< "${CONFIGS[$i]}"
+    read -r td_mode td_lambda lr tbs cap mib label <<< "${CONFIGS[$i]}"
     
     run_id="run_$(printf '%02d' $run_num)"
     run_dir="${BASE_LOG_DIR}/${run_id}"
@@ -168,10 +174,10 @@ for (( i=0; i<total_configs; i++ )); do
 
     echo "────────────────────────────────────────────────────────────"
     echo "[${run_num}/${total_configs}] ${run_id}: ${label}"
-    echo "  ${td_mode}(λ=${td_lambda}) LR=${lr} BS=${tbs}"
+    echo "  ${td_mode}(λ=${td_lambda}) LR=${lr} BS=${tbs} CAP=${cap} MIB=${mib}"
     echo "────────────────────────────────────────────────────────────"
 
-    generate_config "$run_dir" "$td_mode" "$td_lambda" "$lr" "$tbs"
+    generate_config "$run_dir" "$td_mode" "$td_lambda" "$lr" "$tbs" "$cap" "$mib"
 
     start_time=$(date +%s)
     if "${BINARY}" --mode train --debug_mode 1 --config "${run_dir}/config.yaml" 2>"${run_dir}/stderr.log"; then
@@ -183,12 +189,12 @@ for (( i=0; i<total_configs; i++ )); do
         loss=$(extract_loss "${run_dir}/training_log.csv")
         
         echo "  ✓ Win Rate: ${wr}  Margin: ${am}  Loss: ${loss}  Time: ${elapsed}s"
-        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},${wr},${am},${loss}" >> "$SUMMARY_FILE"
+        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},${cap},${mib},${wr},${am},${loss}" >> "$SUMMARY_FILE"
     else
         end_time=$(date +%s)
         elapsed=$(( end_time - start_time ))
         echo "  ✗ FAILED after ${elapsed}s. Check ${run_dir}/stderr.log"
-        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},FAILED,FAILED,FAILED" >> "$SUMMARY_FILE"
+        echo "${run_id},${label},${td_mode},${td_lambda},${lr},${tbs},${cap},${mib},FAILED,FAILED,FAILED" >> "$SUMMARY_FILE"
     fi
     echo ""
 done
@@ -200,6 +206,6 @@ echo ""
 echo "Top 10 by Win Rate:"
 printf "%-10s %-15s %-10s %-8s %-8s %-10s %-10s\n" "RUN" "LABEL" "MODE" "LAMBDA" "LR" "WIN_RATE" "MARGIN"
 echo "────────────────────────────────────────────────────────────────────────────────────────────────"
-tail -n +2 "$SUMMARY_FILE" | grep -v "FAILED" | sort -t',' -k7 -rn | head -n 10 | while IFS=',' read -r rid lbl tdm tdl lr bs wr am ls; do
+tail -n +2 "$SUMMARY_FILE" | grep -v "FAILED" | sort -t',' -k9 -rn | head -n 10 | while IFS=',' read -r rid lbl tdm tdl lr bs cap mib wr am ls; do
     printf "%-10s %-15s %-10s %-8s %-8s %-10s %-10s\n" "$rid" "$lbl" "$tdm" "$tdl" "$lr" "$wr" "$am"
 done
