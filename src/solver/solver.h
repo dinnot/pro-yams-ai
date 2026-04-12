@@ -47,13 +47,15 @@ struct SolverConfig {
 // SolverBuffers — pre-allocated working storage, one instance per game thread.
 // Reused across all solver calls to avoid per-call heap allocation.
 // ---------------------------------------------------------------------------
-constexpr int kMaxAfterstateRequests = 4096;
+constexpr int kMaxAfterstateRequests = 512;
 
 struct SolverBuffers {
     AfterstateRequest requests[kMaxAfterstateRequests];
     int               request_count;
 
     double evs[kMaxAfterstateRequests];
+    
+    bool   dp_computed = false;                // Layer 0 and Layer 1 DP cached flag
 
     // Internal DP tables
     double   v0[kNumDiceStates];               // Layer 0: no rerolls left

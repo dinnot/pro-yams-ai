@@ -27,6 +27,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // -----------------------------------------------------------
             // Step 1: generate afterstate requests.
             // -----------------------------------------------------------
+            game->solver_buffers.dp_computed = false;
             solver_get_requests(game->state, game->ctx, tables,
                                 game->solver_buffers);
 
@@ -203,8 +204,10 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
 
             } else {
                 // Hold and reroll — same player's turn continues.
+                // Because tensors only depend on board state (which hasn't changed),
+                // we skip tensor generation/inference entirely for the rest of the turn!
                 perform_reroll(game->state, result.hold_mask, game->rng);
-                game->phase = GamePhase::kNeedRequests;
+                game->phase = GamePhase::kNeedResolve;
                 available.push(game);
             }
         }

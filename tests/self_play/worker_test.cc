@@ -119,6 +119,7 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
 
     while (game->phase != GamePhase::kCompleted && iterations < kMaxIter) {
         if (game->phase == GamePhase::kNeedRequests) {
+            game->solver_buffers.dp_computed = false;
             solver_get_requests(game->state, game->ctx, *g_tables,
                                 game->solver_buffers);
             ASSERT_LE(game->solver_buffers.request_count,
@@ -162,7 +163,7 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
                 }
             } else {
                 perform_reroll(game->state, res.hold_mask, game->rng);
-                game->phase = GamePhase::kNeedRequests;
+                game->phase = GamePhase::kNeedResolve;
             }
         }
         ++iterations;

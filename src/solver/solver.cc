@@ -154,7 +154,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
     // -----------------------------------------------------------------------
     // Build V0: for each dice state, find the best placement given buffers.evs.
     // -----------------------------------------------------------------------
-    for (int sid = 0; sid < kNumDiceStates; ++sid) {
+    if (!buffers.dp_computed) {
+        for (int sid = 0; sid < kNumDiceStates; ++sid) {
         double best_ev_stop = -std::numeric_limits<double>::infinity();
         double best_ev_no_turbo = -std::numeric_limits<double>::infinity();
         int16_t best_req_stop = -1;
@@ -179,6 +180,7 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         buffers.best_request_idx[sid] = best_req_no_turbo;
         buffers.stop_value[sid] = best_ev_stop;
         buffers.stop_request_idx[sid] = best_req_stop;
+        }
     }
 
     // Short-circuit: if no rerolls remain, return the best placement for current dice.
@@ -231,7 +233,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
     // -----------------------------------------------------------------------
     // Build V1: for each dice state, best hold mask vs stopping.
     // -----------------------------------------------------------------------
-    for (int sid = 0; sid < kNumDiceStates; ++sid) {
+    if (!buffers.dp_computed) {
+        for (int sid = 0; sid < kNumDiceStates; ++sid) {
         double best_ev = buffers.stop_value[sid];  // stop value (includes Turbo)
         int16_t best_mask = -1;                    // -1 = stop
 
@@ -251,6 +254,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         }
         buffers.v1[sid] = best_ev;
         buffers.best_mask_v1[sid] = best_mask;
+        }
+        buffers.dp_computed = true;
     }
 
     int current_id = get_dice_state_id(state.dice, tables);

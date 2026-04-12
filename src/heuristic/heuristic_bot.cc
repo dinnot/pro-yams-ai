@@ -25,16 +25,18 @@ void heuristic_evaluate(const BoardState& board, const GameContext& /*ctx*/,
 void heuristic_play_turn(GameState& state, GameContext& ctx,
                          const PrecomputedTables& tables,
                          SolverBuffers& buffers, RNG& rng) {
+    buffers.dp_computed = false;
+
+    // Step 1: get afterstate requests (static for the turn).
+    solver_get_requests(state, ctx, tables, buffers);
+    assert(buffers.request_count > 0);
+
+    // Step 2: evaluate with heuristic (static for the turn).
+    heuristic_evaluate(state.board, ctx,
+                       buffers.requests, buffers.request_count, buffers.evs);
+
     while (true) {
-        // Step 1: get afterstate requests.
-        solver_get_requests(state, ctx, tables, buffers);
-        assert(buffers.request_count > 0);
-
-        // Step 2: evaluate with heuristic.
-        heuristic_evaluate(state.board, ctx,
-                           buffers.requests, buffers.request_count, buffers.evs);
-
-        // Step 3: resolve best action (greedy — no exploration in heuristic mode).
+        // Step 3: resolve best action (uses cached DP tables on rerolls).
         SolverResult result = solver_resolve_greedy(state, ctx, tables, buffers);
 
         if (result.should_place) {
