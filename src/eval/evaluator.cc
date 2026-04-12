@@ -34,46 +34,46 @@ void nn_play_turn(ProYamsNet& model, torch::Device device,
                    SolverBuffers& buffers,
                    std::vector<float>& tensor_buffer,
                    const SolverConfig& config, RNG& rng) {
-    while (true) {
-        // --- ADD THESE CACHE RESETS ---
-        buffers.dp_computed = false;
-        buffers.evs_blended = false;
+                   
+    buffers.dp_computed = false;
+    buffers.evs_blended = false;
+    
+    // Step 1: get afterstate requests ONCE per turn
+    solver_get_requests(state, ctx, tables, buffers);
 
-        // Step 1: get afterstate requests
-        solver_get_requests(state, ctx, tables, buffers);
-
-        // Handle zero-request edge case (e.g. only Turbo cells remain).
-        if (buffers.request_count == 0) {
-            if (!can_reroll(state, ctx)) {
-                // Deadlock safety break.
-                return;
-            }
+    if (buffers.request_count == 0) {
+        while (can_reroll(state, ctx)) {
             perform_reroll(state, 0, rng);
-            continue;
         }
-
-        // Step 2: generate tensors for all requests
-        generate_tensor_batch(state.board, ctx,
-                              static_cast<int>(state.board.current_player),
-                              buffers.requests, buffers.request_count,
-                              tables, tensor_buffer.data());
-
-        // Step 3: synchronous NN inference
-        {
-            torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(
-                tensor_buffer.data(),
-                {buffers.request_count, kTensorSize},
-                torch::kFloat32
-            ).to(device);
-            auto output = model.forward(input).to(torch::kCPU).contiguous();
-            const float* ptr = output.data_ptr<float>();
-            for (int i = 0; i < buffers.request_count; ++i) {
-                buffers.evs[i] = static_cast<double>(ptr[i]);
-            }
+        auto& all = ctx.legal_all[state.board.current_player];
+        if (all.count > 0) {
+            perform_placement(state, ctx, all.placements[0].column, all.placements[0].row, rng);
         }
+        return; 
+    }
 
-        // Step 4: resolve
+    // Step 2: generate tensors and infer ONCE per turn
+    generate_tensor_batch(state.board, ctx,
+                          static_cast<int>(state.board.current_player),
+                          buffers.requests, buffers.request_count,
+                          tables, tensor_buffer.data());
+
+    {
+        torch::NoGradGuard no_grad;
+        auto input = torch::from_blob(
+            tensor_buffer.data(),
+            {buffers.request_count, kTensorSize},
+            torch::kFloat32
+        ).to(device);
+        auto output = model.forward(input).to(torch::kCPU).contiguous();
+        const float* ptr = output.data_ptr<float>();
+        for (int i = 0; i < buffers.request_count; ++i) {
+            buffers.evs[i] = static_cast<double>(ptr[i]);
+        }
+    }
+
+    // Step 3: resolve in a loop
+    while (true) {
         SolverResult result = solver_resolve(state, ctx, tables, buffers,
                                               config, rng);
 
@@ -84,7 +84,6 @@ void nn_play_turn(ProYamsNet& model, torch::Device device,
         } else {
             if (!can_reroll(state, ctx)) {
                 // Safety break to prevent infinite loop.
-                // Fallback to greedy placement to avoid hang.
                 int current_id = get_dice_state_id(state.dice, tables);
                 int16_t req_idx = buffers.stop_request_idx[current_id];
                 if (req_idx < 0) req_idx = 0;
@@ -93,7 +92,6 @@ void nn_play_turn(ProYamsNet& model, torch::Device device,
                 return;
             }
             perform_reroll(state, result.hold_mask, rng);
-            // Loop: new dice, re-evaluate
         }
     }
 }

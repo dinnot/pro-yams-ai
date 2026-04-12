@@ -94,29 +94,41 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
     record.player = static_cast<int>(session.state.board.current_player);
     std::memcpy(record.initial_dice, session.state.dice, sizeof(session.state.dice));
 
-    while (true) {
-        solver_get_requests(session.state, session.ctx, tables_,
-                            session.buffers);
+    // --- CLEAR CACHES AND GET REQUESTS ONCE PER TURN ---
+    session.buffers.dp_computed = false;
+    session.buffers.evs_blended = false;
+    solver_get_requests(session.state, session.ctx, tables_, session.buffers);
 
-        // Handle Turbo-only / zero-request edge case.
-        if (session.buffers.request_count == 0) {
+    // Handle Turbo-only edge case
+    if (session.buffers.request_count == 0) {
+        while (can_reroll(session.state, session.ctx)) {
             perform_reroll(session.state, 0, session.rng);
             std::array<int8_t, kNumDice> after;
             std::memcpy(after.data(), session.state.dice, sizeof(session.state.dice));
             record.hold_masks.push_back(0);
             record.dice_after_hold.push_back(after);
             record.is_forced_reroll = true;
-            continue;
         }
+        auto& all = session.ctx.legal_all[session.state.board.current_player];
+        if (all.count > 0) {
+            record.placement = all.placements[0];
+            record.score = 0;
+            perform_placement(session.state, session.ctx,
+                              record.placement.column, record.placement.row, session.rng);
+        }
+        session.history.push_back(std::move(record));
+        return;
+    }
 
-        heuristic_evaluate(session.state.board, session.ctx,
-                           session.buffers.requests,
-                           session.buffers.request_count,
-                           session.buffers.evs);
+    // Evaluate ONCE
+    heuristic_evaluate(session.state.board, session.ctx,
+                       session.buffers.requests,
+                       session.buffers.request_count,
+                       session.buffers.evs);
 
-        SolverResult result = solver_resolve_greedy(session.state, session.ctx,
-                                                     tables_,
-                                                     session.buffers);
+    // Loop only to resolve and reroll dice
+    while (true) {
+        SolverResult result = solver_resolve_greedy(session.state, session.ctx, tables_, session.buffers);
 
         if (result.should_place) {
             if (session.debug_mode) {
@@ -128,8 +140,7 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
                                     static_cast<float>(session.buffers.evs[i])});
                 }
                 std::sort(pevs.begin(), pevs.end(),
-                          [](const auto& a, const auto& b) {
-                              return a.eval_value > b.eval_value; });
+                          [](const auto& a, const auto& b) { return a.eval_value > b.eval_value; });
                 record.placement_evals = std::move(pevs);
             }
             record.placement = result.placement;
@@ -140,7 +151,6 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
         }
 
         if (session.debug_mode) {
-            // mask_evs[0..kNumHoldMasks-1] were filled by solver_resolve_greedy.
             std::vector<GameSession::HoldCandidateEval> hevs;
             hevs.reserve(kNumHoldMasks);
             for (int mask = 0; mask < kNumHoldMasks; ++mask) {
@@ -148,8 +158,7 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
                                 static_cast<float>(session.buffers.mask_evs[mask])});
             }
             std::sort(hevs.begin(), hevs.end(),
-                      [](const auto& a, const auto& b) {
-                          return a.expected_value > b.expected_value; });
+                      [](const auto& a, const auto& b) { return a.expected_value > b.expected_value; });
             record.hold_evals.push_back(std::move(hevs));
         }
 
@@ -173,41 +182,54 @@ void SessionManager::play_nn_turn(GameSession& session) {
 
     SolverConfig greedy{0.0, 0.0, false};
 
-    while (true) {
-        solver_get_requests(session.state, session.ctx, tables_,
-                            session.buffers);
+    // --- CLEAR CACHES AND GET REQUESTS ONCE PER TURN ---
+    session.buffers.dp_computed = false;
+    session.buffers.evs_blended = false;
+    solver_get_requests(session.state, session.ctx, tables_, session.buffers);
 
-        if (session.buffers.request_count == 0) {
+    if (session.buffers.request_count == 0) {
+        while (can_reroll(session.state, session.ctx)) {
             perform_reroll(session.state, 0, session.rng);
             std::array<int8_t, kNumDice> after;
             std::memcpy(after.data(), session.state.dice, sizeof(session.state.dice));
             record.hold_masks.push_back(0);
             record.dice_after_hold.push_back(after);
             record.is_forced_reroll = true;
-            continue;
         }
-
-        // Generate tensors.
-        generate_tensor_batch(session.state.board, session.ctx,
-                              static_cast<int>(session.state.board.current_player),
-                              session.buffers.requests,
-                              session.buffers.request_count,
-                              tables_,
-                              session.tensor_buffer.data());
-
-        // Synchronous NN inference (from_blob is safe here — inference only).
-        {
-            torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(
-                session.tensor_buffer.data(),
-                {session.buffers.request_count, kTensorSize},
-                torch::kFloat32).to(device_);
-            auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
-            const float* ptr = output.data_ptr<float>();
-            for (int i = 0; i < session.buffers.request_count; ++i)
-                session.buffers.evs[i] = static_cast<double>(ptr[i]);
+        auto& all = session.ctx.legal_all[session.state.board.current_player];
+        if (all.count > 0) {
+            record.placement = all.placements[0];
+            record.score = 0;
+            perform_placement(session.state, session.ctx,
+                              record.placement.column, record.placement.row, session.rng);
         }
+        session.history.push_back(std::move(record));
+        return;
+    }
 
+    // Generate tensors ONCE.
+    generate_tensor_batch(session.state.board, session.ctx,
+                          static_cast<int>(session.state.board.current_player),
+                          session.buffers.requests,
+                          session.buffers.request_count,
+                          tables_,
+                          session.tensor_buffer.data());
+
+    // Synchronous NN inference ONCE
+    {
+        torch::NoGradGuard no_grad;
+        auto input = torch::from_blob(
+            session.tensor_buffer.data(),
+            {session.buffers.request_count, kTensorSize},
+            torch::kFloat32).to(device_);
+        auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
+        const float* ptr = output.data_ptr<float>();
+        for (int i = 0; i < session.buffers.request_count; ++i)
+            session.buffers.evs[i] = static_cast<double>(ptr[i]);
+    }
+
+    // Loop only for rerolls
+    while (true) {
         SolverResult result = solver_resolve(session.state, session.ctx,
                                               tables_, session.buffers,
                                               greedy, session.rng);
@@ -222,8 +244,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
                                     static_cast<float>(session.buffers.evs[i])});
                 }
                 std::sort(pevs.begin(), pevs.end(),
-                          [](const auto& a, const auto& b) {
-                              return a.eval_value > b.eval_value; });
+                          [](const auto& a, const auto& b) { return a.eval_value > b.eval_value; });
                 record.placement_evals = std::move(pevs);
             }
             record.placement = result.placement;
@@ -234,7 +255,6 @@ void SessionManager::play_nn_turn(GameSession& session) {
         }
 
         if (session.debug_mode) {
-            // mask_evs[0..kNumHoldMasks-1] were filled by solver_resolve (greedy path).
             std::vector<GameSession::HoldCandidateEval> hevs;
             hevs.reserve(kNumHoldMasks);
             for (int mask = 0; mask < kNumHoldMasks; ++mask) {
@@ -242,8 +262,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
                                 static_cast<float>(session.buffers.mask_evs[mask])});
             }
             std::sort(hevs.begin(), hevs.end(),
-                      [](const auto& a, const auto& b) {
-                          return a.expected_value > b.expected_value; });
+                      [](const auto& a, const auto& b) { return a.expected_value > b.expected_value; });
             record.hold_evals.push_back(std::move(hevs));
         }
 

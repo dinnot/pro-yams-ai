@@ -134,9 +134,19 @@ void TrainingLoop::run(int num_steps) {
         // ---------------------------------------------------------------
         if (buffer_->size() >= config_.min_buffer_size) {
             
-            // FIX: Accumulate fractional steps based on completed games
-            double ratio = config_.train_steps_per_collect > 0.0 ? config_.train_steps_per_collect : 1.0;
-            pending_train_steps_ += static_cast<double>(collected) * ratio;
+            // We want to keep sample generation and consumption perfectly balanced.
+            // 1 game produces ~156 samples. 1 step consumes `train_batch_size` samples.
+            // To train exactly 1 epoch: steps_needed = (collected * 156) / batch_size
+            double samples_generated = static_cast<double>(collected) * 156.0;
+            double steps_for_one_epoch = samples_generated / static_cast<double>(config_.train_batch_size);
+            
+            // The user config `train_steps_per_collect` was historically used as raw steps per game,
+            // which caused massive overtraining. We now treat it as an epoch multiplier.
+            // e.g. 0.5 means train on 50% of the generated data.
+            double epochs = config_.train_steps_per_collect > 0.0 ? config_.train_steps_per_collect : 1.0;
+            if (epochs > 1.0) epochs = 1.0; // Failsafe for old config values like 4.0
+
+            pending_train_steps_ += steps_for_one_epoch * epochs;
             int steps_to_do = static_cast<int>(pending_train_steps_);
             pending_train_steps_ -= steps_to_do;
 
