@@ -1,12 +1,12 @@
-num_steps: 100000
+num_steps: 10000
 
 training:
   replay_capacity: 1000000
   min_buffer_size: 200000
-  train_batch_size: 2048
-  train_steps_per_collect: 1
-  model_swap_interval: 100
-  checkpoint_interval: 10000
+  train_batch_size: 8192
+  train_steps_per_collect: 0.125
+  model_swap_interval: 10
+  checkpoint_interval: 1000
   max_checkpoints: 2
 
   td_mode: mc
@@ -14,14 +14,14 @@ training:
 
   initial_temperature: 1.0
   min_temperature: 0.1
-  temperature_decay: 0.9999712         # Hits 0.1 at ~80k steps
+  temperature_decay: 0.999712         # Hits 0.1 at ~80k steps
 
-  eval_interval: 10000
+  eval_interval: 2000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/ab_control_sprint4
-  log_dir: ./logs/ab_control_sprint4
-  log_path: ./logs/ab_control_sprint4/training_log.csv
+  checkpoint_dir: checkpoints/ab_control_sprint9
+  log_dir: ./logs/ab_control_sprint9
+  log_path: ./logs/ab_control_sprint9/training_log.csv
 
   self_play:
     max_inference_batch: 4096
@@ -31,7 +31,7 @@ training:
     num_games: 2048
     num_coordinators: 2
     debug_mode: true
-    debug_log_path: "./logs/ab_control_sprint4/debug_coordinator.log"
+    debug_log_path: "./logs/ab_control_sprint9/debug_coordinator.log"
 
   model:
     input_size: 809
@@ -39,4 +39,4 @@ training:
     hidden_width: 256
     learning_rate: 0.0005
     debug_mode: true
-    debug_log_path: "./logs/ab_control_sprint4/debug_batch.log"
+    debug_log_path: "./logs/ab_control_sprint9/debug_batch.log"
