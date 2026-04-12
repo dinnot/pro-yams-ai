@@ -84,6 +84,16 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // Capture if this is the first resolve of the turn BEFORE we run solver_resolve
             bool is_first_resolve = !game->solver_buffers.dp_computed;
 
+            // ------------------------------------------------------------------
+            // FIX: Run solver with PURE NN EVs to get the correct start-of-turn
+            // EV for TD learning. This prevents the heuristic from poisoning targets!
+            // ------------------------------------------------------------------
+            if (is_first_resolve && config.heuristic_weight > 0.0) {
+                SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers);
+                game->current_turn_start_ev = pure_res.expected_value;
+                game->solver_buffers.dp_computed = false; // Reset so the blended resolve can run
+            }
+
             if (config.heuristic_weight > 0.0 && !game->solver_buffers.evs_blended) {
                 // Save raw NN EVs for debugging
                 std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs, 
@@ -113,6 +123,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                                                   game->solver_buffers, config,
                                                   game->rng);
 
+            
             // Log Game 0, limit to first 5 turns of the game to avoid spam
             if (config.debug_mode && game->is_debug_game && game->trajectory_length < 5) {
                 std::ofstream dbg(game->debug_log_path, std::ios::app);
@@ -168,8 +179,8 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 }
             }
 
-            // Capture the pure optimal EV at the very first decision point of the turn.
-            if (is_first_resolve) {
+            // FIX: Only capture from the main result if the heuristic is turned OFF.
+            if (is_first_resolve && config.heuristic_weight <= 0.0) {
                 game->current_turn_start_ev = result.expected_value;
             }
 
