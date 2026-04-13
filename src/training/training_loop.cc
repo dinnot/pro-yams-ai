@@ -120,6 +120,19 @@ void TrainingLoop::run(int num_steps) {
 
     orchestrator_->start();
 
+    if (config_.logs_on_start) {
+        log_metrics(config_.log_path, metrics());
+
+        if (config_.eval_interval > 0) {
+            EvalResult eval = run_evaluation(
+                trainer_->model_mut(), trainer_->device(),
+                tables_, config_.eval_games,
+                static_cast<uint64_t>(training_step_));
+            log_evaluation(config_.log_dir, training_step_, eval);
+            last_eval_win_rate_ = eval.nn_win_rate();
+        }
+    }
+
     while (!stop_flag_.load(std::memory_order_relaxed) &&
            training_step_ < num_steps) {
         // ---------------------------------------------------------------

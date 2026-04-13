@@ -47,7 +47,8 @@ struct TrainingConfig {
     int eval_games    = 200;    // Games per evaluation run
 
     // --- Developer / Debug ---
-    bool debug_mode = false;
+    bool debug_mode    = false;
+    bool logs_on_start = false; // Log metrics and run eval before first training step
 
     // --- Paths ---
     std::string checkpoint_dir = "checkpoints";
