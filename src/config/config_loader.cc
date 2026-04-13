@@ -53,6 +53,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "min_temperature",     tc.min_temperature);
     maybe_assign(n, "temperature_decay",   tc.temperature_decay);
     maybe_assign(n, "temperature_decay_start_step", tc.temperature_decay_start_step);
+    maybe_assign(n, "temperature_decay_start_value", tc.temperature_decay_start_value);
     maybe_assign(n, "initial_epsilon",     tc.initial_epsilon);
     maybe_assign(n, "eval_interval",       tc.eval_interval);
     maybe_assign(n, "eval_games",          tc.eval_games);

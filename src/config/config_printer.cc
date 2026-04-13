@@ -36,7 +36,8 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "initial_temperature"  << YAML::Value << tc.initial_temperature;
     out << YAML::Key << "min_temperature"      << YAML::Value << tc.min_temperature;
     out << YAML::Key << "temperature_decay"    << YAML::Value << tc.temperature_decay;
-    out << YAML::Key << "temperature_decay_start_step" << YAML::Value << tc.temperature_decay_start_step;
+    out << YAML::Key << "temperature_decay_start_step"  << YAML::Value << tc.temperature_decay_start_step;
+    out << YAML::Key << "temperature_decay_start_value" << YAML::Value << tc.temperature_decay_start_value;
     out << YAML::Key << "initial_epsilon"      << YAML::Value << tc.initial_epsilon;
     out << YAML::Key << "eval_interval"        << YAML::Value << tc.eval_interval;
     out << YAML::Key << "eval_games"           << YAML::Value << tc.eval_games;

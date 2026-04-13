@@ -239,8 +239,13 @@ void TrainingLoop::do_training_step() {
 
     // 2. Decay temperature ONLY after the configured start step (Stage 2)
     if (training_step_ >= config_.temperature_decay_start_step) {
-        temperature_ = std::max(config_.min_temperature,
-                                temperature_ * config_.temperature_decay);
+        if (training_step_ == config_.temperature_decay_start_step &&
+            config_.temperature_decay_start_value > 0.0) {
+            temperature_ = config_.temperature_decay_start_value;
+        } else {
+            temperature_ = std::max(config_.min_temperature,
+                                    temperature_ * config_.temperature_decay);
+        }
     }
 
     // Push updated config to self-play workers

@@ -17,9 +17,14 @@ void heuristic_evaluate(const BoardState& board, const GameContext& /*ctx*/,
         int row = requests[i].placement.row;
         int score = requests[i].score;
         if (row > 0 && row < kRow6s) {
-            if (score >= (row + 1) * 5) score += 16;
-            else if (score >= (row + 1) * 4) score += 10;
-            else if (score >= (row + 1) * 3) score += 6;
+            if (score >= (row + 1) * 3) score += 6;
+            // else if (board.coefficients[col] >= 14) {
+            //     score = score / (row + 1);
+            // }
+        }
+        if (score == 0) {
+            score = (18 - board.coefficients[col]) * 0.1;
+            if (row <= kRow6s) score *= 2;
         }
         evs[i] = static_cast<double>(score) * board.coefficients[col];
     }

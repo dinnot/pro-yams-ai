@@ -24,6 +24,7 @@ training:
   min_temperature: 0.1
   temperature_decay: 0.9999
   temperature_decay_start_step: 0
+  temperature_decay_start_value: 0.0  # 0 = disabled; if > 0: jump to this value at decay_start_step
   initial_epsilon: 0.0
 
   # Evaluation

@@ -33,6 +33,7 @@ struct TrainingConfig {
     double min_temperature     = 0.1;
     double temperature_decay   = 0.9999;  // Applied every training step
     int temperature_decay_start_step = 0; // Steps to wait before decaying temp
+    double temperature_decay_start_value = 0.0; // If > 0: jump to this value at decay_start_step, then decay from there
 
     // --- Heuristic Bootstrapping ---
     double initial_heuristic_weight = 1.0;

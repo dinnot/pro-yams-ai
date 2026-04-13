@@ -149,6 +149,37 @@ TEST(TrainingLoopTest, TemperatureDecays) {
 }
 
 // ---------------------------------------------------------------------------
+// temperature_decay_start_value: temperature jumps to the configured value
+// at decay_start_step, then decays normally from there.
+// ---------------------------------------------------------------------------
+TEST(TrainingLoopTest, TemperatureDecayStartValue) {
+    ensure_tables();
+
+    const std::string ckpt_dir = "/tmp/tl_test_decay_start_val";
+    const std::string log_path = "/tmp/tl_test_decay_start_val.csv";
+    std::filesystem::remove_all(ckpt_dir);
+    std::filesystem::remove(log_path);
+
+    TrainingConfig cfg = make_small_config(ckpt_dir, log_path);
+    cfg.initial_temperature          = 1.0;
+    cfg.min_temperature              = 0.01;
+    cfg.temperature_decay            = 1.0;    // no decay — isolates the jump
+    cfg.temperature_decay_start_step = 10;
+    cfg.temperature_decay_start_value = 0.5;
+
+    TrainingLoop loop(cfg, *g_tables,
+                      torch::Device(torch::kCPU),
+                      torch::Device(torch::kCPU));
+
+    // Run exactly to the start step — temperature should jump to 0.5
+    loop.run(10);
+    EXPECT_NEAR(loop.metrics().temperature, 0.5, 1e-9);
+
+    std::filesystem::remove_all(ckpt_dir);
+    std::filesystem::remove(log_path);
+}
+
+// ---------------------------------------------------------------------------
 // Checkpoint save/load round-trip via resume_from_checkpoint.
 // ---------------------------------------------------------------------------
 TEST(TrainingLoopTest, Checkpoint_ResumeRestoresStep) {

@@ -42,6 +42,11 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.temperature_decay must be in (0, 1]");
     if (tc.temperature_decay_start_step < 0)
         r.fail("training.temperature_decay_start_step must be non-negative");
+    if (tc.temperature_decay_start_value < 0.0)
+        r.fail("training.temperature_decay_start_value must be non-negative");
+    if (tc.temperature_decay_start_value > 0.0 &&
+        tc.temperature_decay_start_value < tc.min_temperature)
+        r.fail("training.temperature_decay_start_value must not be below min_temperature");
 
     // Evaluation (eval_interval == 0 means disabled, which is valid)
     if (tc.eval_interval < 0)

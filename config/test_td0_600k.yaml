@@ -1,0 +1,45 @@
+num_steps: 600000
+
+training:
+  replay_capacity: 500000
+  min_buffer_size: 50000
+  train_batch_size: 4096
+  train_steps_per_collect: 0.125
+  model_swap_interval: 100
+  checkpoint_interval: 10000
+  max_checkpoints: 3
+
+  td_mode: td0
+  td_lambda: 0.95
+
+  initial_temperature: 0.5
+  min_temperature: 0.3
+  temperature_decay: 0.999997811
+  temperature_decay_start_step: 10000
+  temperature_decay_start_value: 1.0  
+
+  eval_interval: 10000
+  eval_games: 500
+
+  checkpoint_dir: checkpoints/test_td0_600k
+  log_dir: ./logs/test_td0_600k
+  log_path: ./logs/test_td0_600k/training_log.csv
+
+  initial_heuristic_weight: 0.0
+  heuristic_decay_steps: 0
+
+  self_play:
+    max_inference_batch: 4096
+    min_games_per_batch: 2
+    batch_timeout_ms: 5
+    num_workers: 24
+    num_games: 2048
+    num_coordinators: 2
+    debug_mode: false
+
+  model:
+    input_size: 809
+    hidden_layers: 3
+    hidden_width: 512
+    learning_rate: 0.0004
+    debug_mode: false
