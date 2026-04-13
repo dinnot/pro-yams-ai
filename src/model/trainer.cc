@@ -43,7 +43,11 @@ double ModelTrainer::train_step(const float* states, const double* targets,
     auto target_tensor = torch::empty({batch_size, 1}, torch::kFloat32);
     {
         float* tptr = target_tensor.data_ptr<float>();
-        for (int i = 0; i < batch_size; ++i) tptr[i] = static_cast<float>(targets[i]);
+        for (int i = 0; i < batch_size; ++i) {
+            float val = static_cast<float>(targets[i]);
+            if (std::isnan(val)) val = 0.5f; // Failsafe
+            tptr[i] = std::max(0.0f, std::min(1.0f, val));
+        }
     }
     target_tensor = target_tensor.to(device_);  // clone because from_blob doesn't own the data
 

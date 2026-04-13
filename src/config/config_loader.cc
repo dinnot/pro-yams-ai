@@ -52,6 +52,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "initial_temperature", tc.initial_temperature);
     maybe_assign(n, "min_temperature",     tc.min_temperature);
     maybe_assign(n, "temperature_decay",   tc.temperature_decay);
+    maybe_assign(n, "temperature_decay_start_step", tc.temperature_decay_start_step);
     maybe_assign(n, "initial_epsilon",     tc.initial_epsilon);
     maybe_assign(n, "eval_interval",       tc.eval_interval);
     maybe_assign(n, "eval_games",          tc.eval_games);
@@ -90,6 +91,7 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--train_steps_per_collect" && i + 1 < argc) config.training.train_steps_per_collect = std::stod(argv[++i]);
         else if (arg == "--replay_buffer_size" && i + 1 < argc) config.training.replay_capacity = std::stoi(argv[++i]);
         else if (arg == "--placement_temperature" && i + 1 < argc) config.training.initial_temperature = std::stod(argv[++i]);
+        else if (arg == "--temperature_decay_start_step" && i + 1 < argc) config.training.temperature_decay_start_step = std::stoi(argv[++i]);
         else if (arg == "--num_workers" && i + 1 < argc) config.training.self_play.num_workers = std::stoi(argv[++i]);
         else if (arg == "--num_games" && i + 1 < argc) config.training.self_play.num_games = std::stoi(argv[++i]);
         else if (arg == "--num_coordinators" && i + 1 < argc) config.training.self_play.num_coordinators = std::stoi(argv[++i]);

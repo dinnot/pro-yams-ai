@@ -23,6 +23,7 @@ training:
   initial_temperature: 1.0
   min_temperature: 0.1
   temperature_decay: 0.9999
+  temperature_decay_start_step: 0
   initial_epsilon: 0.0
 
   # Evaluation

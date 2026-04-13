@@ -229,16 +229,18 @@ void TrainingLoop::do_training_step() {
     ++training_step_;
     total_samples_trained_ += n;
 
-    // Decay temperature
-    temperature_ = std::max(config_.min_temperature,
-                            temperature_ * config_.temperature_decay);
-
-    // Decay heuristic weight linearly
+    // 1. Decay heuristic weight linearly FIRST (Stage 1)
     if (training_step_ < config_.heuristic_decay_steps) {
         heuristic_weight_ = config_.initial_heuristic_weight * 
             (1.0 - static_cast<double>(training_step_) / config_.heuristic_decay_steps);
     } else {
         heuristic_weight_ = 0.0;
+    }
+
+    // 2. Decay temperature ONLY after the configured start step (Stage 2)
+    if (training_step_ >= config_.temperature_decay_start_step) {
+        temperature_ = std::max(config_.min_temperature,
+                                temperature_ * config_.temperature_decay);
     }
 
     // Push updated config to self-play workers

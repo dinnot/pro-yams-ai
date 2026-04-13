@@ -28,11 +28,18 @@ int count_filled_cells(const BoardState& board, int player) {
 
 int sum_all_filled(const BoardState& board, int player) {
     int s = 0;
-    for (int col = 0; col < kNumColumns; ++col)
+    for (int col = 0; col < kNumColumns; ++col) {
+        int upper_realistic_sum = 0;
         for (int row = 0; row < kNumRows; ++row) {
             int8_t v = board.cells[player][col][row];
-            if (v > 0) s += v;
+            if (v > 0) { 
+                s += v;
+                if (row <= kRow6s) upper_realistic_sum += v;
+            } else if (row <= kRow6s) {
+                upper_realistic_sum += 3 * (row + 1);
+            }
         }
+    }
     return s;
 }
 
@@ -135,13 +142,16 @@ void generate_tensor(const BoardState& board, const GameContext& ctx,
 
             // 2. Upper potential (max if empty upper cells filled to max)
             int upper_potential = upper_sum;
+            int upper_realistic = upper_sum;
             for (int row = 0; row <= kRow6s; ++row)
-                if (board.cells[p][col][row] == kCellEmpty)
+                if (board.cells[p][col][row] == kCellEmpty) {
                     upper_potential += kMaxScorePerRow[row];
+                    upper_realistic += 3 * (row + 1);
+                }
             out[idx++] = std::min(1.0f, static_cast<float>(upper_potential) / 100.0f);
 
             // 3. Clean column eligibility
-            bool clean = (upper_sum >= 60) && (!ctx.lower_has_scratch[p][col]);
+            bool clean = (upper_realistic >= 60) && (!ctx.lower_has_scratch[p][col]);
             out[idx++] = clean ? 1.0f : 0.0f;
 
             // 4-5. Column duel advantage / disadvantage

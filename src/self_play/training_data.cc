@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstring>
 
 int extract_training_samples(const GameInstance& game,
@@ -68,7 +69,10 @@ int extract_training_samples(const GameInstance& game,
         }
         }
 
-        samples[i].target = target;
+        // Clamp target strictly to [0.0, 1.0] to prevent PyTorch BCE Loss 
+        // from crashing due to floating-point precision drift.
+        if (std::isnan(target)) target = 0.5;
+        samples[i].target = std::max(0.0, std::min(1.0, target));
     }
 
     return n;

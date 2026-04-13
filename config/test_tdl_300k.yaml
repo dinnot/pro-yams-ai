@@ -1,0 +1,44 @@
+num_steps: 300000
+
+training:
+  replay_capacity: 30000
+  min_buffer_size: 10000
+  train_batch_size: 4096
+  train_steps_per_collect: 0.125
+  model_swap_interval: 10
+  checkpoint_interval: 10000
+  max_checkpoints: 2
+
+  td_mode: tdlambda
+  td_lambda: 0.95
+
+  initial_temperature: 0.8
+  min_temperature: 0.1
+  temperature_decay: 0.999991
+  temperature_decay_start_step: 20000
+
+  initial_heuristic_weight: 1
+  heuristic_decay_steps: 20000
+
+  eval_interval: 20000
+  eval_games: 500
+
+  checkpoint_dir: checkpoints/test_tdl_300k
+  log_dir: ./logs/test_tdl_300k
+  log_path: ./logs/test_tdl_300k/training_log.csv
+
+  self_play:
+    max_inference_batch: 4096
+    min_games_per_batch: 2
+    batch_timeout_ms: 5
+    num_workers: 24
+    num_games: 2048
+    num_coordinators: 2
+    debug_mode: false
+
+  model:
+    input_size: 809
+    hidden_layers: 3
+    hidden_width: 256
+    learning_rate: 0.00032
+    debug_mode: false
