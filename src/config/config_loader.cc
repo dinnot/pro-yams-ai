@@ -39,6 +39,7 @@ void load_model_config(const YAML::Node& n, ModelConfig& m) {
     maybe_assign(n, "hidden_width",       m.hidden_width);
     maybe_assign(n, "learning_rate",      m.learning_rate);
     maybe_assign(n, "output_activation",  m.output_activation);
+    maybe_assign(n, "loss_function",      m.loss_function);
 }
 
 void load_training_config(const YAML::Node& n, TrainingConfig& tc) {

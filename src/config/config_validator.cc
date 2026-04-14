@@ -82,6 +82,8 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.model.learning_rate must be positive");
     if (m.output_activation != "tanh" && m.output_activation != "sigmoid")
         r.fail("training.model.output_activation must be \"tanh\" or \"sigmoid\"");
+    if (m.loss_function != "mse" && m.loss_function != "bce")
+        r.fail("training.model.loss_function must be \"mse\" or \"bce\"");
 
     return r;
 }

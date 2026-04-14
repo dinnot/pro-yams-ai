@@ -57,10 +57,9 @@ double ModelTrainer::train_step(const float* states, const double* targets,
     // Forward pass
     auto prediction = model_->forward(state_tensor);
 
-    // Loss: MSE for tanh (outputs in [-1,1]), BCE for sigmoid (outputs in (0,1)).
-    // BCE would produce NaN on negative tanh outputs.
+    // Loss: configurable per loss_function setting.
     torch::Tensor loss;
-    if (use_tanh) {
+    if (config_.loss_function == "mse") {
         loss = torch::mse_loss(prediction, target_tensor);
     } else {
         loss = torch::binary_cross_entropy(prediction, target_tensor);
@@ -76,17 +75,18 @@ double ModelTrainer::train_step(const float* states, const double* targets,
         const float* p_ptr = pred_cpu.data_ptr<float>();
         const float* t_ptr = targ_cpu.data_ptr<float>();
         
+        const float win_threshold = use_tanh ? 0.0f : 0.5f;
         for (int i = 0; i < batch_size; ++i) {
-            if (t_ptr[i] > 0.5f) { sum_win += p_ptr[i]; count_win++; }
-            else                 { sum_loss += p_ptr[i]; count_loss++; }
+            if (p_ptr[i] > win_threshold) { sum_win += p_ptr[i]; count_win++; }
+            else                          { sum_loss += p_ptr[i]; count_loss++; }
         }
-        
+
         double avg_win = count_win > 0 ? sum_win / count_win : 0.0;
         double avg_loss = count_loss > 0 ? sum_loss / count_loss : 0.0;
 
         std::stringstream ss;
         ss << "\n--- Debug Batch @ Step " << training_step_ << " ---\n"
-           << "BCE Loss:        " << loss.item<double>() << "\n"
+           << config_.loss_function << " Loss: " << loss.item<double>() << "\n"
            << "Avg Pred (Win):  " << avg_win << " (" << count_win << " samples)\n"
            << "Avg Pred (Loss): " << avg_loss << " (" << count_loss << " samples)\n";
 

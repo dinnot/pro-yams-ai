@@ -13,4 +13,5 @@ struct ModelConfig {
     bool   debug_mode     = false;  // Print sample tensor health
     std::string debug_log_path = "";
     std::string output_activation = "tanh";  // "tanh" or "sigmoid"
+    std::string loss_function     = "mse";   // "mse" or "bce"
 };

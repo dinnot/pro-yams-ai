@@ -53,3 +53,4 @@ training:
     hidden_width: 256
     learning_rate: 0.001
     output_activation: tanh    # tanh (margin mode) | sigmoid (binary win/loss)
+    loss_function: mse         # mse (for tanh/margin) | bce (for sigmoid/binary)
