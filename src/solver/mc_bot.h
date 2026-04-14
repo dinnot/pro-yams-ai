@@ -25,16 +25,25 @@ struct MCConfig {
 // CandidateAction — one candidate action being evaluated by rollouts.
 // ---------------------------------------------------------------------------
 struct CandidateAction {
-    bool      is_placement;    // true = place, false = hold+reroll
-    Placement placement;       // Only valid if is_placement
-    int8_t    score;           // Only valid if is_placement
-    uint8_t   hold_mask;       // Only valid if !is_placement
-    double    nn_ev;           // NN-based expected value (for initial ranking)
-    double    win_count;       // Accumulated wins from rollouts
-    int       rollout_count;   // Number of rollouts completed
+    bool      is_placement  = false; // true = place, false = hold+reroll
+    Placement placement     = {};    // Only valid if is_placement
+    int8_t    score         = 0;     // Only valid if is_placement
+    uint8_t   hold_mask     = 0;     // Only valid if !is_placement
+    double    nn_ev         = 0.0;   // NN-based expected value
+    double    win_count     = 0.0;   // Accumulated wins from rollouts
+    int       rollout_count = 0;     // Number of rollouts completed
 
     double empirical_wr() const {
         return rollout_count > 0 ? win_count / rollout_count : 0.0;
+    }
+
+    // Bayesian-smoothed win rate: blends the NN EV (as a prior worth
+    // `prior_weight` pseudo-rollouts) with the empirical rollouts. When
+    // rollouts are few, this stays anchored to the NN EV; as rollouts grow,
+    // empirical evidence takes over.
+    double bayesian_wr(double prior_weight = 10.0) const {
+        return (nn_ev * prior_weight + win_count) /
+               (prior_weight + rollout_count);
     }
 };
 
@@ -72,9 +81,12 @@ struct MCTimeAllocation {
 // @return 1.0 if mc_player wins, 0.0 if they lose, 0.5 if draw
 // ---------------------------------------------------------------------------
 double simulate_rollout(const BoardState& board,
+                        const GameContext& ctx,
                         int mc_player,
                         ProYamsNet& model, torch::Device device,
                         const PrecomputedTables& tables,
+                        SolverBuffers& shared_buffers,
+                        std::vector<float>& shared_tensor_buffer,
                         RNG& rng);
 
 // ---------------------------------------------------------------------------

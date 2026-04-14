@@ -7,7 +7,6 @@
 #include <cstring>
 #include <vector>
 
-#include "engine/context_rebuild.h"
 #include "engine/duel.h"
 #include "engine/placement.h"
 #include "engine/game_flow.h"
@@ -21,31 +20,33 @@
 // ---------------------------------------------------------------------------
 
 double simulate_rollout(const BoardState& board,
+                        const GameContext& ctx,
                         int mc_player,
                         ProYamsNet& model, torch::Device device,
                         const PrecomputedTables& tables,
+                        SolverBuffers& shared_buffers,
+                        std::vector<float>& shared_tensor_buffer,
                         RNG& rng) {
-    // Set up a fresh game state from the afterstate.
+    // Set up a fresh game state from the afterstate. The caller supplies a
+    // matching GameContext, so we avoid an O(156) rebuild_context_from_board
+    // scan on every rollout.
     GameState sim_state;
     sim_state.board = board;
 
     // Roll dice for the next player's turn.
     start_turn(sim_state, rng);
 
-    // Rebuild context from the cloned board.
-    GameContext sim_ctx;
-    rebuild_context_from_board(sim_state.board, sim_ctx);
+    GameContext sim_ctx = ctx;
 
-    SolverBuffers buffers{};
     SolverConfig greedy{0.0, 0.0, false};
 
-    std::vector<float> tensor_buffer(
-        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+    // Reset solver cache state for the hoisted buffers.
+    shared_buffers.dp_computed = false;
+    shared_buffers.evs_blended = false;
 
-    // Play to completion.
     while (!is_terminal(sim_state.board)) {
         nn_play_turn(model, device, sim_state, sim_ctx, tables,
-                     buffers, tensor_buffer, greedy, rng);
+                     shared_buffers, shared_tensor_buffer, greedy, rng);
     }
 
     return get_game_result_for_player(sim_state, sim_ctx, mc_player);
@@ -63,15 +64,17 @@ static double simulate_rollout_from_state(GameState sim_state,
                                            int mc_player,
                                            ProYamsNet& model, torch::Device device,
                                            const PrecomputedTables& tables,
+                                           SolverBuffers& shared_buffers,
+                                           std::vector<float>& shared_tensor_buffer,
                                            RNG& rng) {
-    SolverBuffers buffers{};
     SolverConfig greedy{0.0, 0.0, false};
-    std::vector<float> tensor_buffer(
-        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+
+    shared_buffers.dp_computed = false;
+    shared_buffers.evs_blended = false;
 
     while (!is_terminal(sim_state.board)) {
         nn_play_turn(model, device, sim_state, sim_ctx, tables,
-                     buffers, tensor_buffer, greedy, rng);
+                     shared_buffers, shared_tensor_buffer, greedy, rng);
     }
 
     return get_game_result_for_player(sim_state, sim_ctx, mc_player);
@@ -85,97 +88,100 @@ int select_top_candidates(const GameState& state, const GameContext& ctx,
                           const PrecomputedTables& tables,
                           const SolverBuffers& buffers,
                           int max_k, CandidateAction* out) {
-    int count = 0;
     int current_id = get_dice_state_id(state.dice, tables);
     int rolls_left = state.rolls_left;
+    const int p = state.board.current_player;
 
-    // --- Placement candidates ---
-    // Collect all achievable placements for the current dice state, ranked by EV.
-    struct PlacementEV {
-        int request_idx;
-        double ev;
+    // Strict achievable check — mirrors solver_resolve's check_achievable
+    // exactly so that candidate placements respect the Golden Rule, SS/LS
+    // constraints, and the Turbo-on-last-roll exclusion. Without this, the MC
+    // bot explores illegal timelines (notably voluntary scratches), making
+    // its rollouts disconnected from reality.
+    auto check_achievable = [&](int sid, int req_idx) -> bool {
+        const AfterstateRequest& req = buffers.requests[req_idx];
+        int col = req.placement.column;
+        int row = req.placement.row;
+
+        // Turbo requires at least one reroll remaining.
+        if (rolls_left == 0 && col == kColTurbo) return false;
+
+        int raw = tables.score_tables.dice_score[sid][row];
+        bool is_valid = false;
+
+        if (raw > 0 && raw >= ctx.golden_max[col][row]) {
+            is_valid = true;
+            if (row == kRowSS) {
+                if (ctx.ls_scratched[p][col]) is_valid = false;
+                else {
+                    int8_t ls_val = state.board.cells[p][col][kRowLS];
+                    if (ls_val != kCellEmpty && ls_val != 0 && raw >= ls_val)
+                        is_valid = false;
+                }
+            } else if (row == kRowLS) {
+                if (ctx.ss_scratched[p][col]) is_valid = false;
+                else {
+                    int max_ss = ctx.golden_max[col][kRowSS];
+                    if (max_ss > 0 && raw <= max_ss) is_valid = false;
+                }
+            }
+        }
+        return is_valid ? (req.score == raw) : (req.score == 0);
     };
-    std::vector<PlacementEV> place_candidates;
-    place_candidates.reserve(buffers.request_count);
+
+    // Collect all candidates (placements + holds) into a single list so we
+    // can globally sort them by NN EV. Previously placements were written
+    // first and holds appended unsorted, which meant that if the time budget
+    // was exhausted before any rollouts, the bot would default to the first
+    // placement rather than the globally best NN action.
+    std::vector<CandidateAction> all_cands;
+    all_cands.reserve(buffers.request_count + kNumHoldMasks);
 
     for (int i = 0; i < buffers.request_count; ++i) {
+        if (!check_achievable(current_id, i)) continue;
         const AfterstateRequest& req = buffers.requests[i];
-        bool achievable = (req.score == 0) ||
-            (tables.score_tables.dice_score[current_id][req.placement.row] == req.score);
-        if (achievable) {
-            place_candidates.push_back({i, buffers.evs[i]});
-        }
+        CandidateAction c{};
+        c.is_placement = true;
+        c.placement = req.placement;
+        c.score = req.score;
+        c.hold_mask = 0;
+        c.nn_ev = buffers.evs[i];
+        c.win_count = 0;
+        c.rollout_count = 0;
+        all_cands.push_back(c);
     }
 
-    // Sort by EV descending.
-    std::sort(place_candidates.begin(), place_candidates.end(),
-              [](const PlacementEV& a, const PlacementEV& b) {
-                  return a.ev > b.ev;
-              });
-
-    // Add top placement candidates.
-    int place_slots = std::min(max_k, static_cast<int>(place_candidates.size()));
-    // If we have rerolls, reserve some slots for hold masks.
-    if (rolls_left > 0 && place_slots > 2) place_slots = 2;
-
-    for (int i = 0; i < place_slots && count < max_k; ++i) {
-        const auto& pc = place_candidates[i];
-        const auto& req = buffers.requests[pc.request_idx];
-        out[count].is_placement = true;
-        out[count].placement = req.placement;
-        out[count].score = req.score;
-        out[count].hold_mask = 0;
-        out[count].nn_ev = pc.ev;
-        out[count].win_count = 0;
-        out[count].rollout_count = 0;
-        count++;
-    }
-
-    // --- Hold mask candidates (if rerolls remain) ---
     if (rolls_left > 0 && can_reroll(state, ctx)) {
-        struct MaskEV {
-            uint8_t mask;
-            double ev;
-        };
-        MaskEV mask_evs[kNumHoldMasks];
-
-        // Use V0 or V1 depending on rolls_left.
         for (int mask = 0; mask < kNumHoldMasks; ++mask) {
             int held_id = tables.moves[current_id][mask];
             int tr_count = 0;
             const Transition* tr = get_transitions(held_id, tr_count, tables);
             double ev = 0.0;
             if (rolls_left == 1) {
-                // Transitions go into V0.
                 for (int t = 0; t < tr_count; ++t)
                     ev += tr[t].probability * buffers.v0[tr[t].target_state_id];
             } else {
-                // rolls_left == 2: transitions go into V1.
                 for (int t = 0; t < tr_count; ++t)
                     ev += tr[t].probability * buffers.v1[tr[t].target_state_id];
             }
-            mask_evs[mask] = {static_cast<uint8_t>(mask), ev};
-        }
-
-        // Sort by EV descending.
-        std::sort(mask_evs, mask_evs + kNumHoldMasks,
-                  [](const MaskEV& a, const MaskEV& b) {
-                      return a.ev > b.ev;
-                  });
-
-        // Add top hold mask candidates (that are better than worst placement).
-        for (int i = 0; i < kNumHoldMasks && count < max_k; ++i) {
-            out[count].is_placement = false;
-            out[count].placement = {};
-            out[count].score = 0;
-            out[count].hold_mask = mask_evs[i].mask;
-            out[count].nn_ev = mask_evs[i].ev;
-            out[count].win_count = 0;
-            out[count].rollout_count = 0;
-            count++;
+            CandidateAction c{};
+            c.is_placement = false;
+            c.placement = {};
+            c.score = 0;
+            c.hold_mask = static_cast<uint8_t>(mask);
+            c.nn_ev = ev;
+            c.win_count = 0;
+            c.rollout_count = 0;
+            all_cands.push_back(c);
         }
     }
 
+    std::sort(all_cands.begin(), all_cands.end(),
+              [](const CandidateAction& a, const CandidateAction& b) {
+                  return a.nn_ev > b.nn_ev;
+              });
+
+    int count = std::min(max_k, static_cast<int>(all_cands.size()));
+    for (int i = 0; i < count; ++i) out[i] = all_cands[i];
     return count;
 }
 
@@ -208,11 +214,12 @@ bool can_terminate_early(const CandidateAction* candidates, int count,
                          int min_rollouts) {
     if (count <= 1) return true;
 
-    // Find the best candidate by empirical win rate.
+    // Find the best candidate by Bayesian-smoothed win rate. Pure empirical
+    // comparison is noisy when rollouts are few (e.g. 1/1 beats 4/5).
     int best_idx = 0;
-    double best_wr = candidates[0].empirical_wr();
+    double best_wr = candidates[0].bayesian_wr();
     for (int i = 1; i < count; ++i) {
-        double wr = candidates[i].empirical_wr();
+        double wr = candidates[i].bayesian_wr();
         if (wr > best_wr) {
             best_wr = wr;
             best_idx = i;
@@ -251,6 +258,13 @@ void mc_play_turn(GameState& state, GameContext& ctx,
     SolverConfig greedy{0.0, 0.0, false};
 
     std::vector<float> tensor_buffer(
+        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+
+    // Hoisted rollout buffers — reused across every simulated game during
+    // this turn. Previously simulate_rollout allocated a fresh ~1.6MB tensor
+    // buffer per rollout, thrashing the heap and destroying cache locality.
+    SolverBuffers rollout_buffers{};
+    std::vector<float> rollout_tensor_buffer(
         static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
 
     while (true) {
@@ -349,8 +363,9 @@ void mc_play_turn(GameState& state, GameContext& ctx,
         int mc_player = static_cast<int>(state.board.current_player);
         double elapsed_decision = 0.0;
 
-        while (elapsed_decision < decision_budget) {
-            for (int ci = 0; ci < num_candidates; ++ci) {
+        bool time_exhausted = false;
+        while (elapsed_decision < decision_budget && !time_exhausted) {
+            for (int ci = 0; ci < num_candidates && !time_exhausted; ++ci) {
                 auto& cand = candidates[ci];
                 for (int b = 0; b < mc_config.rollout_batch_size; ++b) {
                     RNG rollout_rng(rng.next());
@@ -358,11 +373,12 @@ void mc_play_turn(GameState& state, GameContext& ctx,
 
                     if (cand.is_placement) {
                         // Apply the placement to get the afterstate, then
-                        // simulate from the resulting board (start_turn will
-                        // roll dice for the next player inside simulate_rollout).
+                        // simulate from the resulting board. Copy the live
+                        // GameContext rather than calling the O(156)
+                        // rebuild_context_from_board scan; apply_placement
+                        // updates the context incrementally.
                         BoardState rollout_board = state.board;
-                        GameContext tmp_ctx;
-                        rebuild_context_from_board(rollout_board, tmp_ctx);
+                        GameContext tmp_ctx = ctx;
                         apply_placement(mc_player,
                                         cand.placement.column,
                                         cand.placement.row,
@@ -371,8 +387,10 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                         rollout_board.current_player =
                             1 - rollout_board.current_player;
                         outcome = simulate_rollout(
-                            rollout_board, mc_player,
-                            model, device, tables, rollout_rng);
+                            rollout_board, tmp_ctx, mc_player,
+                            model, device, tables,
+                            rollout_buffers, rollout_tensor_buffer,
+                            rollout_rng);
                     } else {
                         // Hold and reroll: apply the reroll to get the new
                         // dice state, then continue the turn from that state
@@ -384,21 +402,28 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                         tmp_state.rolls_left = state.rolls_left;
                         RNG hold_rng(rollout_rng.next());
                         perform_reroll(tmp_state, cand.hold_mask, hold_rng);
-                        GameContext tmp_ctx;
-                        rebuild_context_from_board(tmp_state.board, tmp_ctx);
+                        GameContext tmp_ctx = ctx;
                         outcome = simulate_rollout_from_state(
                             tmp_state, tmp_ctx, mc_player,
-                            model, device, tables, rollout_rng);
+                            model, device, tables,
+                            rollout_buffers, rollout_tensor_buffer,
+                            rollout_rng);
                     }
 
                     cand.win_count += outcome;
                     cand.rollout_count++;
                 }
-            }
 
-            auto now = Clock::now();
-            elapsed_decision = std::chrono::duration<double, std::milli>(
-                now - decision_start).count();
+                // Check the time budget between candidates so we don't
+                // overshoot after a slow rollout batch.
+                auto now_inner = Clock::now();
+                elapsed_decision = std::chrono::duration<double, std::milli>(
+                    now_inner - decision_start).count();
+                if (elapsed_decision >= decision_budget) {
+                    time_exhausted = true;
+                    break;
+                }
+            }
 
             // Check early termination.
             if (can_terminate_early(candidates, num_candidates,
@@ -406,11 +431,14 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                 break;
         }
 
-        // Step 4: Pick the best candidate by empirical win rate.
+        // Step 4: Pick the best candidate by Bayesian-smoothed win rate.
+        // The NN EV acts as a prior so early-terminated rollouts (or zero
+        // rollouts due to an exhausted time budget) gracefully fall back to
+        // the NN's recommendation instead of statistical noise.
         int best_idx = 0;
-        double best_wr = candidates[0].empirical_wr();
+        double best_wr = candidates[0].bayesian_wr();
         for (int i = 1; i < num_candidates; ++i) {
-            double wr = candidates[i].empirical_wr();
+            double wr = candidates[i].bayesian_wr();
             if (wr > best_wr) {
                 best_wr = wr;
                 best_idx = i;

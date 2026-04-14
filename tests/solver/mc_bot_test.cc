@@ -5,9 +5,11 @@
 
 #include <torch/torch.h>
 
+#include "engine/context_rebuild.h"
 #include "engine/game_flow.h"
 #include "engine/rng.h"
 #include "engine/scoring.h"
+#include "engine/tensor.h"
 #include "heuristic/heuristic_bot.h"
 #include "model/pro_yams_net.h"
 #include "solver/mc_bot.h"
@@ -49,8 +51,13 @@ TEST_F(MCBotTest, SingleRolloutCompletes) {
     for (int i = 0; i < 10; ++i)
         heuristic_play_turn(state, ctx, tables_, buffers, rng);
 
-    double result = simulate_rollout(state.board, 0,
-                                      *model_, device_, tables_, rng);
+    SolverBuffers rollout_buffers{};
+    std::vector<float> rollout_tensor_buffer(
+        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+    double result = simulate_rollout(state.board, ctx, 0,
+                                      *model_, device_, tables_,
+                                      rollout_buffers, rollout_tensor_buffer,
+                                      rng);
     EXPECT_TRUE(result == 0.0 || result == 0.5 || result == 1.0);
 }
 
@@ -66,10 +73,15 @@ TEST_F(MCBotTest, MultipleRolloutsProduceValidWinRate) {
 
     double wins = 0;
     int num_rollouts = 20;
+    SolverBuffers rollout_buffers{};
+    std::vector<float> rollout_tensor_buffer(
+        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
     for (int i = 0; i < num_rollouts; ++i) {
         RNG rollout_rng(rng.next());
-        double r = simulate_rollout(state.board, 0,
-                                     *model_, device_, tables_, rollout_rng);
+        double r = simulate_rollout(state.board, ctx, 0,
+                                     *model_, device_, tables_,
+                                     rollout_buffers, rollout_tensor_buffer,
+                                     rollout_rng);
         wins += r;
     }
 
@@ -91,8 +103,16 @@ TEST_F(MCBotTest, DeterministicRollouts) {
     for (int i = 0; i < 10; ++i)
         heuristic_play_turn(state, ctx, tables_, buffers, init_rng);
 
-    double r1 = simulate_rollout(state.board, 0, *model_, device_, tables_, rng1);
-    double r2 = simulate_rollout(state.board, 0, *model_, device_, tables_, rng2);
+    SolverBuffers rollout_buffers1{};
+    SolverBuffers rollout_buffers2{};
+    std::vector<float> rollout_tensor_buffer1(
+        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+    std::vector<float> rollout_tensor_buffer2(
+        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+    double r1 = simulate_rollout(state.board, ctx, 0, *model_, device_, tables_,
+                                  rollout_buffers1, rollout_tensor_buffer1, rng1);
+    double r2 = simulate_rollout(state.board, ctx, 0, *model_, device_, tables_,
+                                  rollout_buffers2, rollout_tensor_buffer2, rng2);
     EXPECT_EQ(r1, r2);
 }
 
