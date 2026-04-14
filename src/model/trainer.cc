@@ -39,24 +39,32 @@ double ModelTrainer::train_step(const float* states, const double* targets,
                 static_cast<size_t>(batch_size) * kTensorSize * sizeof(float));
     state_tensor = state_tensor.to(device_);
 
-    // Build target tensor: convert doubles to float32
+    // Build target tensor: convert doubles to float32, clamped to the valid range
+    // for the chosen activation (tanh → [-1, 1], sigmoid → [0, 1]).
+    const bool use_tanh = (config_.output_activation != "sigmoid");
     auto target_tensor = torch::empty({batch_size, 1}, torch::kFloat32);
     {
         float* tptr = target_tensor.data_ptr<float>();
         for (int i = 0; i < batch_size; ++i) {
             float val = static_cast<float>(targets[i]);
-            if (std::isnan(val)) val = 0.5f; // Failsafe
-            tptr[i] = std::max(0.0f, std::min(1.0f, val));
+            if (std::isnan(val)) val = use_tanh ? 0.0f : 0.5f;
+            tptr[i] = use_tanh ? std::max(-1.0f, std::min(1.0f, val))
+                               : std::max( 0.0f, std::min(1.0f, val));
         }
     }
-    target_tensor = target_tensor.to(device_);  // clone because from_blob doesn't own the data
+    target_tensor = target_tensor.to(device_);
 
     // Forward pass
     auto prediction = model_->forward(state_tensor);
 
-    // BCE loss — sigmoid output with binary targets; avoids vanishing gradients
-    // that MSE causes when the sigmoid is saturated.
-    auto loss = torch::binary_cross_entropy(prediction, target_tensor);
+    // Loss: MSE for tanh (outputs in [-1,1]), BCE for sigmoid (outputs in (0,1)).
+    // BCE would produce NaN on negative tanh outputs.
+    torch::Tensor loss;
+    if (use_tanh) {
+        loss = torch::mse_loss(prediction, target_tensor);
+    } else {
+        loss = torch::binary_cross_entropy(prediction, target_tensor);
+    }
 
     if (config_.debug_mode && training_step_ % 1000 == 0) {
         auto pred_cpu = prediction.to(torch::kCPU);

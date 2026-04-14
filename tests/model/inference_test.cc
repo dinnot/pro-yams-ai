@@ -63,8 +63,8 @@ TEST(InferenceTest, VariousBatchSizes) {
             << "batch_inference threw for batch_size=" << bs;
 
         for (int i = 0; i < bs; ++i) {
-            EXPECT_GT(output[i], 0.0) << "Output below 0 for batch_size=" << bs;
-            EXPECT_LT(output[i], 1.0) << "Output above 1 for batch_size=" << bs;
+            EXPECT_GT(output[i], -1.0) << "Output below -1 for batch_size=" << bs;
+            EXPECT_LT(output[i],  1.0) << "Output above 1 for batch_size=" << bs;
         }
     }
 }
@@ -87,8 +87,8 @@ TEST(InferenceTest, Outputs_InUnitRange) {
     engine.batch_inference(input.data(), bs, output.data());
 
     for (int i = 0; i < bs; ++i) {
-        EXPECT_GT(output[i], 0.0) << "Output[" << i << "] not > 0";
-        EXPECT_LT(output[i], 1.0) << "Output[" << i << "] not < 1";
+        EXPECT_GT(output[i], -1.0) << "Output[" << i << "] not > -1";
+        EXPECT_LT(output[i],  1.0) << "Output[" << i << "] not < 1";
     }
 }
 

@@ -34,10 +34,11 @@ void load_self_play_config(const YAML::Node& n, SelfPlayConfig& sp) {
 }
 
 void load_model_config(const YAML::Node& n, ModelConfig& m) {
-    maybe_assign(n, "input_size",    m.input_size);
-    maybe_assign(n, "hidden_layers", m.hidden_layers);
-    maybe_assign(n, "hidden_width",  m.hidden_width);
-    maybe_assign(n, "learning_rate", m.learning_rate);
+    maybe_assign(n, "input_size",         m.input_size);
+    maybe_assign(n, "hidden_layers",      m.hidden_layers);
+    maybe_assign(n, "hidden_width",       m.hidden_width);
+    maybe_assign(n, "learning_rate",      m.learning_rate);
+    maybe_assign(n, "output_activation",  m.output_activation);
 }
 
 void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
@@ -87,6 +88,7 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--learning_rate" && i + 1 < argc) config.training.model.learning_rate = std::stod(argv[++i]);
         else if (arg == "--hidden_layers" && i + 1 < argc) config.training.model.hidden_layers = std::stoi(argv[++i]);
         else if (arg == "--hidden_width" && i + 1 < argc) config.training.model.hidden_width = std::stoi(argv[++i]);
+        else if (arg == "--output_activation" && i + 1 < argc) config.training.model.output_activation = argv[++i];
         else if (arg == "--td_mode" && i + 1 < argc) {
             config.training.td_mode = parse_td_mode(argv[++i]);
         }

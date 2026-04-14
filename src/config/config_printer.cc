@@ -65,7 +65,8 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "input_size"    << YAML::Value << m.input_size;
     out << YAML::Key << "hidden_layers" << YAML::Value << m.hidden_layers;
     out << YAML::Key << "hidden_width"  << YAML::Value << m.hidden_width;
-    out << YAML::Key << "learning_rate" << YAML::Value << m.learning_rate;
+    out << YAML::Key << "learning_rate"     << YAML::Value << m.learning_rate;
+    out << YAML::Key << "output_activation" << YAML::Value << m.output_activation;
     out << YAML::EndMap;
 
     out << YAML::EndMap; // training

@@ -54,10 +54,10 @@ TEST(InitTest, XavierInit_ReasonableVariance) {
 }
 
 // ---------------------------------------------------------------------------
-// Output near 0.5 after Xavier init (uninformed prior)
+// Output near 0 after Xavier init (uninformed prior for tanh)
 // ---------------------------------------------------------------------------
 TEST(InitTest, XavierInit_OutputNearHalf) {
-    // Run multiple seeds to verify it's consistently near 0.5
+    // Run multiple seeds to verify outputs are bounded (tanh → near 0)
     ModelConfig cfg;
     cfg.hidden_layers = 3;
     cfg.hidden_width  = 256;
@@ -72,9 +72,10 @@ TEST(InitTest, XavierInit_OutputNearHalf) {
         auto input  = torch::rand({500, kTensorSize});
         auto output = net.forward(input);
         float mean  = output.mean().item<float>();
-        EXPECT_GT(mean, 0.2f)
-            << "Mean output < 0.2 with seed " << seed << " (mean=" << mean << ")";
-        EXPECT_LT(mean, 0.8f)
+        // After Xavier init with tanh, mean should be near 0 and well within [-1,1].
+        EXPECT_GT(mean, -0.8f)
+            << "Mean output < -0.8 with seed " << seed << " (mean=" << mean << ")";
+        EXPECT_LT(mean,  0.8f)
             << "Mean output > 0.8 with seed " << seed << " (mean=" << mean << ")";
     }
 }

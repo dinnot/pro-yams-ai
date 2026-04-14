@@ -80,6 +80,8 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.model.hidden_width must be positive");
     if (m.learning_rate <= 0.0)
         r.fail("training.model.learning_rate must be positive");
+    if (m.output_activation != "tanh" && m.output_activation != "sigmoid")
+        r.fail("training.model.output_activation must be \"tanh\" or \"sigmoid\"");
 
     return r;
 }

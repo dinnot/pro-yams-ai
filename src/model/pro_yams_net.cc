@@ -28,7 +28,12 @@ torch::Tensor ProYamsNet::forward(torch::Tensor x) {
     for (int i = 0; i < num_hidden_; ++i) {
         x = torch::relu(hidden_layers_[i]->forward(x));
     }
-    x = torch::sigmoid(output_layer_->forward(x));
+    x = output_layer_->forward(x);
+    if (config_.output_activation == "sigmoid") {
+        x = torch::sigmoid(x);
+    } else {
+        x = torch::tanh(x);  // default (includes "tanh" and fallback)
+    }
     return x;
 }
 

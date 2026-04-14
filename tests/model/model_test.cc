@@ -77,10 +77,25 @@ TEST(ModelTest, ForwardShape_BatchSize512) {
 }
 
 // ---------------------------------------------------------------------------
-// Output range: sigmoid guarantees (0, 1)
+// Output range: tanh guarantees (-1, 1); sigmoid guarantees (0, 1)
 // ---------------------------------------------------------------------------
-TEST(ModelTest, OutputRange_InUnitInterval) {
+TEST(ModelTest, OutputRange_Tanh) {
     ModelConfig cfg;
+    cfg.output_activation = "tanh";
+    ProYamsNet net(cfg);
+    net.eval();
+    torch::NoGradGuard no_grad;
+    auto input  = torch::rand({256, kTensorSize});
+    auto output = net.forward(input);
+    auto min_val = output.min().item<float>();
+    auto max_val = output.max().item<float>();
+    EXPECT_GT(min_val, -1.0f);
+    EXPECT_LT(max_val,  1.0f);
+}
+
+TEST(ModelTest, OutputRange_Sigmoid) {
+    ModelConfig cfg;
+    cfg.output_activation = "sigmoid";
     ProYamsNet net(cfg);
     net.eval();
     torch::NoGradGuard no_grad;
@@ -120,10 +135,10 @@ TEST(ModelTest, ConfigAccessor) {
 }
 
 // ---------------------------------------------------------------------------
-// Weight initialization: outputs near 0.5 (uninformed prior)
+// Weight initialization: outputs near 0 for tanh (uninformed prior)
 // ---------------------------------------------------------------------------
-TEST(ModelTest, XavierInit_OutputsNearHalf) {
-    ModelConfig cfg;
+TEST(ModelTest, XavierInit_OutputsNearZero) {
+    ModelConfig cfg;  // default output_activation = "tanh"
     ProYamsNet net(cfg);
     initialize_weights(net);
     net.eval();
@@ -132,10 +147,10 @@ TEST(ModelTest, XavierInit_OutputsNearHalf) {
     auto input = torch::rand({1000, kTensorSize});
     auto output = net.forward(input);
     float mean = output.mean().item<float>();
-    // After Xavier init, mean should be roughly 0.5 with high probability.
-    // Bounds are [0.2, 0.8] to avoid spurious failures from random init variance.
-    EXPECT_GT(mean, 0.2f) << "Mean output too low — init may be problematic";
-    EXPECT_LT(mean, 0.8f) << "Mean output too high — init may be problematic";
+    // After Xavier init with tanh, mean should be near 0.
+    // Bounds are [-0.8, 0.8] to avoid spurious failures from random init variance.
+    EXPECT_GT(mean, -0.8f) << "Mean output too low — init may be problematic";
+    EXPECT_LT(mean,  0.8f) << "Mean output too high — init may be problematic";
 }
 
 // ---------------------------------------------------------------------------

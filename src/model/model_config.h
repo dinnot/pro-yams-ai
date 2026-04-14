@@ -12,4 +12,5 @@ struct ModelConfig {
     double learning_rate  = 0.001;  // Adam optimizer learning rate
     bool   debug_mode     = false;  // Print sample tensor health
     std::string debug_log_path = "";
+    std::string output_activation = "tanh";  // "tanh" or "sigmoid"
 };

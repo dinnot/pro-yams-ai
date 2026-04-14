@@ -52,3 +52,4 @@ training:
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.001
+    output_activation: tanh    # tanh (margin mode) | sigmoid (binary win/loss)
