@@ -73,20 +73,30 @@ void solver_get_requests(const GameState& state, const GameContext& ctx,
 // softmax_sample
 // ---------------------------------------------------------------------------
 
-int softmax_sample(const double* values, int count, double temperature, RNG& rng) {
+int softmax_sample(const double* values, int count, double temperature, RNG& rng,
+                   bool use_margin) {
     assert(count > 0);
     if (count == 1) return 0;
 
     constexpr double kClampMin = 1e-6;
     constexpr double kClampMax = 1.0 - 1e-6;
 
-    // Convert win probabilities to logits.
     double max_logit = -1e18;
     double logits[kMaxAfterstateRequests];  // generous, but caller ensures count <= this
-    for (int i = 0; i < count; ++i) {
-        double v = std::max(kClampMin, std::min(kClampMax, values[i]));
-        logits[i] = std::log(v / (1.0 - v));
-        if (logits[i] > max_logit) max_logit = logits[i];
+    if (use_margin) {
+        // Values are already margin logits in [-1, 1]; scale to give temperature
+        // a reasonable dynamic range.
+        for (int i = 0; i < count; ++i) {
+            logits[i] = values[i] * 3.0;
+            if (logits[i] > max_logit) max_logit = logits[i];
+        }
+    } else {
+        // Convert win probabilities to logits.
+        for (int i = 0; i < count; ++i) {
+            double v = std::max(kClampMin, std::min(kClampMax, values[i]));
+            logits[i] = std::log(v / (1.0 - v));
+            if (logits[i] > max_logit) max_logit = logits[i];
+        }
     }
 
     // Softmax with temperature (shift by max for numerical stability).
@@ -208,7 +218,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
             }
             if (place_count > 1) {
                 int sel = softmax_sample(place_evs, place_count,
-                                         config.placement_temperature, rng);
+                                         config.placement_temperature, rng,
+                                         config.use_duel_margin_maximization);
                 int req_i = place_idx[sel];
                 result.placement = buffers.requests[req_i].placement;
                 result.score = buffers.requests[req_i].score;
@@ -295,7 +306,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
             buffers.mask_evs[kNumHoldMasks] = best_ev;
 
             int selected = softmax_sample(buffers.mask_evs, kNumHoldMasks + 1,
-                                          config.hold_temperature, rng);
+                                          config.hold_temperature, rng,
+                                          config.use_duel_margin_maximization);
             if (selected == kNumHoldMasks) {
                 // Stop and place (best_is_place remains true).
                 best_ev = greedy_max_ev; 
@@ -364,7 +376,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         }
         if (place_count > 1) {
             int sel = softmax_sample(place_evs, place_count,
-                                     config.placement_temperature, rng);
+                                     config.placement_temperature, rng,
+                                     config.use_duel_margin_maximization);
             int req_i = place_idx[sel];
             result.placement = buffers.requests[req_i].placement;
             result.score = buffers.requests[req_i].score;

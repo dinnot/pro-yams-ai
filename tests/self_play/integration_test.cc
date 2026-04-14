@@ -136,6 +136,7 @@ TEST(IntegrationTest, TrainingDataExtraction_ValidSamples) {
 
     // TD(0)
     int ns = extract_training_samples(*g, TDMode::kTD0, 0.0,
+                                       false, 4000.0,
                                        samples.data(), traj_len);
     EXPECT_EQ(ns, traj_len);
     for (int i = 0; i < ns; ++i) {
@@ -145,7 +146,8 @@ TEST(IntegrationTest, TrainingDataExtraction_ValidSamples) {
 
     // MC
     std::vector<TrainingSample> mc_samples(traj_len);
-    extract_training_samples(*g, TDMode::kMC, 0.0, mc_samples.data(), traj_len);
+    extract_training_samples(*g, TDMode::kMC, 0.0, false, 4000.0,
+                             mc_samples.data(), traj_len);
     // MC targets should differ from TD(0) for at least some steps.
     bool any_diff = false;
     for (int i = 0; i < ns; ++i)

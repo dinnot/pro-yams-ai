@@ -7,60 +7,65 @@
 
 int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
+                              bool use_margin, double margin_scale,
                               TrainingSample* samples, int max_samples) {
     int n = std::min(game.trajectory_length, max_samples);
+
+    // Terminal target from the perspective of player 0.
+    const double terminal_p0 = use_margin
+        ? std::tanh(static_cast<double>(game.final_duel_margin) / margin_scale)
+        : game.result;
+
+    auto terminal_for = [&](int8_t my_player) -> double {
+        if (use_margin) {
+            double m = (my_player == 0) ? terminal_p0 : -terminal_p0;
+            return m;
+        }
+        return (my_player == 0) ? terminal_p0 : 1.0 - terminal_p0;
+    };
+
+    auto flip = [&](double v) -> double {
+        return use_margin ? -v : 1.0 - v;
+    };
 
     for (int i = 0; i < n; ++i) {
         const TrajectoryStep& step = game.trajectory[i];
         int8_t my_player = step.player;
 
-        // Copy the afterstate tensor.
         std::memcpy(samples[i].state, step.tensor, kTensorSize * sizeof(float));
 
         double target = 0.0;
 
         switch (td_mode) {
         case TDMode::kMC:
-            // Actual game outcome from this player's perspective.
-            target = (my_player == 0) ? game.result : 1.0 - game.result;
+            target = terminal_for(my_player);
             break;
 
         case TDMode::kTD0:
             if (i + 1 < game.trajectory_length) {
-                // Bootstrap: next afterstate value is from the opponent's
-                // perspective (players alternate), so flip it.
-                target = 1.0 - game.trajectory[i + 1].value;
+                target = flip(game.trajectory[i + 1].value);
             } else {
-                // Last step — use actual game outcome.
-                target = (my_player == 0) ? game.result : 1.0 - game.result;
+                target = terminal_for(my_player);
             }
             break;
 
         case TDMode::kTDLambda: {
-            // Weighted blend of all future bootstrapped values + terminal.
-            // weight(j) = (1 - λ) * λ^(j-i-1)  for j = i+1 .. T-1
-            // weight(terminal) = λ^(T-i-1)
             double accumulated = 0.0;
             double weight_sum  = 0.0;
-            double lam_power   = 1.0;  // λ^(j-i-1) starting at j=i+1
+            double lam_power   = 1.0;
 
             for (int j = i + 1; j < game.trajectory_length; ++j) {
                 const TrajectoryStep& future = game.trajectory[j];
-                double bootstrap;
-                if (future.player != my_player) {
-                    // Opponent's value — flip perspective.
-                    bootstrap = 1.0 - future.value;
-                } else {
-                    bootstrap = future.value;
-                }
+                double bootstrap = (future.player != my_player)
+                    ? flip(future.value)
+                    : future.value;
                 double w = (1.0 - td_lambda) * lam_power;
                 accumulated += w * bootstrap;
                 weight_sum  += w;
                 lam_power   *= td_lambda;
             }
 
-            // Terminal value gets the remaining weight (λ^(T-i-1)).
-            double terminal = (my_player == 0) ? game.result : 1.0 - game.result;
+            double terminal = terminal_for(my_player);
             accumulated += lam_power * terminal;
             weight_sum  += lam_power;
 
@@ -69,10 +74,12 @@ int extract_training_samples(const GameInstance& game,
         }
         }
 
-        // Clamp target strictly to [0.0, 1.0] to prevent PyTorch BCE Loss 
-        // from crashing due to floating-point precision drift.
-        if (std::isnan(target)) target = 0.5;
-        samples[i].target = std::max(0.0, std::min(1.0, target));
+        if (std::isnan(target)) target = use_margin ? 0.0 : 0.5;
+        if (use_margin) {
+            samples[i].target = std::max(-1.0, std::min(1.0, target));
+        } else {
+            samples[i].target = std::max(0.0, std::min(1.0, target));
+        }
     }
 
     return n;

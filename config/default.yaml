@@ -19,6 +19,10 @@ training:
   td_mode: mc           # mc | td0 | tdlambda
   td_lambda: 0.0        # Used only with tdlambda mode
 
+  # Duel margin maximization: if true, targets are tanh(margin/scale) in [-1, 1]
+  use_duel_margin_maximization: true
+  duel_margin_maximization_scale: 4000.0
+
   # Exploration (softmax temperature applied by solver)
   initial_temperature: 1.0
   min_temperature: 0.1

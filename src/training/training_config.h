@@ -17,6 +17,11 @@ struct TrainingConfig {
     TDMode td_mode   = TDMode::kMC;   // MC targets never go stale in replay buffer
     double td_lambda = 0.0;           // Used only for kTDLambda
 
+    // --- Duel margin maximization ---
+    // When true, targets are tanh(margin/scale) in [-1, 1] instead of win/loss in [0, 1].
+    bool   use_duel_margin_maximization = true;
+    double duel_margin_maximization_scale = 4000.0;
+
     // --- Replay buffer ---
     int replay_capacity       = 2'000'000; // Maximum samples stored
     int min_buffer_size       = 10'000;    // Don't train until buffer reaches this size

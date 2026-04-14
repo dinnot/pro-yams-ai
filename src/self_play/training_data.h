@@ -36,4 +36,5 @@ struct TrainingSample {
 // ---------------------------------------------------------------------------
 int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
+                              bool use_margin, double margin_scale,
                               TrainingSample* samples, int max_samples);

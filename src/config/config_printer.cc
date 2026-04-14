@@ -47,6 +47,8 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "debug_mode"           << YAML::Value << tc.debug_mode;
     out << YAML::Key << "initial_heuristic_weight" << YAML::Value << tc.initial_heuristic_weight;
     out << YAML::Key << "heuristic_decay_steps" << YAML::Value << tc.heuristic_decay_steps;
+    out << YAML::Key << "use_duel_margin_maximization"   << YAML::Value << tc.use_duel_margin_maximization;
+    out << YAML::Key << "duel_margin_maximization_scale" << YAML::Value << tc.duel_margin_maximization_scale;
 
     out << YAML::Key << "self_play";
     out << YAML::Value << YAML::BeginMap;

@@ -40,6 +40,8 @@ struct SolverConfig {
     bool   exploration_enabled;    // Master switch (false = always greedy)
     bool   debug_mode = false;
     double heuristic_weight = 0.0;
+    bool   use_duel_margin_maximization = false;
+    double duel_margin_maximization_scale = 4000.0;
     std::string debug_log_path;
 };
 
@@ -102,7 +104,9 @@ inline SolverResult solver_resolve_greedy(const GameState& state, const GameCont
 // Softmax sampling with logit transformation.
 // ---------------------------------------------------------------------------
 
-/// Sample an index proportionally from win-probability values using softmax.
-/// Converts values to logits before applying temperature.
-/// values must be in (0, 1) — clamped internally if needed.
-int softmax_sample(const double* values, int count, double temperature, RNG& rng);
+/// Sample an index proportionally from values using softmax.
+/// If use_margin is false, values are win probabilities in (0, 1) and are
+/// converted to logits via log(v/(1-v)). If true, values are margin logits in
+/// [-1, 1] and are scaled directly by 3.0.
+int softmax_sample(const double* values, int count, double temperature, RNG& rng,
+                   bool use_margin = false);

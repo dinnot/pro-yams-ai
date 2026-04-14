@@ -71,7 +71,8 @@
       "Bash(cmake --build build --target queue_test)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/self_play/self_play_tests:*)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/training/training_tests)",
-      "Bash(cmake --build . --target pro_yams_ai)"
+      "Bash(cmake --build . --target pro_yams_ai)",
+      "Bash(cmake --build . -j)"
     ]
   }
 }

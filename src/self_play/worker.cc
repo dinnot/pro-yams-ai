@@ -1,6 +1,7 @@
 #include "self_play/worker.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
 
 #include <fstream>
@@ -45,6 +46,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                                           all.placements[0].row, game->rng);
                         if (is_terminal(game->state.board)) {
                             int duel = get_game_result(game->state, game->ctx);
+                            game->final_duel_margin = duel;
                             game->result = (duel > 0) ? 1.0 : (duel < 0) ? 0.0 : 0.5;
                             game->phase = GamePhase::kCompleted;
                             completed.push(game);
@@ -111,7 +113,12 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 // move to 1.0, poisoning the value trajectory and destroying the signal.
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {
-                    heuristic_evs[i] = std::max(0.0, std::min(1.0, heuristic_evs[i] / 1800.0));
+                    if (config.use_duel_margin_maximization) {
+                        heuristic_evs[i] = std::tanh(
+                            heuristic_evs[i] / config.duel_margin_maximization_scale);
+                    } else {
+                        heuristic_evs[i] = std::max(0.0, std::min(1.0, heuristic_evs[i] / 1800.0));
+                    }
                     game->solver_buffers.evs[i] =
                         (1.0 - config.heuristic_weight) * game->solver_buffers.raw_nn_evs[i] +
                         config.heuristic_weight * heuristic_evs[i];
@@ -208,6 +215,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
 
                 if (is_terminal(game->state.board)) {
                     int duel = get_game_result(game->state, game->ctx);
+                    game->final_duel_margin = duel;
                     game->result = (duel > 0) ? 1.0 : (duel < 0) ? 0.0 : 0.5;
                     game->phase  = GamePhase::kCompleted;
                     completed.push(game);

@@ -54,6 +54,8 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
     solver_config_.debug_mode            = config_.debug_mode;
     solver_config_.heuristic_weight      = heuristic_weight_;
+    solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
+    solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
     solver_config_.debug_log_path        = config_.log_dir + "/debug_game_0.log";
 
     // Orchestrator (does NOT start threads yet — call run() for that)
@@ -191,6 +193,8 @@ int TrainingLoop::collect_completed_games() {
             std::vector<TrainingSample> samples(static_cast<size_t>(traj_len));
             int ns = extract_training_samples(*g, config_.td_mode,
                                               config_.td_lambda,
+                                              config_.use_duel_margin_maximization,
+                                              config_.duel_margin_maximization_scale,
                                               samples.data(), traj_len);
             buffer_->add_batch(samples.data(), ns);
         }
@@ -266,6 +270,8 @@ void TrainingLoop::do_training_step() {
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
     solver_config_.heuristic_weight      = heuristic_weight_;
+    solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
+    solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
     orchestrator_->update_solver_config(solver_config_);
 }
 

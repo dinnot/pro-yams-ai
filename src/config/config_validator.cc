@@ -48,6 +48,10 @@ ValidationResult validate_config(const AppConfig& cfg) {
         tc.temperature_decay_start_value < tc.min_temperature)
         r.fail("training.temperature_decay_start_value must not be below min_temperature");
 
+    // Duel margin maximization
+    if (tc.duel_margin_maximization_scale <= 0.0)
+        r.fail("training.duel_margin_maximization_scale must be positive");
+
     // Evaluation (eval_interval == 0 means disabled, which is valid)
     if (tc.eval_interval < 0)
         r.fail("training.eval_interval must be non-negative (0 = disabled)");

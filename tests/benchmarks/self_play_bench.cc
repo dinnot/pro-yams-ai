@@ -77,8 +77,8 @@ static void BM_TrainingDataExtraction(benchmark::State& state) {
     double lambda = 0.9;
 
     for (auto _ : state) {
-        int n = extract_training_samples(game, mode, lambda, samples,
-                                          GameInstance::kMaxTrajectorySteps);
+        int n = extract_training_samples(game, mode, lambda, false, 4000.0,
+                                          samples, GameInstance::kMaxTrajectorySteps);
         benchmark::DoNotOptimize(n);
     }
     state.SetItemsProcessed(state.iterations() * game.trajectory_length);
