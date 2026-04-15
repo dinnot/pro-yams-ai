@@ -42,7 +42,11 @@ struct CandidateAction {
     // rollouts are few, this stays anchored to the NN EV; as rollouts grow,
     // empirical evidence takes over.
     double bayesian_wr(double prior_weight = 10.0) const {
-        return (nn_ev * prior_weight + win_count) /
+        // Map nn_ev from [-1, 1] margin space back to [0, 1] probability space
+        // (If the network is sigmoid, nn_ev is already in [0,1], so we clamp at 0 for safety).
+        double normalized_prior = (nn_ev < 0.0) ? (nn_ev + 1.0) / 2.0 : nn_ev; 
+        
+        return (normalized_prior * prior_weight + win_count) /
                (prior_weight + rollout_count);
     }
 };
