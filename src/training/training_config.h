@@ -51,6 +51,11 @@ struct TrainingConfig {
     int eval_interval = 1000;   // Training steps between evaluation runs
     int eval_games    = 200;    // Games per evaluation run
 
+    // --- Potential-Based Reward Shaping (PBRS) ---
+    bool   use_pbrs          = false;
+    double pbrs_upper_reward = 0.1;
+    double pbrs_clean_reward = 0.2;
+
     // --- Developer / Debug ---
     bool debug_mode    = false;
     bool logs_on_start = false; // Log metrics and run eval before first training step

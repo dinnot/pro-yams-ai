@@ -192,10 +192,15 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             }
 
             if (result.should_place) {
+                // Snapshot pre-placement state for PBRS detection.
+                int    pbrs_p   = game->state.board.current_player;
+                int    pbrs_col = result.placement.column;
+                bool   upper_before = (game->ctx.upper_sum[pbrs_p][pbrs_col] >= 60);
+
                 // Record trajectory step before applying placement.
                 assert(game->trajectory_length < GameInstance::kMaxTrajectorySteps);
                 TrajectoryStep& step = game->trajectory[game->trajectory_length];
-                
+
                 // Use the Q-value from the START of the turn, avoiding dice degradation!
                 step.value  = game->current_turn_start_ev;
                 step.player = static_cast<int8_t>(game->state.board.current_player);
@@ -212,6 +217,28 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 // Apply placement (switches player, rolls dice for next turn).
                 perform_placement(game->state, game->ctx,
                                   result.placement.column, result.placement.row, game->rng);
+
+                // Compute PBRS bonus for milestones achieved exactly on this turn.
+                double pbrs = 0.0;
+                if (config.use_pbrs) {
+                    bool upper_after = (game->ctx.upper_sum[pbrs_p][pbrs_col] >= 60);
+                    // 1. Upper Section Bonus unlocked
+                    if (!upper_before && upper_after) {
+                        pbrs += config.pbrs_upper_reward;
+                    }
+                    // 2. Clean Column unlocked
+                    bool col_full = true;
+                    for (int r = 0; r < kNumRows; ++r) {
+                        if (game->state.board.cells[pbrs_p][pbrs_col][r] == -1) {
+                            col_full = false;
+                            break;
+                        }
+                    }
+                    if (col_full && upper_after && !game->ctx.lower_has_scratch[pbrs_p][pbrs_col]) {
+                        pbrs += config.pbrs_clean_reward;
+                    }
+                }
+                step.pbrs_reward = pbrs;
 
                 if (is_terminal(game->state.board)) {
                     int duel = get_game_result(game->state, game->ctx);

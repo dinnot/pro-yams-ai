@@ -23,6 +23,11 @@ training:
   use_duel_margin_maximization: true
   duel_margin_maximization_scale: 4000.0
 
+  # Potential-Based Reward Shaping (PBRS)
+  use_pbrs: false
+  pbrs_upper_reward: 0.1
+  pbrs_clean_reward: 0.2
+
   # Exploration (softmax temperature applied by solver)
   initial_temperature: 1.0
   min_temperature: 0.1

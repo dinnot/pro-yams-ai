@@ -25,6 +25,7 @@ struct TrajectoryStep {
     float   tensor[kTensorSize];  // Afterstate tensor at time of placement
     double  value;                 // V(s) from solver for the chosen placement
     int8_t  player;               // Which player made this placement (0 or 1)
+    double  pbrs_reward = 0.0;    // Potential-based reward shaping bonus for this step
 };
 
 // ---------------------------------------------------------------------------

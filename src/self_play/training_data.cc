@@ -8,6 +8,7 @@
 int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
                               bool use_margin, double margin_scale,
+                              bool use_pbrs,
                               TrainingSample* samples, int max_samples) {
     int n = std::min(game.trajectory_length, max_samples);
 
@@ -75,6 +76,11 @@ int extract_training_samples(const GameInstance& game,
         }
 
         if (std::isnan(target)) target = use_margin ? 0.0 : 0.5;
+
+        if (use_pbrs) {
+            target += step.pbrs_reward;
+        }
+
         if (use_margin) {
             samples[i].target = std::max(-1.0, std::min(1.0, target));
         } else {

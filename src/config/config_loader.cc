@@ -68,6 +68,9 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "heuristic_decay_steps", tc.heuristic_decay_steps);
     maybe_assign(n, "use_duel_margin_maximization",   tc.use_duel_margin_maximization);
     maybe_assign(n, "duel_margin_maximization_scale", tc.duel_margin_maximization_scale);
+    maybe_assign(n, "use_pbrs",          tc.use_pbrs);
+    maybe_assign(n, "pbrs_upper_reward", tc.pbrs_upper_reward);
+    maybe_assign(n, "pbrs_clean_reward", tc.pbrs_clean_reward);
     if (n["td_mode"])   tc.td_mode = parse_td_mode(n["td_mode"].as<std::string>());
     if (n["self_play"]) load_self_play_config(n["self_play"], tc.self_play);
     if (n["model"])     load_model_config(n["model"], tc.model);

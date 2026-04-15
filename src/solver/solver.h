@@ -42,6 +42,9 @@ struct SolverConfig {
     double heuristic_weight = 0.0;
     bool   use_duel_margin_maximization = false;
     double duel_margin_maximization_scale = 4000.0;
+    bool   use_pbrs          = false;
+    double pbrs_upper_reward = 0.1;
+    double pbrs_clean_reward = 0.2;
     std::string debug_log_path;
 };
 

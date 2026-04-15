@@ -56,6 +56,9 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     solver_config_.heuristic_weight      = heuristic_weight_;
     solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
     solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
+    solver_config_.use_pbrs          = config_.use_pbrs;
+    solver_config_.pbrs_upper_reward = config_.pbrs_upper_reward;
+    solver_config_.pbrs_clean_reward = config_.pbrs_clean_reward;
     solver_config_.debug_log_path        = config_.log_dir + "/debug_game_0.log";
 
     // Orchestrator (does NOT start threads yet — call run() for that)
@@ -195,6 +198,7 @@ int TrainingLoop::collect_completed_games() {
                                               config_.td_lambda,
                                               config_.use_duel_margin_maximization,
                                               config_.duel_margin_maximization_scale,
+                                              config_.use_pbrs,
                                               samples.data(), traj_len);
             buffer_->add_batch(samples.data(), ns);
         }
@@ -272,6 +276,9 @@ void TrainingLoop::do_training_step() {
     solver_config_.heuristic_weight      = heuristic_weight_;
     solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
     solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
+    solver_config_.use_pbrs          = config_.use_pbrs;
+    solver_config_.pbrs_upper_reward = config_.pbrs_upper_reward;
+    solver_config_.pbrs_clean_reward = config_.pbrs_clean_reward;
     orchestrator_->update_solver_config(solver_config_);
 }
 
