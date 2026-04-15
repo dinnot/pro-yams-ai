@@ -80,7 +80,9 @@
       "Bash(cmake --build build --parallel 4)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --parallel 4)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target model_tests)",
-      "Bash(cmake --build build --target yams_ai)"
+      "Bash(cmake --build build --target yams_ai)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(python3 -m pytest --tb=short -q)"
     ]
   }
 }

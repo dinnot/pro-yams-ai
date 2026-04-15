@@ -15,12 +15,26 @@
 #include <fstream>
 
 // ---------------------------------------------------------------------------
-// Shared small model for coordinator tests (CPU only for speed)
+// Shared small model for coordinator tests (CPU only for speed).
+// Uses the default ModelConfig activation ("tanh") — tests that care about
+// EV range use make_inference_cpu_with_activation() instead.
 // ---------------------------------------------------------------------------
 static std::shared_ptr<InferenceEngine> make_inference_cpu() {
     ModelConfig cfg;
     cfg.hidden_layers = 1;
     cfg.hidden_width  = 32;
+    auto model = std::make_shared<ProYamsNet>(cfg);
+    initialize_weights(*model);
+    model->eval();
+    return std::make_shared<InferenceEngine>(model, torch::Device(torch::kCPU));
+}
+
+static std::shared_ptr<InferenceEngine> make_inference_cpu_with_activation(
+        const std::string& activation) {
+    ModelConfig cfg;
+    cfg.hidden_layers     = 1;
+    cfg.hidden_width      = 32;
+    cfg.output_activation = activation;
     auto model = std::make_shared<ProYamsNet>(cfg);
     initialize_weights(*model);
     model->eval();
@@ -39,10 +53,23 @@ static std::unique_ptr<GameInstance> make_fake_game(int req_count, int id = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// Batch assembly — games move to available with kNeedResolve + EVs set
+// Batch assembly — parameterized over output activation.
+// Each variant verifies that EVs land in the range valid for that activation:
+//   sigmoid → [0, 1],  tanh → [-1, 1].
 // ---------------------------------------------------------------------------
-TEST(CoordinatorTest, BatchAssembly_DistributesEVs) {
-    auto engine = make_inference_cpu();
+struct ActivationParam {
+    std::string name;
+    double      ev_min;
+    double      ev_max;
+};
+
+class CoordinatorActivationTest
+    : public ::testing::TestWithParam<ActivationParam> {};
+
+TEST_P(CoordinatorActivationTest, BatchAssembly_DistributesEVs) {
+    const auto& p = GetParam();
+    auto engine = make_inference_cpu_with_activation(p.name);
+
     SelfPlayConfig cfg;
     cfg.max_inference_batch = 1024;
     cfg.min_games_per_batch = 2;
@@ -59,13 +86,11 @@ TEST(CoordinatorTest, BatchAssembly_DistributesEVs) {
     pending.push(g1.get());
     pending.push(g2.get());
 
-    // Run coordinator for one iteration then shut down.
     std::thread ct(coordinator_thread,
                    std::ref(pending), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
                    std::ref(shutdown), 0);
 
-    // Wait until all 3 games are in available queue.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 3 &&
            std::chrono::steady_clock::now() < deadline) {
@@ -79,14 +104,25 @@ TEST(CoordinatorTest, BatchAssembly_DistributesEVs) {
 
     while (auto* g = available.try_pop()) {
         EXPECT_EQ(g->phase, GamePhase::kNeedResolve);
-        // EVs should be in [0, 1] (sigmoid output).
         for (int i = 0; i < g->solver_buffers.request_count; ++i) {
             double ev = g->solver_buffers.evs[i];
-            EXPECT_GE(ev, 0.0);
-            EXPECT_LE(ev, 1.0);
+            EXPECT_GE(ev, p.ev_min) << "activation=" << p.name;
+            EXPECT_LE(ev, p.ev_max) << "activation=" << p.name;
         }
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    Activations,
+    CoordinatorActivationTest,
+    ::testing::Values(
+        ActivationParam{"sigmoid",  0.0, 1.0},
+        ActivationParam{"tanh",    -1.0, 1.0}
+    ),
+    [](const ::testing::TestParamInfo<ActivationParam>& info) {
+        return info.param.name;
+    }
+);
 
 // ---------------------------------------------------------------------------
 // Batch overflow — excess games go back to pending

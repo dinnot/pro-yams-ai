@@ -30,7 +30,7 @@ TEST(TrajectoryTest, MC_TargetsMatchOutcome) {
     GameInstance game = make_game_with_trajectory(4, 1.0);  // player 0 wins
 
     TrainingSample samples[4];
-    int n = extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, samples, 4);
+    int n = extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, false, samples, 4);
 
     ASSERT_EQ(n, 4);
     // Step 0, 2: player 0 → target = 1.0
@@ -49,7 +49,7 @@ TEST(TrajectoryTest, TD0_Bootstrap) {
     GameInstance game = make_game_with_trajectory(4, 0.8);
 
     TrainingSample samples[4];
-    int n = extract_training_samples(game, TDMode::kTD0, 0.0, false, 4000.0, samples, 4);
+    int n = extract_training_samples(game, TDMode::kTD0, 0.0, false, 4000.0, false, samples, 4);
 
     ASSERT_EQ(n, 4);
 
@@ -70,8 +70,8 @@ TEST(TrajectoryTest, TDLambda_Lambda0_EqualsTD0) {
     GameInstance game = make_game_with_trajectory(4, 0.8);
 
     TrainingSample td0_samples[4], tdl_samples[4];
-    extract_training_samples(game, TDMode::kTD0, 0.0, false, 4000.0, td0_samples, 4);
-    extract_training_samples(game, TDMode::kTDLambda, 0.0, false, 4000.0, tdl_samples, 4);
+    extract_training_samples(game, TDMode::kTD0, 0.0, false, 4000.0, false, td0_samples, 4);
+    extract_training_samples(game, TDMode::kTDLambda, 0.0, false, 4000.0, false, tdl_samples, 4);
 
     for (int i = 0; i < 4; ++i)
         EXPECT_NEAR(tdl_samples[i].target, td0_samples[i].target, 1e-9)
@@ -85,8 +85,8 @@ TEST(TrajectoryTest, TDLambda_Lambda1_EqualsMC) {
     GameInstance game = make_game_with_trajectory(4, 0.8);
 
     TrainingSample mc_samples[4], tdl_samples[4];
-    extract_training_samples(game, TDMode::kMC, 1.0, false, 4000.0, mc_samples, 4);
-    extract_training_samples(game, TDMode::kTDLambda, 1.0, false, 4000.0, tdl_samples, 4);
+    extract_training_samples(game, TDMode::kMC, 1.0, false, 4000.0, false, mc_samples, 4);
+    extract_training_samples(game, TDMode::kTDLambda, 1.0, false, 4000.0, false, tdl_samples, 4);
 
     for (int i = 0; i < 4; ++i)
         EXPECT_NEAR(tdl_samples[i].target, mc_samples[i].target, 1e-9)
@@ -116,9 +116,9 @@ TEST(TrajectoryTest, TDLambda_Half_BetweenTD0AndMC) {
     }
 
     TrainingSample td0[6], mc[6], tdl[6];
-    extract_training_samples(game, TDMode::kTD0,      0.0, false, 4000.0, td0, 6);
-    extract_training_samples(game, TDMode::kMC,       0.0, false, 4000.0, mc,  6);
-    extract_training_samples(game, TDMode::kTDLambda, 0.5, false, 4000.0, tdl, 6);
+    extract_training_samples(game, TDMode::kTD0,      0.0, false, 4000.0, false, td0, 6);
+    extract_training_samples(game, TDMode::kMC,       0.0, false, 4000.0, false, mc,  6);
+    extract_training_samples(game, TDMode::kTDLambda, 0.5, false, 4000.0, false, tdl, 6);
 
     for (int i = 0; i < 6; ++i) {
         double lo = std::min(td0[i].target, mc[i].target);
@@ -138,13 +138,13 @@ TEST(TrajectoryTest, AllTargets_InUnitRange) {
 
     TrainingSample samples[10];
     for (auto mode : {TDMode::kTD0, TDMode::kMC}) {
-        extract_training_samples(game, mode, 0.0, false, 4000.0, samples, 10);
+        extract_training_samples(game, mode, 0.0, false, 4000.0, false, samples, 10);
         for (int i = 0; i < 10; ++i) {
             EXPECT_GE(samples[i].target, 0.0) << "mode=" << (int)mode << " step=" << i;
             EXPECT_LE(samples[i].target, 1.0) << "mode=" << (int)mode << " step=" << i;
         }
     }
-    extract_training_samples(game, TDMode::kTDLambda, 0.7, false, 4000.0, samples, 10);
+    extract_training_samples(game, TDMode::kTDLambda, 0.7, false, 4000.0, false, samples, 10);
     for (int i = 0; i < 10; ++i) {
         EXPECT_GE(samples[i].target, 0.0) << "TDλ step=" << i;
         EXPECT_LE(samples[i].target, 1.0) << "TDλ step=" << i;
@@ -158,7 +158,7 @@ TEST(TrajectoryTest, Tensor_CopiedToSample) {
     GameInstance game = make_game_with_trajectory(3, 0.5);
 
     TrainingSample samples[3];
-    extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, samples, 3);
+    extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, false, samples, 3);
 
     for (int i = 0; i < 3; ++i) {
         // Each step's tensor was filled with float(i).
@@ -175,6 +175,6 @@ TEST(TrajectoryTest, MaxSamples_Respected) {
     GameInstance game = make_game_with_trajectory(10, 0.5);
 
     TrainingSample samples[5];
-    int n = extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, samples, 5);
+    int n = extract_training_samples(game, TDMode::kMC, 0.0, false, 4000.0, false, samples, 5);
     EXPECT_EQ(n, 5);
 }
