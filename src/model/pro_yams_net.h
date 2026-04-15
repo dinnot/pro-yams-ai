@@ -5,11 +5,23 @@
 #include "model/model_config.h"
 
 // ---------------------------------------------------------------------------
-// ProYamsNet — feedforward MLP for win-probability prediction.
+// ResBlockImpl — residual block: two linear layers with LayerNorm and a skip.
+// ---------------------------------------------------------------------------
+struct ResBlockImpl : torch::nn::Module {
+    torch::nn::Linear lin1{nullptr}, lin2{nullptr};
+    torch::nn::LayerNorm norm1{nullptr}, norm2{nullptr};
+    ResBlockImpl(int dim);
+    torch::Tensor forward(torch::Tensor x);
+};
+TORCH_MODULE(ResBlock);
+
+// ---------------------------------------------------------------------------
+// ProYamsNet — feedforward network for win-probability prediction.
 //
-// Architecture:
-//   Input(input_size) → [Linear → ReLU] × hidden_layers → Linear → Sigmoid
-//   Output: P(Win) ∈ (0, 1)
+// Architecture (resnet):
+//   Input(input_size) → Linear+ReLU → [ResBlock] × (hidden_layers-1) → Linear → activation
+// Architecture (mlp):
+//   Input(input_size) → [Linear+ReLU] × hidden_layers → Linear → activation
 //
 // Usage: std::shared_ptr<ProYamsNet> — do NOT use TORCH_MODULE macro, as this
 // model is owned via shared_ptr throughout the codebase.
@@ -29,9 +41,8 @@ public:
 
 private:
     ModelConfig config_;
-    std::vector<torch::nn::Linear> hidden_layers_;
+    torch::nn::Sequential hidden_blocks_{nullptr};
     torch::nn::Linear output_layer_{nullptr};
-    int num_hidden_;
 };
 
 // ---------------------------------------------------------------------------

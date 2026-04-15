@@ -54,3 +54,4 @@ training:
     learning_rate: 0.001
     output_activation: tanh    # tanh (margin mode) | sigmoid (binary win/loss)
     loss_function: mse         # mse (for tanh/margin) | bce (for sigmoid/binary)
+    architecture: resnet       # resnet | mlp

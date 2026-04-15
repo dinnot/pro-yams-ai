@@ -76,7 +76,10 @@
       "Bash(./tests/model_tests)",
       "Bash(./bin/model_tests)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/model/model_tests)",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/model/model_tests *)"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/model/model_tests *)",
+      "Bash(cmake --build build --parallel 4)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --parallel 4)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target model_tests)"
     ]
   }
 }

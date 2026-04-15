@@ -84,6 +84,8 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.model.output_activation must be \"tanh\" or \"sigmoid\"");
     if (m.loss_function != "mse" && m.loss_function != "bce")
         r.fail("training.model.loss_function must be \"mse\" or \"bce\"");
+    if (m.architecture != "mlp" && m.architecture != "resnet")
+        r.fail("training.model.architecture must be \"mlp\" or \"resnet\"");
 
     return r;
 }

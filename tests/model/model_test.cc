@@ -15,34 +15,36 @@ TEST(ModelTest, DefaultConfig_Construction) {
 }
 
 TEST(ModelTest, ParameterCount_DefaultConfig) {
-    // Default: 3 hidden layers of width 256
-    // Layer 0: 809*256 weights + 256 bias = 207,104 + 256 = 207,360
-    // Layer 1: 256*256 weights + 256 bias = 65,536  + 256 = 65,792
-    // Layer 2: 256*256 weights + 256 bias = 65,536  + 256 = 65,792
-    // Output:  256*1   weights + 1   bias = 256     + 1   = 257
-    // Total:                                               = 339,201
+    // Default: 3 hidden layers of width 256, architecture=resnet
+    // Projection: 809*256 + 256                              = 207,360
+    // ResBlock 0: lin1(256*256+256) + norm1(256*2)
+    //           + lin2(256*256+256) + norm2(256*2)           = 132,608
+    // ResBlock 1: same                                       = 132,608
+    // Output:  256*1 + 1                                     =     257
+    // Total:                                                 = 472,833
     ModelConfig cfg;
     ProYamsNet net(cfg);
     int64_t param_count = 0;
     for (const auto& p : net.parameters()) {
         param_count += p.numel();
     }
-    EXPECT_EQ(param_count, 339201LL);
+    EXPECT_EQ(param_count, 472833LL);
 }
 
 TEST(ModelTest, CustomConfig_ParameterCount) {
-    // 2 hidden layers of width 128
+    // 2 hidden layers of width 128, architecture=resnet
     ModelConfig cfg;
     cfg.hidden_layers = 2;
     cfg.hidden_width  = 128;
-    // Layer 0: 809*128 + 128 = 103,552 + 128 = 103,680
-    // Layer 1: 128*128 + 128 = 16,384  + 128 = 16,512
-    // Output:  128*1   + 1   = 129
-    // Total:                 = 120,321
+    // Projection: 809*128 + 128                             = 103,680
+    // ResBlock 0: lin1(128*128+128) + norm1(128*2)
+    //           + lin2(128*128+128) + norm2(128*2)          =  33,536
+    // Output:  128*1 + 1                                    =     129
+    // Total:                                                = 137,345
     ProYamsNet net(cfg);
     int64_t param_count = 0;
     for (const auto& p : net.parameters()) param_count += p.numel();
-    EXPECT_EQ(param_count, 120321LL);
+    EXPECT_EQ(param_count, 137345LL);
 }
 
 // ---------------------------------------------------------------------------

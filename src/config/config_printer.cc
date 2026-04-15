@@ -68,6 +68,7 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "learning_rate"     << YAML::Value << m.learning_rate;
     out << YAML::Key << "output_activation" << YAML::Value << m.output_activation;
     out << YAML::Key << "loss_function"     << YAML::Value << m.loss_function;
+    out << YAML::Key << "architecture"      << YAML::Value << m.architecture;
     out << YAML::EndMap;
 
     out << YAML::EndMap; // training
