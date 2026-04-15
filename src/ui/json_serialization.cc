@@ -107,7 +107,8 @@ json game_state_to_json(const GameSession& session) {
         t["score"] = static_cast<int>(turn.score);
 
         // Debug block (omitted entirely when debug data is absent).
-        if (!turn.hold_evals.empty() || !turn.placement_evals.empty()) {
+        if (!turn.hold_evals.empty() || !turn.placement_evals.empty() ||
+            turn.has_board_nn_value) {
             json dbg;
 
             json he_arr = json::array();
@@ -140,6 +141,9 @@ json game_state_to_json(const GameSession& session) {
                 pe_arr.push_back(c);
             }
             dbg["placement_evals"] = pe_arr;
+
+            if (turn.has_board_nn_value)
+                dbg["board_nn_value"] = turn.board_nn_value;
 
             t["debug"] = dbg;
         }

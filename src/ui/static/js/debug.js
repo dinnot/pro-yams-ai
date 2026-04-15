@@ -3,11 +3,25 @@
 
 const Debug = {
     /// Build a collapsed debug panel DOM element for one turn's debug data.
-    /// debugData: { hold_evals: [[{mask, held_flags, expected_value},...], ...],
+    /// debugData: { board_nn_value?: number,
+    ///              hold_evals: [[{mask, held_flags, expected_value},...], ...],
     ///              placement_evals: [{column, row, column_name, row_name, score, eval_value},...] }
     buildPanel(debugData) {
         const panel = document.createElement('div');
         panel.className = 'debug-panel';
+
+        // --- Board NN value ---
+        if (debugData.board_nn_value !== undefined) {
+            const title = document.createElement('div');
+            title.className = 'debug-section-title';
+            title.textContent = 'Board evaluation (NN)';
+            panel.appendChild(title);
+
+            const val = document.createElement('div');
+            val.className = 'debug-nn-value';
+            val.textContent = `Win probability: ${debugData.board_nn_value.toFixed(4)}`;
+            panel.appendChild(val);
+        }
 
         // --- Hold evaluations ---
         if (debugData.hold_evals && debugData.hold_evals.length > 0) {
@@ -32,23 +46,52 @@ const Debug = {
 
         // --- Placement evaluations ---
         if (debugData.placement_evals && debugData.placement_evals.length > 0) {
+            const PAGE = 10;
+            const total = debugData.placement_evals.length;
+
             const plTitle = document.createElement('div');
             plTitle.className = 'debug-section-title';
-            plTitle.textContent = `Placement candidates (top 10)`;
+            plTitle.textContent = `Placement candidates (top ${Math.min(PAGE, total)} of ${total})`;
             panel.appendChild(plTitle);
 
-            const tbl = Debug.buildTable(
-                ['Rank', 'Column', 'Row', 'Score', 'Bot Eval'],
-                debugData.placement_evals.slice(0, 10).map((cand, rank) => [
-                    rank + 1,
-                    cand.column_name || cand.column,
-                    cand.row_name    || cand.row,
-                    cand.score,
-                    cand.eval_value.toFixed(4)
-                ]),
-                0  // highlight rank-1 row
-            );
+            const rows = debugData.placement_evals.map((cand, rank) => [
+                rank + 1,
+                cand.column_name || cand.column,
+                cand.row_name    || cand.row,
+                cand.score,
+                cand.eval_value.toFixed(4)
+            ]);
+
+            const tbl = Debug.buildTable(['Rank', 'Column', 'Row', 'Score', 'Bot Eval'],
+                                         rows.slice(0, PAGE), 0);
             panel.appendChild(tbl);
+
+            if (total > PAGE) {
+                const toggle = document.createElement('button');
+                toggle.className = 'debug-show-more';
+                toggle.textContent = `Show all ${total}`;
+                let expanded = false;
+                toggle.addEventListener('click', () => {
+                    expanded = !expanded;
+                    // Rebuild tbody in-place rather than replacing the whole table.
+                    const tbody = tbl.tBodies[0];
+                    tbody.replaceChildren();
+                    const visible = expanded ? rows : rows.slice(0, PAGE);
+                    visible.forEach((row, ri) => {
+                        const tr = tbody.insertRow();
+                        if (ri === 0) tr.classList.add('debug-best-row');
+                        for (const cell of row) {
+                            const td = tr.insertCell();
+                            td.textContent = String(cell);
+                        }
+                    });
+                    plTitle.textContent = expanded
+                        ? `Placement candidates (all ${total})`
+                        : `Placement candidates (top ${PAGE} of ${total})`;
+                    toggle.textContent = expanded ? 'Show less' : `Show all ${total}`;
+                });
+                panel.appendChild(toggle);
+            }
         }
 
         return panel;

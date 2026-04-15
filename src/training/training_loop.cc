@@ -236,7 +236,7 @@ void TrainingLoop::do_training_step() {
 
     last_loss_ = trainer_->train_step(states.data(), targets.data(), n);
     
-    if (config_.debug_mode && training_step_ % 1000 == 0) {
+    if (config_.debug_mode && training_step_ % 200 == 0) {
         std::string queue_log_path = config_.log_dir + "/debug_queues.log";
         std::ofstream f(queue_log_path, std::ios::app);
         if (f.is_open()) {

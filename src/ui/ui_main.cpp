@@ -39,11 +39,10 @@ int main(int argc, char* argv[]) {
 
     if (!checkpoint_path.empty()) {
         try {
-            ModelConfig model_cfg;
+            ModelConfig model_cfg =
+                ModelTrainer::config_from_checkpoint(checkpoint_path);
             ModelTrainer trainer(model_cfg, device);
-            int dummy_step = 0;
-            double dummy_t = 1.0, dummy_e = 0.0;
-            trainer.load_checkpoint(checkpoint_path, dummy_step, dummy_t, dummy_e);
+            trainer.load_weights(checkpoint_path);
             model = trainer.clone_for_inference(device);
             model->to(device);
             model->eval();

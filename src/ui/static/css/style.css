@@ -229,6 +229,24 @@ select, input[type="text"] {
 .debug-held-die { color: #e94560; }
 .debug-free-die { color: #555; }
 
+.debug-show-more {
+  background: none;
+  border: none;
+  color: #7aabcc;
+  font-size: 0.68rem;
+  padding: 2px 0 4px;
+  cursor: pointer;
+  text-decoration: underline;
+  display: block;
+}
+.debug-show-more:hover { color: #a8d0ee; }
+
+.debug-nn-value {
+  font-size: 0.75rem;
+  color: #a8d0ee;
+  padding: 2px 0 6px;
+}
+
 /* Score breakdown */
 .score-breakdown-panel {
   margin-top: 16px;

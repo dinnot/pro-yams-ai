@@ -47,8 +47,20 @@ public:
 
     /// Load a checkpoint and restore all state.
     /// On return, training_step / temperature / epsilon hold the saved values.
+    /// Supports both the current (hidden_blocks) and legacy (hidden_N) formats.
     void load_checkpoint(const std::string& path, int& training_step,
                           double& temperature, double& epsilon);
+
+    /// Load only the model weights from a checkpoint (no optimizer state).
+    /// Useful for inference-only contexts where the optimizer is not needed and
+    /// the .optimizer file may contain CUDA tensors incompatible with CPU.
+    void load_weights(const std::string& path);
+
+    /// Read architecture metadata from a checkpoint without loading weights.
+    /// Missing fields fall back to sensible defaults (hidden_width=256,
+    /// hidden_layers=3, architecture="mlp").  Safe to call before constructing
+    /// a ModelTrainer so the trainer is built with the right shape.
+    static ModelConfig config_from_checkpoint(const std::string& path);
 
     /// Total number of train_step() calls made so far.
     int training_step_count() const { return training_step_; }

@@ -351,7 +351,8 @@ const Game = {
 
             const hasDebug = turn.debug &&
                 ((turn.debug.hold_evals && turn.debug.hold_evals.length > 0) ||
-                 (turn.debug.placement_evals && turn.debug.placement_evals.length > 0));
+                 (turn.debug.placement_evals && turn.debug.placement_evals.length > 0) ||
+                 turn.debug.board_nn_value !== undefined);
 
             entry.innerHTML =
                 `<span class="${pClass}">P${turn.player}</span> ${chain}` +

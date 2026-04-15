@@ -134,6 +134,13 @@ void ModelTrainer::save_checkpoint(const std::string& path,
                          torch::tensor(static_cast<int64_t>(config_.hidden_width)));
     model_archive.write("input_size",
                          torch::tensor(static_cast<int64_t>(config_.input_size)));
+    {
+        const auto& arch = config_.architecture;
+        auto t = torch::from_blob(const_cast<char*>(arch.data()),
+                                   {static_cast<long>(arch.size())},
+                                   torch::kUInt8).clone();
+        model_archive.write("architecture", t);
+    }
 
     model_archive.save_to(path + ".model");
 
@@ -143,6 +150,53 @@ void ModelTrainer::save_checkpoint(const std::string& path,
     training_step_ = training_step;
 }
 
+// ---------------------------------------------------------------------------
+// load_model_weights_from_archive — shared helper used by load_checkpoint and
+// load_weights.  Tries current-format first, falls back to legacy MLP format
+// (pre-hidden_blocks refactor: hidden_0, hidden_1, … → hidden_blocks.0, …).
+// ---------------------------------------------------------------------------
+static void load_model_weights_from_archive(torch::serialize::InputArchive& archive,
+                                             ProYamsNet& model,
+                                             const std::string& path,
+                                             int ckpt_hidden_layers) {
+    bool loaded = false;
+    try {
+        model.load(archive);
+        loaded = true;
+    } catch (const c10::Error& first_err) {
+        // Reload a fresh archive — the original may be partially consumed.
+        torch::serialize::InputArchive legacy;
+        legacy.load_from(path + ".model");
+        try {
+            torch::NoGradGuard no_grad;
+            auto params = model.named_parameters();
+
+            torch::serialize::InputArchive out_a;
+            legacy.read("output", out_a);
+            torch::Tensor w, b;
+            out_a.read("weight", w); out_a.read("bias", b);
+            params["output.weight"].data().copy_(w);
+            params["output.bias"].data().copy_(b);
+
+            for (int i = 0; i < ckpt_hidden_layers; ++i) {
+                torch::serialize::InputArchive ha;
+                legacy.read("hidden_" + std::to_string(i), ha);
+                torch::Tensor hw, hb;
+                ha.read("weight", hw); ha.read("bias", hb);
+                std::string key = "hidden_blocks." + std::to_string(i * 2);
+                params[key + ".weight"].data().copy_(hw);
+                params[key + ".bias"].data().copy_(hb);
+            }
+            loaded = true;
+            std::cerr << "Note: loaded checkpoint using legacy MLP format migration.\n";
+        } catch (const std::exception& leg_err) {
+            std::cerr << "Legacy load also failed: " << leg_err.what() << "\n";
+            throw first_err;
+        }
+    }
+    (void)loaded;
+}
+
 void ModelTrainer::load_checkpoint(const std::string& path,
                                     int& training_step,
                                     double& temperature,
@@ -150,42 +204,86 @@ void ModelTrainer::load_checkpoint(const std::string& path,
     // --- Load model weights + metadata ---
     torch::serialize::InputArchive model_archive;
     model_archive.load_from(path + ".model");
-    model_->load(model_archive);
+
+    // Read metadata with fallback defaults (old checkpoints may lack some keys).
+    auto read_int64 = [&](const std::string& key, int64_t def) -> int64_t {
+        try { torch::Tensor t; model_archive.read(key, t); return t.item<int64_t>(); }
+        catch (...) { return def; }
+    };
+    auto read_dbl = [&](const std::string& key, double def) -> double {
+        try { torch::Tensor t; model_archive.read(key, t); return t.item<double>(); }
+        catch (...) { return def; }
+    };
+
+    training_step = static_cast<int>(read_int64("training_step", 0));
+    temperature   = read_dbl("temperature", 1.0);
+    epsilon       = read_dbl("epsilon", 0.0);
+    int ckpt_hidden_layers = static_cast<int>(read_int64("hidden_layers", config_.hidden_layers));
+    int ckpt_hidden_width  = static_cast<int>(read_int64("hidden_width",  config_.hidden_width));
+
+    if (ckpt_hidden_layers != config_.hidden_layers || ckpt_hidden_width != config_.hidden_width) {
+        std::cerr << "Warning: checkpoint architecture (" << ckpt_hidden_layers
+                  << "x" << ckpt_hidden_width << ") differs from model config ("
+                  << config_.hidden_layers << "x" << config_.hidden_width
+                  << ") — load may fail.\n";
+    }
+
+    load_model_weights_from_archive(model_archive, *model_, path, ckpt_hidden_layers);
     model_->to(device_);
 
-    // Read metadata — use separate tensor vars to avoid dtype reuse issues
-    {
-        torch::Tensor t;
-        model_archive.read("training_step", t);
-        training_step = static_cast<int>(t.item<int64_t>());
+    // --- Load optimizer state (best-effort; skip if incompatible) ---
+    try {
+        torch::load(*optimizer_, path + ".optimizer");
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: could not load optimizer state (" << e.what()
+                  << ") — optimizer will start fresh.\n";
     }
-    {
-        torch::Tensor t;
-        model_archive.read("temperature", t);
-        temperature = t.item<double>();
-    }
-    {
-        torch::Tensor t;
-        model_archive.read("epsilon", t);
-        epsilon = t.item<double>();
-    }
-
-    // Verify architecture
-    {
-        torch::Tensor t;
-        model_archive.read("hidden_layers", t);
-        assert(static_cast<int>(t.item<int64_t>()) == config_.hidden_layers);
-    }
-    {
-        torch::Tensor t;
-        model_archive.read("hidden_width", t);
-        assert(static_cast<int>(t.item<int64_t>()) == config_.hidden_width);
-    }
-
-    // --- Load optimizer state ---
-    torch::load(*optimizer_, path + ".optimizer");
 
     training_step_ = training_step;
+}
+
+void ModelTrainer::load_weights(const std::string& path) {
+    torch::serialize::InputArchive archive;
+    archive.load_from(path + ".model");
+
+    auto read_int64 = [&](const std::string& key, int64_t def) -> int64_t {
+        try { torch::Tensor t; archive.read(key, t); return t.item<int64_t>(); }
+        catch (...) { return def; }
+    };
+    int ckpt_hidden_layers = static_cast<int>(
+        read_int64("hidden_layers", config_.hidden_layers));
+
+    load_model_weights_from_archive(archive, *model_, path, ckpt_hidden_layers);
+    model_->to(device_);
+}
+
+ModelConfig ModelTrainer::config_from_checkpoint(const std::string& path) {
+    ModelConfig cfg;  // sensible defaults
+
+    torch::serialize::InputArchive archive;
+    archive.load_from(path + ".model");
+
+    auto read_int64 = [&](const std::string& key, int64_t def) -> int64_t {
+        try { torch::Tensor t; archive.read(key, t); return t.item<int64_t>(); }
+        catch (...) { return def; }
+    };
+
+    cfg.hidden_layers = static_cast<int>(read_int64("hidden_layers", 3));
+    cfg.hidden_width  = static_cast<int>(read_int64("hidden_width",  256));
+    cfg.input_size    = static_cast<int>(read_int64("input_size",    cfg.input_size));
+
+    // Old checkpoints pre-date the resnet refactor — assume mlp.
+    // New checkpoints save "architecture" explicitly.
+    try {
+        torch::Tensor t;
+        archive.read("architecture", t);
+        cfg.architecture = std::string(reinterpret_cast<const char*>(t.data_ptr()),
+                                       t.numel());
+    } catch (...) {
+        cfg.architecture = "mlp";
+    }
+
+    return cfg;
 }
 
 // ---------------------------------------------------------------------------

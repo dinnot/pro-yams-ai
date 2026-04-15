@@ -91,6 +91,11 @@ private:
     // Play one bot turn for the given session. Returns true if game is now over.
     bool play_one_bot_turn(GameSession& session);
 
+    // If nn_model_ is available, evaluate the current board state from
+    // record.player's perspective and store the result in record.
+    // Must be called after perform_placement has updated session state.
+    void eval_and_store_board_nn(GameSession& session, GameSession::TurnRecord& record);
+
     // Shared state (read-only after construction — no mutex needed)
     const PrecomputedTables& tables_;
     ProYamsNet*              nn_model_;

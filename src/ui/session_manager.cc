@@ -23,6 +23,22 @@ SessionManager::SessionManager(const PrecomputedTables& tables,
     : tables_(tables), nn_model_(nn_model), device_(device) {}
 
 // ---------------------------------------------------------------------------
+// eval_and_store_board_nn
+// ---------------------------------------------------------------------------
+
+void SessionManager::eval_and_store_board_nn(GameSession& session,
+                                              GameSession::TurnRecord& record) {
+    if (!nn_model_) return;
+    float buf[kTensorSize];
+    generate_tensor(session.state.board, session.ctx, record.player, tables_, buf);
+    torch::NoGradGuard no_grad;
+    auto input  = torch::from_blob(buf, {1, kTensorSize}, torch::kFloat32).to(device_);
+    auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
+    record.board_nn_value     = output.data_ptr<float>()[0];
+    record.has_board_nn_value = true;
+}
+
+// ---------------------------------------------------------------------------
 // get_entry — look up a session entry by ID.  Briefly acquires map_mutex_.
 // Returns a shared_ptr so the entry stays alive even if remove_session runs
 // concurrently.
@@ -116,6 +132,7 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
             perform_placement(session.state, session.ctx,
                               record.placement.column, record.placement.row, session.rng);
         }
+        if (session.debug_mode) eval_and_store_board_nn(session, record);
         session.history.push_back(std::move(record));
         return;
     }
@@ -132,12 +149,23 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
 
         if (result.should_place) {
             if (session.debug_mode) {
+                // Sort dice once — compute_raw_score requires sorted input.
+                int8_t sorted_dice[kNumDice];
+                std::memcpy(sorted_dice, session.state.dice, sizeof(sorted_dice));
+                std::sort(sorted_dice, sorted_dice + kNumDice);
+
                 std::vector<GameSession::PlacementCandidateEval> pevs;
-                pevs.reserve(session.buffers.request_count);
                 for (int i = 0; i < session.buffers.request_count; ++i) {
-                    pevs.push_back({session.buffers.requests[i].placement,
-                                    session.buffers.requests[i].score,
-                                    static_cast<float>(session.buffers.evs[i])});
+                    int8_t req_score = session.buffers.requests[i].score;
+                    int    row       = session.buffers.requests[i].placement.row;
+                    int8_t raw       = static_cast<int8_t>(compute_raw_score(sorted_dice, row));
+                    // Only include placements valid for the current dice: the declared
+                    // score must match what the dice actually produce, or be a scratch (0).
+                    if (req_score == raw || req_score == 0) {
+                        pevs.push_back({session.buffers.requests[i].placement,
+                                        req_score,
+                                        static_cast<float>(session.buffers.evs[i])});
+                    }
                 }
                 std::sort(pevs.begin(), pevs.end(),
                           [](const auto& a, const auto& b) { return a.eval_value > b.eval_value; });
@@ -170,6 +198,7 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
         record.dice_after_hold.push_back(after);
     }
 
+    if (session.debug_mode) eval_and_store_board_nn(session, record);
     session.history.push_back(std::move(record));
 }
 
@@ -203,6 +232,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
             perform_placement(session.state, session.ctx,
                               record.placement.column, record.placement.row, session.rng);
         }
+        if (session.debug_mode) eval_and_store_board_nn(session, record);
         session.history.push_back(std::move(record));
         return;
     }
@@ -236,12 +266,23 @@ void SessionManager::play_nn_turn(GameSession& session) {
 
         if (result.should_place) {
             if (session.debug_mode) {
+                // Sort dice once — compute_raw_score requires sorted input.
+                int8_t sorted_dice[kNumDice];
+                std::memcpy(sorted_dice, session.state.dice, sizeof(sorted_dice));
+                std::sort(sorted_dice, sorted_dice + kNumDice);
+
                 std::vector<GameSession::PlacementCandidateEval> pevs;
-                pevs.reserve(session.buffers.request_count);
                 for (int i = 0; i < session.buffers.request_count; ++i) {
-                    pevs.push_back({session.buffers.requests[i].placement,
-                                    session.buffers.requests[i].score,
-                                    static_cast<float>(session.buffers.evs[i])});
+                    int8_t req_score = session.buffers.requests[i].score;
+                    int    row       = session.buffers.requests[i].placement.row;
+                    int8_t raw       = static_cast<int8_t>(compute_raw_score(sorted_dice, row));
+                    // Only include placements valid for the current dice: the declared
+                    // score must match what the dice actually produce, or be a scratch (0).
+                    if (req_score == raw || req_score == 0) {
+                        pevs.push_back({session.buffers.requests[i].placement,
+                                        req_score,
+                                        static_cast<float>(session.buffers.evs[i])});
+                    }
                 }
                 std::sort(pevs.begin(), pevs.end(),
                           [](const auto& a, const auto& b) { return a.eval_value > b.eval_value; });
@@ -274,6 +315,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
         record.dice_after_hold.push_back(after);
     }
 
+    if (session.debug_mode) eval_and_store_board_nn(session, record);
     session.history.push_back(std::move(record));
 }
 
@@ -305,6 +347,7 @@ void SessionManager::play_mc_turn(GameSession& session) {
         }
     }
 
+    if (session.debug_mode) eval_and_store_board_nn(session, record);
     session.history.push_back(std::move(record));
 }
 
@@ -452,11 +495,14 @@ bool SessionManager::human_place(int session_id, int column, int row) {
         s->current_turn.placement = {static_cast<int8_t>(column),
                                       static_cast<int8_t>(row)};
         s->current_turn.score = static_cast<int8_t>(score);
-        s->history.push_back(s->current_turn);
-        s->current_turn = {};
 
         perform_placement(s->state, s->ctx, column, row, s->rng);
         s->waiting_for_human = false;
+
+        if (s->debug_mode) eval_and_store_board_nn(*s, s->current_turn);
+
+        s->history.push_back(s->current_turn);
+        s->current_turn = {};
 
         if (is_terminal(s->state.board)) {
             s->game_over = true;

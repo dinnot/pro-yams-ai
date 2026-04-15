@@ -73,6 +73,11 @@ struct GameSession {
         std::vector<std::vector<HoldCandidateEval>> hold_evals;
         // All placements the bot evaluated, sorted desc by eval_value.
         std::vector<PlacementCandidateEval> placement_evals;
+        // NN evaluation of the resulting board after this turn, from placing
+        // player's perspective. Populated when debug_mode == true and a NN
+        // model is available (regardless of player type).
+        float board_nn_value     = -1.0f;
+        bool  has_board_nn_value = false;
     };
     std::vector<TurnRecord> history;
 
