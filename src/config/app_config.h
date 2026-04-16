@@ -13,6 +13,7 @@ struct AppConfig {
     int num_steps = 100000;  // Gradient steps to run in train mode
     std::string mode = "info";
     std::string config_path;
-    std::string checkpoint_path;
+    std::string checkpoint_path;  // Init weights from this checkpoint (fresh training)
+    std::string resume_path;      // Resume full training state from this checkpoint dir
     uint64_t seed = 42;
 };

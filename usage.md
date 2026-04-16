@@ -52,11 +52,37 @@ Prints CUDA availability, device count, and runs a quick GPU tensor test.
 ./build/pro_yams_ai --mode train --config config/default.yaml
 ```
 
-Resume from a checkpoint:
+#### Initialize from a pre-trained model
+
+Start fresh training (step 0, new optimizer) using an existing checkpoint's weights as the starting point:
 
 ```bash
-./build/pro_yams_ai --mode train --config config/default.yaml --checkpoint checkpoints/step_5000.pt
+./build/pro_yams_ai --mode train --config config/my_config.yaml \
+    --checkpoint checkpoints/test_td0_100k/checkpoint_step_50000
 ```
+
+`--checkpoint` accepts a file stem or a directory (uses the latest checkpoint in the directory):
+
+```bash
+./build/pro_yams_ai --mode train --config config/my_config.yaml \
+    --checkpoint checkpoints/test_td0_100k
+```
+
+#### Resume a cancelled training run
+
+Resume from where training left off — restores the saved config, model weights, optimizer state, training step, temperature, and replay buffer:
+
+```bash
+./build/pro_yams_ai --mode train --resume checkpoints/test_td0_100k
+```
+
+The config is loaded automatically from `<checkpoint_dir>/config.yaml` (saved on every training start). You can still override individual settings:
+
+```bash
+./build/pro_yams_ai --mode train --resume checkpoints/test_td0_100k --num_steps 200000
+```
+
+`--resume` and `--checkpoint` cannot be used together.
 
 Training supports graceful shutdown with `Ctrl+C` (SIGINT/SIGTERM) — it finishes the current step and saves a checkpoint.
 
@@ -109,7 +135,8 @@ All flags can override values from the YAML config file.
 |------|-------------|---------|
 | `--mode` | `info`, `config`, `train`, `eval`, `play` | `info` |
 | `--config` | Path to YAML config file | (built-in defaults) |
-| `--checkpoint` | Path to model checkpoint | (none) |
+| `--checkpoint` | Init model weights from checkpoint (stem or dir) | (none) |
+| `--resume` | Resume training from checkpoint dir (loads saved config) | (none) |
 | `--seed` | RNG seed | 42 |
 | `--num_steps` | Training gradient steps | 100000 |
 | `--learning_rate` | Model learning rate | 0.001 |

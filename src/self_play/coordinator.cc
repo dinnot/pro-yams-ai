@@ -39,10 +39,19 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
         inference.batch_inference(dummy, 1, &dummy_out);
     }
 
-    // Pre-allocate buffers.
-    std::vector<float>  batch_tensors(config.max_inference_batch * kTensorSize);
+    // Pre-allocate batch tensor as pinned memory when using CUDA.
+    // Pinned (page-locked) memory enables async DMA transfers to GPU,
+    // freeing the CPU thread during the H2D copy.
+    auto tensor_opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    if (inference.device().is_cuda()) {
+        tensor_opts = tensor_opts.pinned_memory(true);
+    }
+    torch::Tensor batch_tensor_storage = torch::empty(
+        {config.max_inference_batch, kTensorSize}, tensor_opts);
+    float* batch_tensors_ptr = batch_tensor_storage.data_ptr<float>();
+
     std::vector<double> batch_results(config.max_inference_batch);
-    std::vector<GameInstance*> temp_buffer(config.min_games_per_batch);
+    std::vector<GameInstance*> temp_buffer(config.max_inference_batch);
 
     struct BatchEntry {
         GameInstance* game;
@@ -68,61 +77,45 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
         auto t_assembly_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
         // ----------------------------------------------------------------
-        // Phase 1: assemble a batch of up to min_games_per_batch games.
+        // Phase 1+2: Bulk-collect games with minimal lock acquisitions.
         //
-        // Use pop_with_timeout so that when only a few (or one) game
-        // remains active and the others have completed, we don't wait
-        // indefinitely for a full min_games_per_batch.  The rule:
-        //   • If pop_with_timeout returns nullptr (timeout) AND the
-        //     batch already has at least one game, break immediately
-        //     and proceed to inference on the partial batch.
-        //   • If the batch is still empty on timeout, loop back to
-        //     the outer while so we re-check shutdown.
+        // First collect() blocks up to batch_timeout_ms for at least one
+        // game. Second collect() greedily grabs whatever is instantly
+        // available. This replaces per-game pop loops that hammered the
+        // queue mutex.
         // ----------------------------------------------------------------
-        for (int slot = 0; slot < config.min_games_per_batch; ++slot) {
-            GameInstance* game = pending.pop_with_timeout(config.batch_timeout_ms);
-            if (game == nullptr) {
-                // Timeout: process partial batch if we have one, else re-check.
-                break;
-            }
-            if (game == nullptr) continue;  // sentinel guard (redundant, safe)
+        int collected = 0;
+        collected = pending.collect(temp_buffer.data(),
+                                    config.max_inference_batch,
+                                    config.batch_timeout_ms);
+        if (collected == 0) continue;  // timeout with nothing — re-check shutdown
+
+        // Greedily grab any more that arrived while we processed.
+        if (collected < config.max_inference_batch) {
+            collected += pending.collect(temp_buffer.data() + collected,
+                                         config.max_inference_batch - collected,
+                                         0);
+        }
+
+        for (int i = 0; i < collected; ++i) {
+            GameInstance* game = temp_buffer[i];
             int req_count = game->solver_buffers.request_count;
             if (req_count <= 0) {
                 game->phase = GamePhase::kNeedRequests;
                 available.push(game);
                 continue;
             }
+
             // Always admit the very first game to guarantee progress.
             if (num_entries > 0 &&
                 total_tensors + req_count > config.max_inference_batch) {
-                pending.push_front(game);
-                break;  // batch is full enough; don't fetch more
-            }
-            std::memcpy(batch_tensors.data() + total_tensors * kTensorSize,
-                        game->tensor_buffer,
-                        static_cast<size_t>(req_count) * kTensorSize * sizeof(float));
-            batch_entries[num_entries++] = {game, total_tensors, req_count};
-            total_tensors += req_count;
-        }
-
-        // ----------------------------------------------------------------
-        // Phase 2: greedily fill remaining batch space (non-blocking).
-        // ----------------------------------------------------------------
-        while (total_tensors < config.max_inference_batch) {
-            GameInstance* game = pending.try_pop();
-            if (game == nullptr) break;
-            int req_count = game->solver_buffers.request_count;
-            if (req_count <= 0) {
-                game->phase = GamePhase::kNeedRequests;
-                available.push(game);
-                continue;
-            }
-            if (total_tensors + req_count > config.max_inference_batch) {
-                // Requeue at the front and stop trying — subsequent games won't fit either.
-                pending.push_front(game);
+                // Batch is full. Return this game and all subsequent
+                // unprocessed games to the front of the queue.
+                pending.push_front_batch(temp_buffer.data() + i, collected - i);
                 break;
             }
-            std::memcpy(batch_tensors.data() + total_tensors * kTensorSize,
+
+            std::memcpy(batch_tensors_ptr + total_tensors * kTensorSize,
                         game->tensor_buffer,
                         static_cast<size_t>(req_count) * kTensorSize * sizeof(float));
             batch_entries[num_entries++] = {game, total_tensors, req_count};
@@ -134,9 +127,10 @@ void coordinator_thread(GameQueue& pending, GameQueue& available,
         auto t_inference_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
         // ----------------------------------------------------------------
-        // Phase 3: GPU inference.
+        // Phase 3: GPU inference (uses async DMA when buffer is pinned).
         // ----------------------------------------------------------------
-        inference.batch_inference(batch_tensors.data(), total_tensors,
+        auto input_slice = batch_tensor_storage.narrow(0, 0, total_tensors);
+        inference.batch_inference(input_slice, total_tensors,
                                   batch_results.data());
 
         auto t_distribute_start = config.debug_mode ? Clock::now() : Clock::time_point();

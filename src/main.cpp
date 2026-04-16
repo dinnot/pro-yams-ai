@@ -77,10 +77,27 @@ static int mode_train(const AppConfig& cfg) {
         std::filesystem::create_directories(cfg.training.log_dir);
         save_config(cfg, cfg.training.log_dir + "/config.yaml");
     }
+    // Also save config into checkpoint dir so --resume can find it later.
+    std::filesystem::create_directories(cfg.training.checkpoint_dir);
+    save_config(cfg, cfg.training.checkpoint_dir + "/config.yaml");
 
-    if (!cfg.checkpoint_path.empty()) {
-        std::cout << "Resuming from checkpoint dir: " << cfg.checkpoint_path << "\n";
-        resume_from_checkpoint(loop, cfg.checkpoint_path);
+    if (!cfg.resume_path.empty() && !cfg.checkpoint_path.empty()) {
+        std::cerr << "Error: --resume and --checkpoint cannot be used together.\n";
+        return 1;
+    }
+
+    if (!cfg.resume_path.empty()) {
+        std::cout << "Resuming training from: " << cfg.resume_path << "\n";
+        if (!resume_from_checkpoint(loop, cfg.resume_path)) {
+            std::cerr << "Error: no checkpoints found in " << cfg.resume_path << "\n";
+            return 1;
+        }
+    } else if (!cfg.checkpoint_path.empty()) {
+        std::cout << "Initializing model weights from: " << cfg.checkpoint_path << "\n";
+        if (!init_from_checkpoint(loop, cfg.checkpoint_path)) {
+            std::cerr << "Error: could not load checkpoint from " << cfg.checkpoint_path << "\n";
+            return 1;
+        }
     }
 
     std::cout << "Starting training for " << cfg.num_steps << " steps\n";

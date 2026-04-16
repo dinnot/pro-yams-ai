@@ -24,6 +24,14 @@ public:
     /// @param output     Output array (batch_size doubles) — written in place
     void batch_inference(const float* input, int batch_size, double* output);
 
+    /// Run inference on a pre-built CPU tensor (e.g. pinned memory).
+    /// Uses non-blocking GPU transfer when possible (pinned → async DMA).
+    ///
+    /// @param input_tensor  CPU tensor of shape [batch_size, kTensorSize]
+    /// @param batch_size    Number of samples
+    /// @param output        Output array (batch_size doubles) — written in place
+    void batch_inference(torch::Tensor input_tensor, int batch_size, double* output);
+
     /// Atomically swap the underlying model.
     /// Safe to call while another thread is inside batch_inference.
     void swap_model(std::shared_ptr<ProYamsNet> new_model);

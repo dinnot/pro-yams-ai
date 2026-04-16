@@ -26,6 +26,13 @@ void InferenceEngine::batch_inference(const float* input, int batch_size,
         options
     );
 
+    batch_inference(input_tensor, batch_size, output);
+}
+
+void InferenceEngine::batch_inference(torch::Tensor input_tensor, int batch_size,
+                                       double* output) {
+    assert(batch_size > 0);
+
     torch::Tensor result;
     std::shared_ptr<ProYamsNet> local_model;
 
@@ -37,9 +44,12 @@ void InferenceEngine::batch_inference(const float* input, int batch_size,
 
     // Execute GPU forward pass lock-free — local_model keeps the old model
     // alive even if swap_model() runs concurrently.
+    // When input_tensor is pinned memory, non_blocking=true enables async DMA
+    // to GPU, freeing the CPU thread while the transfer completes.
     {
         torch::NoGradGuard no_grad;
-        auto gpu_input  = input_tensor.to(device_);
+        bool async_transfer = device_.is_cuda() && input_tensor.is_pinned();
+        auto gpu_input  = input_tensor.to(device_, /*non_blocking=*/async_transfer);
         auto gpu_output = local_model->forward(gpu_input);
         result = gpu_output.to(torch::kCPU).contiguous();
     }

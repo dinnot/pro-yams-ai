@@ -27,6 +27,16 @@ void GameQueue::push_batch(GameInstance** games, int count) {
     cv_.notify_all();
 }
 
+void GameQueue::push_front_batch(GameInstance** games, int count) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Insert in reverse so games[0] ends up at the front.
+        for (int i = count - 1; i >= 0; --i)
+            queue_.push_front(games[i]);
+    }
+    cv_.notify_all();
+}
+
 GameInstance* GameQueue::pop() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return !queue_.empty(); });

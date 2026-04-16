@@ -85,7 +85,11 @@
       "Bash(python3 -m pytest --tb=short -q)",
       "Bash(./build/src/ui/pro_yams_ui --static_dir ./src/ui/static --port 8081 --checkpoint ./checkpoints/test_td0_100k/checkpoint_step_100000)",
       "Bash(kill %1)",
-      "Bash(wait)"
+      "Bash(wait)",
+      "Bash(cmake --build build --target pro_yams_tests)",
+      "Bash(ls /home/sorin/pro_yams_ai/build/*.ninja)",
+      "Bash(cmake --build build --target pro_yams)",
+      "Bash(cmake --build build)"
     ]
   }
 }

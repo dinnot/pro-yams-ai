@@ -2,7 +2,6 @@
 add_library(solver STATIC
     precomputed_tables.cc
     solver.cc
-    placeholder.cc
 )
 target_include_directories(solver PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(solver PUBLIC engine)

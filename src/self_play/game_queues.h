@@ -23,6 +23,10 @@ public:
     /// Push multiple games at once (reduces lock acquisitions).
     void push_batch(GameInstance** games, int count);
 
+    /// Push multiple games to the front of the queue, preserving their order.
+    /// After this call, games[0] will be at the very front.
+    void push_front_batch(GameInstance** games, int count);
+
     /// Pop a game. Blocks until one is available.
     /// May return nullptr if nullptr was explicitly pushed (shutdown sentinel).
     GameInstance* pop();

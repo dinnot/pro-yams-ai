@@ -71,6 +71,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "use_pbrs",          tc.use_pbrs);
     maybe_assign(n, "pbrs_upper_reward", tc.pbrs_upper_reward);
     maybe_assign(n, "pbrs_clean_reward", tc.pbrs_clean_reward);
+    maybe_assign(n, "logs_on_start",     tc.logs_on_start);
     if (n["td_mode"])   tc.td_mode = parse_td_mode(n["td_mode"].as<std::string>());
     if (n["self_play"]) load_self_play_config(n["self_play"], tc.self_play);
     if (n["model"])     load_model_config(n["model"], tc.model);
@@ -88,6 +89,7 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         if (arg == "--mode" && i + 1 < argc) config.mode = argv[++i];
         else if (arg == "--config" && i + 1 < argc) { config.config_path = argv[++i]; }
         else if (arg == "--checkpoint" && i + 1 < argc) config.checkpoint_path = argv[++i];
+        else if (arg == "--resume" && i + 1 < argc) config.resume_path = argv[++i];
         else if (arg == "--seed" && i + 1 < argc) config.seed = std::stoull(argv[++i]);
         else if (arg == "--num_steps" && i + 1 < argc) config.num_steps = std::stoi(argv[++i]);
         else if (arg == "--learning_rate" && i + 1 < argc) config.training.model.learning_rate = std::stod(argv[++i]);
@@ -117,14 +119,27 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
 
 AppConfig load_config(int argc, char* argv[]) {
     AppConfig config = default_config();
-    // First pass: check for --config to load YAML base.
+
+    // First pass: check for --resume or --config to load YAML base.
+    // --resume loads the saved config from the checkpoint directory;
+    // --config loads from the user-specified YAML file.
+    std::string resume_dir;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--config" && i + 1 < argc) {
+        std::string arg = argv[i];
+        if (arg == "--resume" && i + 1 < argc) {
+            resume_dir = argv[i + 1];
+            std::string saved_cfg = resume_dir + "/config.yaml";
+            config = load_config(saved_cfg);
+            config.resume_path = resume_dir;
+            break;
+        }
+        if (arg == "--config" && i + 1 < argc) {
             config = load_config(std::string(argv[i + 1]));
             break;
         }
     }
-    // Second pass: CLI overrides take precedence over YAML.
+
+    // Second pass: CLI overrides take precedence over YAML / saved config.
     apply_cli_overrides(config, argc, argv);
     return config;
 }
