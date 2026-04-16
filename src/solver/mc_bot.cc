@@ -38,7 +38,7 @@ double simulate_rollout(const BoardState& board,
 
     GameContext sim_ctx = ctx;
 
-    SolverConfig greedy{0.0, 0.0, false};
+    SolverConfig greedy;
 
     // Reset solver cache state for the hoisted buffers.
     shared_buffers.dp_computed = false;
@@ -67,7 +67,7 @@ static double simulate_rollout_from_state(GameState sim_state,
                                            SolverBuffers& shared_buffers,
                                            std::vector<float>& shared_tensor_buffer,
                                            RNG& rng) {
-    SolverConfig greedy{0.0, 0.0, false};
+    SolverConfig greedy;
 
     shared_buffers.dp_computed = false;
     shared_buffers.evs_blended = false;
@@ -255,7 +255,7 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                   const MCConfig& mc_config, RNG& rng) {
     MCTimeAllocation time_alloc{mc_config.time_budget_ms, 0.0};
     SolverBuffers buffers{};
-    SolverConfig greedy{0.0, 0.0, false};
+    SolverConfig greedy;
 
     std::vector<float> tensor_buffer(
         static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);

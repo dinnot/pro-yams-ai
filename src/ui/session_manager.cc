@@ -218,7 +218,7 @@ void SessionManager::play_nn_turn(GameSession& session) {
     record.player = static_cast<int>(session.state.board.current_player);
     std::memcpy(record.initial_dice, session.state.dice, sizeof(session.state.dice));
 
-    SolverConfig greedy{0.0, 0.0, false};
+    SolverConfig greedy;
 
     // --- CLEAR CACHES AND GET REQUESTS ONCE PER TURN ---
     session.buffers.dp_computed = false;

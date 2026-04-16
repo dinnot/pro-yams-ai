@@ -107,7 +107,7 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
     GameState    state;
     GameContext  ctx;
     SolverBuffers buffers{};
-    SolverConfig greedy_cfg{0.0, 0.0, false};
+    SolverConfig greedy_cfg;
 
     // Tensor buffer is heap-allocated to avoid stack overflow.
     std::vector<float> tensor_buffer(

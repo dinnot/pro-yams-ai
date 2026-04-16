@@ -15,16 +15,27 @@ training:
   initial_temperature: 1.0
   min_temperature: 0.1
   temperature_decay: 0.9999713
+  temperature_decay_start_step: 0
+  temperature_decay_start_value: 0
+  initial_epsilon: 0
 
   eval_interval: 10000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/test_td0_100k
-  log_dir: ./logs/test_td0_100k
-  log_path: ./logs/test_td0_100k/training_log.csv
+  checkpoint_dir: checkpoints/test_td0_100k_new
+  log_dir: ./logs/test_td0_100k_new
+  log_path: ./logs/test_td0_100k_new/training_log.csv
+  debug_mode: false
 
   initial_heuristic_weight: 1.0
   heuristic_decay_steps: 50000
+
+
+  use_duel_margin_maximization: false
+  duel_margin_maximization_scale: 4000
+  use_pbrs: false
+  pbrs_upper_reward: 0.1
+  pbrs_clean_reward: 0.2
 
   self_play:
     max_inference_batch: 4096
@@ -40,4 +51,7 @@ training:
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.00032
+    output_activation: sigmoid
+    loss_function: bce
+    architecture: mlp
     debug_mode: false

@@ -95,7 +95,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // EV for TD learning. This prevents the heuristic from poisoning targets!
             // ------------------------------------------------------------------
             if (is_first_resolve && config.heuristic_weight > 0.0) {
-                SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers);
+                SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers, true);
                 game->current_turn_start_ev = pure_res.pre_roll_ev;
                 game->solver_buffers.dp_computed = false; // Reset so the blended resolve can run
             }
@@ -130,8 +130,16 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 game->solver_buffers.evs_blended = true; // Mark as blended!
             }
 
+            SolverConfig active_cfg = config;
+            // Only compute V2 if we didn't already get it from the pure pass
+            if (is_first_resolve && config.heuristic_weight <= 0.0) {
+                active_cfg.compute_pre_roll_ev = true;
+            } else {
+                active_cfg.compute_pre_roll_ev = false;
+            }
+
             SolverResult result = solver_resolve(game->state, game->ctx, tables,
-                                                  game->solver_buffers, config,
+                                                  game->solver_buffers, active_cfg,
                                                   game->rng);
 
             if (result.is_exploratory) {

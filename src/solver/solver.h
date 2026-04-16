@@ -37,9 +37,9 @@ struct SolverResult {
 // SolverConfig — temperature parameters for exploration.
 // ---------------------------------------------------------------------------
 struct SolverConfig {
-    double placement_temperature;  // 0.0 = greedy, >0 = softmax exploration
-    double hold_temperature;       // 0.0 = greedy, >0 = softmax exploration
-    bool   exploration_enabled;    // Master switch (false = always greedy)
+    double placement_temperature = 0.0;  // 0.0 = greedy, >0 = softmax exploration
+    double hold_temperature = 0.0;       // 0.0 = greedy, >0 = softmax exploration
+    bool   exploration_enabled = false;   // Master switch (false = always greedy)
     bool   debug_mode = false;
     double heuristic_weight = 0.0;
     bool   use_duel_margin_maximization = false;
@@ -47,7 +47,8 @@ struct SolverConfig {
     bool   use_pbrs          = false;
     double pbrs_upper_reward = 0.1;
     double pbrs_clean_reward = 0.2;
-    std::string debug_log_path;
+    std::string debug_log_path = "";
+    bool   compute_pre_roll_ev = false;  // Opt-in V2 computation
 };
 
 // ---------------------------------------------------------------------------
@@ -66,11 +67,22 @@ struct SolverBuffers {
     bool   evs_blended = false;                // Prevents double-blending heuristic
     bool   dp_computed = false;                // Layer 0 and Layer 1 DP cached flag
 
+    constexpr static int kMaxHeldConfigs = 792; // Safe theoretical upper bound (actual is 462)
+
     // Internal DP tables
     double   v0[kNumDiceStates];               // Layer 0: no rerolls left
     double   v1[kNumDiceStates];               // Layer 1: one reroll left
     double   v2[kNumDiceStates];               // Layer 2: two rerolls left
     double   pre_roll_ev;                      // Pre-roll EV for the turn
+
+    double   ev_held_v0[kMaxHeldConfigs];      // Fast-cache: EV of held configs -> V0
+    double   ev_held_v1[kMaxHeldConfigs];      // Fast-cache: EV of held configs -> V1
+
+    int16_t  req_map[78][101];                 // Maps [cell_idx][raw_score] -> req_idx. -1 if invalid
+    int16_t  scratch_map[78];                  // Maps [cell_idx] -> scratch req_idx
+    int8_t   cell_cols[78];
+    int8_t   cell_rows[78];
+    int8_t   num_legal_cells;
 
     int16_t  best_request_idx[kNumDiceStates]; // Best placement index at V0
     int16_t  best_mask_v1[kNumDiceStates];     // Best hold mask at V1 (-1=stop)
@@ -100,10 +112,11 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
 /// Convenience: greedy resolve (no exploration).
 inline SolverResult solver_resolve_greedy(const GameState& state, const GameContext& ctx,
                                           const PrecomputedTables& tables,
-                                          SolverBuffers& buffers) {
-    // Provide a dummy RNG — it won't be called in greedy mode.
+                                          SolverBuffers& buffers,
+                                          bool compute_pre_roll_ev = false) {
     RNG dummy(0);
-    SolverConfig cfg{0.0, 0.0, false};
+    SolverConfig cfg;
+    cfg.compute_pre_roll_ev = compute_pre_roll_ev;
     return solver_resolve(state, ctx, tables, buffers, cfg, dummy);
 }
 
