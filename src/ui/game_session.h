@@ -87,4 +87,9 @@ struct GameSession {
 
     // When true, bots record hold/placement evaluations into each TurnRecord.
     bool debug_mode = false;
+
+    // Most-recent NN evaluation of the board state (from the last placing
+    // player's perspective). Populated whenever debug_mode && nn is available.
+    float current_board_nn_value = 0.0f;
+    bool  has_current_board_nn   = false;
 };

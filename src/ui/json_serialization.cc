@@ -152,6 +152,10 @@ json game_state_to_json(const GameSession& session) {
     }
     j["history"] = hist;
 
+    // Current board NN evaluation (debug mode only, if NN is available).
+    if (session.has_current_board_nn)
+        j["current_board_nn_value"] = session.current_board_nn_value;
+
     // Player types
     auto pt_str = [](PlayerType pt) -> const char* {
         switch (pt) {

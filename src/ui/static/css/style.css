@@ -247,6 +247,24 @@ select, input[type="text"] {
   padding: 2px 0 6px;
 }
 
+/* Live NN eval panel */
+.nn-eval-panel {
+  margin: 6px 0 4px;
+  padding: 4px 8px;
+  background: #0f2040;
+  border: 1px solid #1a4a80;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+.nn-eval-label {
+  color: #7aafdd;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.nn-eval-value {
+  color: #a8d0ee;
+}
+
 /* Score breakdown */
 .score-breakdown-panel {
   margin-top: 16px;

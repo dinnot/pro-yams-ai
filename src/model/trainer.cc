@@ -141,6 +141,13 @@ void ModelTrainer::save_checkpoint(const std::string& path,
                                    torch::kUInt8).clone();
         model_archive.write("architecture", t);
     }
+    {
+        const auto& act = config_.output_activation;
+        auto t = torch::from_blob(const_cast<char*>(act.data()),
+                                   {static_cast<long>(act.size())},
+                                   torch::kUInt8).clone();
+        model_archive.write("output_activation", t);
+    }
 
     model_archive.save_to(path + ".model");
 
@@ -281,6 +288,17 @@ ModelConfig ModelTrainer::config_from_checkpoint(const std::string& path) {
                                        t.numel());
     } catch (...) {
         cfg.architecture = "mlp";
+    }
+
+    // Old checkpoints pre-date saving output_activation — assume tanh (the
+    // historical default).  Newer checkpoints save it explicitly.
+    try {
+        torch::Tensor t;
+        archive.read("output_activation", t);
+        cfg.output_activation = std::string(reinterpret_cast<const char*>(t.data_ptr()),
+                                             t.numel());
+    } catch (...) {
+        cfg.output_activation = "sigmoid";
     }
 
     return cfg;

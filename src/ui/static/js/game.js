@@ -244,6 +244,16 @@ const Game = {
         document.getElementById('btn-reroll').disabled = !gs.waiting_for_human || gs.rolls_left <= 0;
         document.getElementById('rolls-left').textContent = gs.rolls_left != null ? gs.rolls_left : '-';
 
+        // NN eval display (debug mode).
+        const nnPanel = document.getElementById('nn-eval-panel');
+        const nnValue = document.getElementById('nn-eval-value');
+        if (gs.current_board_nn_value !== undefined) {
+            nnPanel.style.display = 'block';
+            nnValue.textContent = `${(gs.current_board_nn_value * 100).toFixed(1)}% win prob (last placing player)`;
+        } else {
+            nnPanel.style.display = 'none';
+        }
+
         // Fetch options if human turn.
         let legalP0 = null, legalP1 = null;
         if (gs.waiting_for_human && !gs.game_over) {

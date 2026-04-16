@@ -34,8 +34,17 @@ void SessionManager::eval_and_store_board_nn(GameSession& session,
     torch::NoGradGuard no_grad;
     auto input  = torch::from_blob(buf, {1, kTensorSize}, torch::kFloat32).to(device_);
     auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
-    record.board_nn_value     = output.data_ptr<float>()[0];
+    float val = output.data_ptr<float>()[0];
+    // Normalize to [0, 1] win-probability space regardless of output activation.
+    // tanh models output [-1, 1]: map via (v + 1) / 2.
+    // sigmoid models output [0, 1]: already correct.
+    if (nn_model_->config().output_activation != "sigmoid") {
+        val = (val + 1.0f) / 2.0f;
+    }
+    record.board_nn_value     = val;
     record.has_board_nn_value = true;
+    session.current_board_nn_value = val;
+    session.has_current_board_nn   = true;
 }
 
 // ---------------------------------------------------------------------------
