@@ -29,6 +29,8 @@ struct SolverResult {
     int8_t   score;                // Score to place (valid only if should_place)
     double   expected_value;       // EV of the best action
     int16_t  chosen_request_idx;   // Index into requests[] for chosen placement (-1 if hold)
+    double   pre_roll_ev;          // EV of the state before the first roll
+    bool     is_exploratory;       // true if an off-policy action was taken
 };
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,8 @@ struct SolverBuffers {
     // Internal DP tables
     double   v0[kNumDiceStates];               // Layer 0: no rerolls left
     double   v1[kNumDiceStates];               // Layer 1: one reroll left
+    double   v2[kNumDiceStates];               // Layer 2: two rerolls left
+    double   pre_roll_ev;                      // Pre-roll EV for the turn
 
     int16_t  best_request_idx[kNumDiceStates]; // Best placement index at V0
     int16_t  best_mask_v1[kNumDiceStates];     // Best hold mask at V1 (-1=stop)

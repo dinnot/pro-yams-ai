@@ -26,6 +26,7 @@ struct TrajectoryStep {
     double  value;                 // V(s) from solver for the chosen placement
     int8_t  player;               // Which player made this placement (0 or 1)
     double  pbrs_reward = 0.0;    // Potential-based reward shaping bonus for this step
+    bool    is_exploratory = false; // True if an off-policy action was taken
 };
 
 // ---------------------------------------------------------------------------
@@ -68,4 +69,5 @@ struct GameInstance {
     int    final_duel_margin = 0;  // Raw P0 duel points at terminal state
 
     double current_turn_start_ev = 0.0;
+    bool   current_turn_is_exploratory = false;
 };

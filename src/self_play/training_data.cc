@@ -54,23 +54,35 @@ int extract_training_samples(const GameInstance& game,
             double accumulated = 0.0;
             double weight_sum  = 0.0;
             double lam_power   = 1.0;
+            bool trace_cut     = false;
 
             for (int j = i + 1; j < game.trajectory_length; ++j) {
                 const TrajectoryStep& future = game.trajectory[j];
                 double bootstrap = (future.player != my_player)
                     ? flip(future.value)
                     : future.value;
-                double w = (1.0 - td_lambda) * lam_power;
-                accumulated += w * bootstrap;
-                weight_sum  += w;
-                lam_power   *= td_lambda;
+
+                if (future.is_exploratory) {
+                    // Watkin's cut: halt trace, give remaining weight to unbiased EV
+                    accumulated += lam_power * bootstrap;
+                    weight_sum  += lam_power;
+                    trace_cut = true;
+                    break;
+                } else {
+                    double w = (1.0 - td_lambda) * lam_power;
+                    accumulated += w * bootstrap;
+                    weight_sum  += w;
+                    lam_power   *= td_lambda;
+                }
             }
 
-            double terminal = terminal_for(my_player);
-            accumulated += lam_power * terminal;
-            weight_sum  += lam_power;
+            if (!trace_cut) {
+                double terminal = terminal_for(my_player);
+                accumulated += lam_power * terminal;
+                weight_sum  += lam_power;
+            }
 
-            target = (weight_sum > 0.0) ? accumulated / weight_sum : terminal;
+            target = (weight_sum > 0.0) ? accumulated / weight_sum : terminal_for(my_player);
             break;
         }
         }

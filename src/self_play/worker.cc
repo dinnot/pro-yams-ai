@@ -86,13 +86,17 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // Capture if this is the first resolve of the turn BEFORE we run solver_resolve
             bool is_first_resolve = !game->solver_buffers.dp_computed;
 
+            if (is_first_resolve) {
+                game->current_turn_is_exploratory = false;
+            }
+
             // ------------------------------------------------------------------
             // FIX: Run solver with PURE NN EVs to get the correct start-of-turn
             // EV for TD learning. This prevents the heuristic from poisoning targets!
             // ------------------------------------------------------------------
             if (is_first_resolve && config.heuristic_weight > 0.0) {
                 SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers);
-                game->current_turn_start_ev = pure_res.expected_value;
+                game->current_turn_start_ev = pure_res.pre_roll_ev;
                 game->solver_buffers.dp_computed = false; // Reset so the blended resolve can run
             }
 
@@ -130,7 +134,15 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                                                   game->solver_buffers, config,
                                                   game->rng);
 
-            
+            if (result.is_exploratory) {
+                game->current_turn_is_exploratory = true;
+            }
+
+            // FIX: Only capture from the main result if the heuristic is turned OFF.
+            if (is_first_resolve && config.heuristic_weight <= 0.0) {
+                game->current_turn_start_ev = result.pre_roll_ev;
+            }
+
             // Log Game 0, limit to first 5 turns of the game to avoid spam
             if (config.debug_mode && game->is_debug_game && game->trajectory_length < 5) {
                 std::ofstream dbg(game->debug_log_path, std::ios::app);
@@ -186,11 +198,6 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 }
             }
 
-            // FIX: Only capture from the main result if the heuristic is turned OFF.
-            if (is_first_resolve && config.heuristic_weight <= 0.0) {
-                game->current_turn_start_ev = result.expected_value;
-            }
-
             if (result.should_place) {
                 // Snapshot pre-placement state for PBRS detection.
                 int    pbrs_p   = game->state.board.current_player;
@@ -204,6 +211,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 // Use the Q-value from the START of the turn, avoiding dice degradation!
                 step.value  = game->current_turn_start_ev;
                 step.player = static_cast<int8_t>(game->state.board.current_player);
+                step.is_exploratory = game->current_turn_is_exploratory;
 
                 // Copy the chosen afterstate tensor from tensor_buffer.
                 assert(result.chosen_request_idx >= 0);

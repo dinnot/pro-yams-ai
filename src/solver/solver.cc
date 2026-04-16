@@ -201,7 +201,9 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         result.hold_mask = 0;
         
         // FIX: Use V0's non-Turbo EV, not stop_value
-        result.expected_value = buffers.v0[current_id]; 
+        result.expected_value = buffers.v0[current_id];
+        result.pre_roll_ev = buffers.pre_roll_ev;
+        result.is_exploratory = false;
 
         // Apply placement temperature if exploration enabled.
         if (config.exploration_enabled && config.placement_temperature > 0.0) {
@@ -224,6 +226,15 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
                 result.placement = buffers.requests[req_i].placement;
                 result.score = buffers.requests[req_i].score;
                 result.chosen_request_idx = static_cast<int16_t>(req_i);
+
+                double max_ev = -1e9;
+                for (int i = 0; i < place_count; ++i) {
+                    if (place_evs[i] > max_ev) max_ev = place_evs[i];
+                }
+                if (place_evs[sel] < max_ev - 1e-6) {
+                    result.is_exploratory = true;
+                }
+
                 return result;
             }
         }
@@ -268,6 +279,31 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
         buffers.v1[sid] = best_ev;
         buffers.best_mask_v1[sid] = best_mask;
         }
+        // Build V2: two rerolls left
+        for (int sid = 0; sid < kNumDiceStates; ++sid) {
+            double best_ev = buffers.stop_value[sid];
+            for (int mask = 0; mask < kNumHoldMasks; ++mask) {
+                int held_id = tables.moves[sid][mask];
+                int count = 0;
+                const Transition* tr = get_transitions(held_id, count, tables);
+                double ev = 0.0;
+                for (int t = 0; t < count; ++t)
+                    ev += tr[t].probability * buffers.v1[tr[t].target_state_id];
+                if (ev > best_ev) best_ev = ev;
+            }
+            buffers.v2[sid] = best_ev;
+        }
+
+        // Compute pre-roll EV over initial 5 dice roll
+        int held_id_none = tables.moves[0][0]; // Mask 0 = reroll all
+        int count_none = 0;
+        const Transition* tr_none = get_transitions(held_id_none, count_none, tables);
+        double pre_roll = 0.0;
+        for (int t = 0; t < count_none; ++t) {
+            pre_roll += tr_none[t].probability * buffers.v2[tr_none[t].target_state_id];
+        }
+        buffers.pre_roll_ev = pre_roll;
+
         buffers.dp_computed = true;
     }
 
@@ -284,6 +320,8 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
     // If only Turbo cells remain at rolls_left == 1, must place now —
     // rerolling would drop rolls_left to 0, making Turbo unavailable (deadlock).
     bool force_place = (rolls_left == 1 && ctx.non_turbo_cells_remaining[p] == 0);
+
+    bool is_exploratory = false;
 
     if (!force_place) {
         bool use_exploration = config.exploration_enabled && config.hold_temperature > 0.0;
@@ -310,11 +348,14 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
                                           config.use_duel_margin_maximization);
             if (selected == kNumHoldMasks) {
                 // Stop and place (best_is_place remains true).
-                best_ev = greedy_max_ev; 
+                best_ev = greedy_max_ev;
             } else {
                 best_mask = static_cast<uint8_t>(selected);
                 best_is_place = false;
                 best_ev = greedy_max_ev; // Use the max EV, not the sampled EV!
+            }
+            if (buffers.mask_evs[selected] < greedy_max_ev - 1e-6) {
+                is_exploratory = true;
             }
         } else {
             // Greedy: find best mask.
@@ -339,6 +380,9 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
     }
 
     SolverResult result;
+    result.pre_roll_ev = buffers.pre_roll_ev;
+    result.is_exploratory = is_exploratory;
+
     if (best_is_place) {
         int16_t req_idx = buffers.stop_request_idx[current_id];
         result.should_place = true;
@@ -383,6 +427,14 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
             result.score = buffers.requests[req_i].score;
             // Keep expected_value as greedy max (not sampled action's value).
             result.chosen_request_idx = static_cast<int16_t>(req_i);
+
+            double max_place_ev = -1e9;
+            for (int i = 0; i < place_count; ++i) {
+                if (place_evs[i] > max_place_ev) max_place_ev = place_evs[i];
+            }
+            if (place_evs[sel] < max_place_ev - 1e-6) {
+                result.is_exploratory = true;
+            }
         }
     }
 
