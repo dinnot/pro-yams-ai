@@ -139,7 +139,9 @@ select, input[type="text"] {
   border-radius: 6px;
   padding: 10px;
 }
-.options-panel h4 { margin-bottom: 8px; font-size: 0.9rem; color: #aaa; }
+.options-panel h4 { margin-bottom: 8px; font-size: 0.9rem; color: #aaa; cursor: pointer; user-select: none; }
+.options-panel h4:hover { color: #ccc; }
+.options-panel h4 .toggle-arrow { font-size: 0.7rem; margin-right: 4px; }
 .option-item {
   padding: 6px 8px;
   border-radius: 4px;

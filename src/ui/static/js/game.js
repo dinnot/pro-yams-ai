@@ -6,12 +6,17 @@ const Game = {
     options: null,
     holdMask: 0,
     autoPlayTimer: null,
+    legalCollapsed: true,
 
     async init() {
         document.getElementById('btn-new-game').addEventListener('click', () => Game.newGame());
         document.getElementById('btn-step').addEventListener('click', () => Game.step());
         document.getElementById('btn-play-all').addEventListener('click', () => Game.playAll());
         document.getElementById('btn-reroll').addEventListener('click', () => Game.reroll());
+        document.getElementById('legal-placements-toggle').addEventListener('click', () => {
+            Game.legalCollapsed = !Game.legalCollapsed;
+            Game.applyLegalCollapse();
+        });
     },
 
     async newGame() {
@@ -57,11 +62,29 @@ const Game = {
 
     async reroll() {
         if (!Game.sessionId || !Game.state || !Game.state.waiting_for_human) return;
-        const data = await API.hold(Game.sessionId, Game.holdMask);
+        const prevDice = Game.state.dice ? Game.state.dice.slice() : [];
+        const prevMask = Game.holdMask;
+        const data = await API.hold(Game.sessionId, prevMask);
         if (data.error) { Game.setStatus(data.error); return; }
         Game.state = data;
-        Game.holdMask = 0;
+        Game.holdMask = Game.remapHoldMask(prevDice, prevMask, data.dice || []);
         Game.updateUI();
+    },
+
+    // After a reroll the dice are re-sorted, so bit positions shift.
+    // Rebuild the holdMask by matching held values into the new sorted array.
+    remapHoldMask(prevDice, prevMask, newDice) {
+        const heldValues = prevDice.filter((_, i) => (prevMask >> i) & 1).sort((a, b) => a - b);
+        if (heldValues.length === 0) return 0;
+        let hi = 0;
+        let newMask = 0;
+        for (let i = 0; i < newDice.length && hi < heldValues.length; i++) {
+            if (newDice[i] === heldValues[hi]) {
+                newMask |= (1 << i);
+                hi++;
+            }
+        }
+        return newMask;
     },
 
     async placeScore(column, row) {
@@ -308,24 +331,31 @@ const Game = {
         }
     },
 
+    applyLegalCollapse() {
+        const list = document.getElementById('options-list');
+        const arrow = document.querySelector('#legal-placements-toggle .toggle-arrow');
+        list.style.display = Game.legalCollapsed ? 'none' : '';
+        if (arrow) arrow.textContent = Game.legalCollapsed ? '▶' : '▼';
+    },
+
     renderOptions(placements) {
         const container = document.getElementById('options-list');
         container.innerHTML = '';
         if (!placements || placements.length === 0) {
             container.textContent = 'No legal placements';
-            return;
+        } else {
+            for (const p of placements) {
+                const item = document.createElement('div');
+                item.className = 'option-item';
+                item.innerHTML = `
+                    <span>${p.column_name} / ${p.row_name}</span>
+                    <span class="opt-score">${p.score}</span>
+                `;
+                item.addEventListener('click', () => Game.placeScore(p.column, p.row));
+                container.appendChild(item);
+            }
         }
-
-        for (const p of placements) {
-            const item = document.createElement('div');
-            item.className = 'option-item';
-            item.innerHTML = `
-                <span>${p.column_name} / ${p.row_name}</span>
-                <span class="opt-score">${p.score}</span>
-            `;
-            item.addEventListener('click', () => Game.placeScore(p.column, p.row));
-            container.appendChild(item);
-        }
+        Game.applyLegalCollapse();
     },
 
     renderHistory(history) {

@@ -89,7 +89,25 @@
       "Bash(cmake --build build --target pro_yams_tests)",
       "Bash(ls /home/sorin/pro_yams_ai/build/*.ninja)",
       "Bash(cmake --build build --target pro_yams)",
-      "Bash(cmake --build build)"
+      "Bash(cmake --build build)",
+      "Bash(/home/sorin/pro_yams_ai/build/pro_yams_ai --help)",
+      "Bash(/home/sorin/pro_yams_ai/build/pro_yams_ai --mode config --config /home/sorin/pro_yams_ai/config/default.yaml)",
+      "Bash(python3 scratch/hp10k/make_config.py logs/hp10k/run01_baseline)",
+      "Bash(./build/pro_yams_ai --mode config --config logs/hp10k/run01_baseline/config.yaml)",
+      "Bash(nohup python3 *)",
+      "Bash(echo \"pid=$!\")",
+      "Bash(chmod +x scratch/hp10k/runs.sh)",
+      "Bash(pkill -f \"pro_yams_ai --mode train\")",
+      "Bash(pkill -f \"run_one.py\")",
+      "Bash(./scratch/hp10k/runs.sh run01_baseline *)",
+      "Bash(chmod +x scratch/hp10k/sweep.sh)",
+      "Bash(nohup ./scratch/hp10k/sweep.sh)",
+      "Bash(echo \"pid=$!\" sleep 2 ps -ef)",
+      "Bash(python3 *)",
+      "Bash(chmod +x scratch/hp10k/sweep2.sh)",
+      "Bash(nohup ./scratch/hp10k/sweep2.sh)",
+      "Bash(chmod +x scratch/hp10k/sweep3.sh)",
+      "Bash(nohup ./scratch/hp10k/sweep3.sh)"
     ]
   }
 }
