@@ -7,3 +7,6 @@ logs/
 # Checkpoints
 checkpoint/
 checkpoints/
+
+# Data files
+*.bin

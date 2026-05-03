@@ -6,12 +6,20 @@ add_executable(solver_tests
     solver_request_test.cc
     solver_resolve_test.cc
     softmax_test.cc
+    dp_tables_test.cc
 )
 target_link_libraries(solver_tests PRIVATE solver gtest_main)
 add_test(NAME solver_tests COMMAND solver_tests)
 set_tests_properties(solver_tests PROPERTIES
     ENVIRONMENT "OMP_WAIT_POLICY=passive;OMP_NUM_THREADS=1"
 )
+
+# Heavy DP monotonicity test — separate target since it computes/loads the
+# full ~2 GB DP cache. Not registered with CTest by default; run manually.
+add_executable(dp_tables_monotonicity_test
+    dp_tables_monotonicity_test.cc
+)
+target_link_libraries(dp_tables_monotonicity_test PRIVATE solver gtest_main)
 
 # MC bot tests (requires libtorch for NN model)
 add_executable(mc_bot_tests

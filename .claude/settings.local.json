@@ -107,7 +107,18 @@
       "Bash(chmod +x scratch/hp10k/sweep2.sh)",
       "Bash(nohup ./scratch/hp10k/sweep2.sh)",
       "Bash(chmod +x scratch/hp10k/sweep3.sh)",
-      "Bash(nohup ./scratch/hp10k/sweep3.sh)"
+      "Bash(nohup ./scratch/hp10k/sweep3.sh)",
+      "Bash(cmake --build . --target solver_tests -j)",
+      "Bash(./bin/solver_tests --gtest_filter='DPEncoderTest.*:VariantLogicTest.*:MutualDestructionTest.*:UpperBonusTest.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/bin/solver_tests --gtest_filter='DPEncoderTest.*:VariantLogicTest.*:MutualDestructionTest.*:UpperBonusTest.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/solver/solver_tests --gtest_filter='DPEncoderTest.*:VariantLogicTest.*:MutualDestructionTest.*:UpperBonusTest.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/solver/solver_tests)",
+      "Bash(cmake --build . --target dp_tables_monotonicity_test -j)",
+      "Bash(cmake .)",
+      "Bash(time ./build/tests/solver/dp_tables_monotonicity_test)",
+      "Bash(time ./tests/solver/dp_tables_monotonicity_test)",
+      "Bash(awk NR>=540 && NR<=565 *)",
+      "Bash(cmake --build . --target solver_tests dp_tables_monotonicity_test -j)"
     ]
   }
 }
