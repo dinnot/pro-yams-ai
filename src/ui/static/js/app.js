@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize modules.
     Game.init();
+    Tensor.init();
     Dashboard.init();
     Comparison.init();
 });

@@ -364,3 +364,164 @@ select, input[type="text"] {
   margin-bottom: 16px;
 }
 .chart-box-full canvas { max-height: 270px; }
+
+/* Tensor inspector modal */
+.tensor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+.tensor-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+.tensor-modal-content {
+  position: relative;
+  margin: 24px auto;
+  width: min(1100px, 96vw);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+.tensor-modal-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #0f3460;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tensor-modal-header h3 {
+  font-size: 1rem;
+  color: #e94560;
+}
+.tensor-modal-meta {
+  font-size: 0.82rem;
+  color: #aaa;
+}
+.tensor-modal-meta strong { color: #a8d0ee; }
+.tensor-modal-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: #aaa;
+}
+.tensor-modal-controls label { display: flex; align-items: center; gap: 4px; }
+.tensor-modal-body {
+  overflow: auto;
+  padding: 8px 14px 14px;
+}
+.tensor-error {
+  color: #e94560;
+  padding: 12px;
+}
+
+/* Group sections */
+.tensor-group {
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  margin-top: 10px;
+  background: #111828;
+}
+.tensor-group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  user-select: none;
+  background: #0f2040;
+  border-radius: 4px 4px 0 0;
+}
+.tensor-group > summary::-webkit-details-marker { display: none; }
+.tensor-group > summary::before {
+  content: '▶';
+  font-size: 0.7rem;
+  color: #7aabcc;
+  margin-right: 4px;
+}
+.tensor-group[open] > summary::before { content: '▼'; }
+.tensor-group .tg-name {
+  font-weight: 700;
+  color: #e94560;
+  font-size: 0.9rem;
+}
+.tensor-group .tg-range {
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: #7aabcc;
+}
+.tensor-group .tg-desc {
+  font-size: 0.78rem;
+  color: #aaa;
+  flex: 1;
+}
+.tg-body {
+  padding: 8px 12px 12px;
+}
+.tg-subhead {
+  font-size: 0.78rem;
+  color: #7aabcc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 8px 0 4px;
+}
+.tg-subhead-sm {
+  text-transform: none;
+  letter-spacing: 0;
+  color: #9ab;
+  font-size: 0.76rem;
+}
+
+/* Tensor tables */
+.tn-table {
+  border-collapse: collapse;
+  font-family: monospace;
+  font-size: 0.72rem;
+  margin-bottom: 6px;
+}
+.tn-table th {
+  background: #0f2540;
+  color: #9ab;
+  padding: 3px 6px;
+  font-weight: normal;
+  text-align: center;
+  border: 1px solid #0a1830;
+}
+.tn-table td {
+  padding: 2px 4px;
+  text-align: right;
+  border: 1px solid #0a1830;
+  background: #0d1525;
+}
+
+/* Value cells */
+.tn-cell {
+  display: inline-block;
+  min-width: 38px;
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.72rem;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+.tn-cell.tn-pos  { color: #6dd47e; }
+.tn-cell.tn-neg  { color: #f08080; }
+.tn-cell.tn-zero { color: #555; }
+.tn-cell.tn-hide { color: #2a3045; }
+
+/* Raw fallback grid */
+.tg-raw {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 2px;
+  font-size: 0.7rem;
+}

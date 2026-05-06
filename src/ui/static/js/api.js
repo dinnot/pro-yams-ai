@@ -63,6 +63,14 @@ const API = {
         return res.json();
     },
 
+    async getTensor(id, player) {
+        const url = (player === 0 || player === 1)
+            ? `/api/game/${id}/tensor?player=${player}`
+            : `/api/game/${id}/tensor`;
+        const res = await fetch(url);
+        return res.json();
+    },
+
     // Training logs
     async getTrainingLog(dir) {
         const url = dir ? `/api/logs/training?dir=${encodeURIComponent(dir)}` : '/api/logs/training';

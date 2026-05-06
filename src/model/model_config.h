@@ -14,5 +14,5 @@ struct ModelConfig {
     std::string debug_log_path = "";
     std::string output_activation = "tanh";    // "tanh" or "sigmoid"
     std::string loss_function     = "mse";    // "mse" or "bce"
-    std::string architecture      = "resnet"; // "mlp" or "resnet"
+    std::string architecture      = "mlp"; // "mlp" or "resnet"
 };

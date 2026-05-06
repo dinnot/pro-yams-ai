@@ -43,6 +43,7 @@ private:
     void handle_hold        (const httplib::Request&, httplib::Response&);
     void handle_place       (const httplib::Request&, httplib::Response&);
     void handle_can_reroll  (const httplib::Request&, httplib::Response&);
+    void handle_tensor      (const httplib::Request&, httplib::Response&);
     void handle_training_log(const httplib::Request&, httplib::Response&);
     void handle_eval_log    (const httplib::Request&, httplib::Response&);
     void handle_log_list    (const httplib::Request&, httplib::Response&);

@@ -33,6 +33,7 @@ const Game = {
         // Enable controls.
         document.getElementById('btn-step').disabled = false;
         document.getElementById('btn-play-all').disabled = false;
+        document.getElementById('btn-show-tensor').disabled = false;
 
         // If first player is a bot, auto-advance until human or end.
         if (!Game.state.waiting_for_human && !Game.state.game_over) {

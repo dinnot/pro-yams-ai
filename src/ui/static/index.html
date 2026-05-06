@@ -39,6 +39,7 @@
       </label>
       <button id="btn-step" disabled>Step</button>
       <button id="btn-play-all" disabled>Play All</button>
+      <button id="btn-show-tensor" disabled title="Show neural network input tensor for the current board">Show Tensor</button>
     </div>
 
     <div id="game-status" class="status-bar"></div>
@@ -86,6 +87,28 @@
       <h4>Turn History</h4>
       <div id="history-log" class="history-log"></div>
     </div>
+
+    <!-- Tensor inspector modal -->
+    <div id="tensor-modal" class="tensor-modal" style="display:none">
+      <div class="tensor-modal-backdrop"></div>
+      <div class="tensor-modal-content">
+        <div class="tensor-modal-header">
+          <h3>Neural Network Input Tensor</h3>
+          <div class="tensor-modal-meta" id="tensor-meta"></div>
+          <div class="tensor-modal-controls">
+            <label>Perspective:
+              <select id="tensor-perspective">
+                <option value="0">Player 0</option>
+                <option value="1">Player 1</option>
+              </select>
+            </label>
+            <label><input type="checkbox" id="tensor-only-nonzero"> Hide zero values</label>
+            <button id="btn-tensor-close">Close</button>
+          </div>
+        </div>
+        <div id="tensor-modal-body" class="tensor-modal-body"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ===== DASHBOARD ===== -->
@@ -124,6 +147,7 @@
 <script src="js/api.js"></script>
 <script src="js/board.js"></script>
 <script src="js/debug.js"></script>
+<script src="js/tensor.js"></script>
 <script src="js/game.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/comparison.js"></script>

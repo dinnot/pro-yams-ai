@@ -78,6 +78,15 @@ public:
     /// Whether the NN model is available.
     bool has_nn() const { return nn_model_ != nullptr; }
 
+    /// Compute the 986-feature observation tensor for the session's current
+    /// board state from the given player's perspective. Also runs NN
+    /// inference if a model is loaded and writes the win-probability into
+    /// out_nn_value (only valid when out_has_nn is set).
+    /// Returns false if the session does not exist.
+    bool compute_current_tensor(int session_id, int player,
+                                 std::vector<float>& out_tensor,
+                                 float& out_nn_value, bool& out_has_nn) const;
+
 private:
     // Get a shared_ptr to a session entry. Returns nullptr if not found.
     // Briefly locks map_mutex_.

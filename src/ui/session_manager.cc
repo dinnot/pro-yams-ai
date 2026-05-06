@@ -579,6 +579,43 @@ SessionManager::get_human_options(int session_id, bool& out_can_reroll) const {
 }
 
 // ---------------------------------------------------------------------------
+// compute_current_tensor — generate the 986-feature observation tensor for
+// the session's current board state, optionally running NN inference.
+// ---------------------------------------------------------------------------
+
+bool SessionManager::compute_current_tensor(int session_id, int player,
+                                              std::vector<float>& out_tensor,
+                                              float& out_nn_value,
+                                              bool& out_has_nn) const {
+    auto entry = get_entry(session_id);
+    if (!entry) return false;
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    const GameSession* s = entry->session.get();
+    if (!s) return false;
+
+    out_tensor.assign(kTensorSize, 0.0f);
+    int p = (player == 0 || player == 1) ? player
+                                          : static_cast<int>(s->state.board.current_player);
+    generate_tensor(s->state.board, s->ctx, p, tables_, out_tensor.data());
+
+    out_has_nn  = false;
+    out_nn_value = 0.0f;
+    if (nn_model_) {
+        torch::NoGradGuard no_grad;
+        auto input  = torch::from_blob(out_tensor.data(), {1, kTensorSize},
+                                        torch::kFloat32).to(device_);
+        auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
+        float val = output.data_ptr<float>()[0];
+        if (nn_model_->config().output_activation != "sigmoid") {
+            val = (val + 1.0f) / 2.0f;
+        }
+        out_nn_value = val;
+        out_has_nn   = true;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // remove_session
 // ---------------------------------------------------------------------------
 

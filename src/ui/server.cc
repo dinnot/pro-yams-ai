@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "engine/game_flow.h"
+#include "engine/tensor.h"
 #include "ui/json_serialization.h"
 
 using json = nlohmann::json;
@@ -122,6 +123,10 @@ void UIServer::register_routes() {
     server_.Get(R"(/api/game/(\d+)/can_reroll)",
         [this](const httplib::Request& req, httplib::Response& res) {
             handle_can_reroll(req, res);
+        });
+    server_.Get(R"(/api/game/(\d+)/tensor)",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_tensor(req, res);
         });
 
     // --- Training logs ---
@@ -293,6 +298,69 @@ void UIServer::handle_can_reroll(const httplib::Request& req,
     }
     json_response(res, {{"can_reroll", can_reroll(copy.state, copy.ctx)},
                          {"rolls_left", static_cast<int>(copy.state.rolls_left)}});
+}
+
+void UIServer::handle_tensor(const httplib::Request& req,
+                              httplib::Response& res) {
+    int id = parse_session_id(req);
+
+    int player = -1;
+    if (req.has_param("player")) {
+        try { player = std::stoi(req.get_param_value("player")); }
+        catch (...) { player = -1; }
+    }
+
+    std::vector<float> tensor;
+    float nn_val = 0.0f;
+    bool  has_nn = false;
+    if (!sessions_.compute_current_tensor(id, player, tensor, nn_val, has_nn)) {
+        error_response(res, "session not found", 404);
+        return;
+    }
+
+    GameSession copy;
+    sessions_.get_session_copy(id, copy);
+    int perspective = (player == 0 || player == 1)
+                        ? player : static_cast<int>(copy.state.board.current_player);
+
+    json values = json::array();
+    for (float v : tensor) values.push_back(v);
+
+    // Layout described in src/engine/tensor.h:
+    //   A (312): per-player x col x row x [present, normalized_value]
+    //   B (108): B.1 = pi x col x [upper_sum, e_raw] (24)
+    //            B.2 = col x [rem_me, rem_opp, margin_now, margin_E,
+    //                          d_crush_now, d_crush_E,
+    //                          pts_to_2x, pts_to_3x, pts_to_4x, pts_to_5x (now),
+    //                          pts_to_2x, pts_to_3x, pts_to_4x, pts_to_5x (E)] (84)
+    //   C (156): per-player x col x row 1-turn non-scratch probability
+    //   D (14):  col coeffs (6), filled_frac, duel_now, duel_E,
+    //            dominance_my, dominance_opp, phase_50, phase_100, phase_140
+    //   E (216): per-player x col x 18 (T_min/mid/max x [P60,P70,P80,P90,P100,EU/100])
+    //   F (180): per-player x col x 15 (T_min/mid/max x [P_mid, EV_mid/60, P_low, EV_low/250, P_clean])
+    json groups = json::array();
+    groups.push_back({{"name", "A"}, {"start", 0},   {"size", 312},
+                      {"description", "Cell occupancy and normalized value (per player x column x row x 2)"}});
+    groups.push_back({{"name", "B"}, {"start", 312}, {"size", 108},
+                      {"description", "Per-column derived scores and crush/duel projections"}});
+    groups.push_back({{"name", "C"}, {"start", 420}, {"size", 156},
+                      {"description", "1-turn non-scratch probability per cell (player x column x row)"}});
+    groups.push_back({{"name", "D"}, {"start", 576}, {"size", 14},
+                      {"description", "Global aggregates: column coefficients, fill ratio, total duel margins, dominance and phase flags"}});
+    groups.push_back({{"name", "E"}, {"start", 590}, {"size", 216},
+                      {"description", "Upper-section probabilities and EV across T_min/T_mid/T_max horizons (player x column x 18)"}});
+    groups.push_back({{"name", "F"}, {"start", 806}, {"size", 180},
+                      {"description", "Middle/lower P/EV and clean-column probability across horizons (player x column x 15)"}});
+
+    json out = {
+        {"size",        kTensorSize},
+        {"perspective", perspective},
+        {"values",      values},
+        {"groups",      groups},
+    };
+    if (has_nn) out["nn_value"] = nn_val;
+
+    json_response(res, out);
 }
 
 void UIServer::handle_training_log(const httplib::Request& req,
