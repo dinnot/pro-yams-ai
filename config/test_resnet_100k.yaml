@@ -52,7 +52,7 @@ training:
 
   # --- The Heavyweight Architecture ---
   model:
-    input_size: 809
+    input_size: 986
     hidden_layers: 8             # MASSIVE DEPTH
     hidden_width: 512            # MASSIVE CAPACITY
     learning_rate: 0.00025       # Slightly lowered for stability in an 8-layer network

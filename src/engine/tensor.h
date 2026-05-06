@@ -6,21 +6,23 @@
 #include "solver/solver.h"  // AfterstateRequest
 
 // ---------------------------------------------------------------------------
-// State observation tensor for the neural network.
+// State observation tensor for the neural network (V2.1 layout).
 //
 // Encodes a board position (after placement) from one player's perspective
 // into a flat float array.  No libtorch dependency — produces raw floats that
 // the model library wraps into torch::Tensor.
 //
-// Layout (809 features):
-//   Group A (468): per-player × per-column × per-row cell values (3 per cell)
-//   Group B  (96): per-player × per-column derived features (8 per column)
-//   Group C (156): per-player × per-column × per-row probability features
-//   Group D  (89): global features (coefficients, progress, golden rule, totals)
+// Layout (986 features):
+//   Group A (312): per-player × per-column × per-row cell values (2 per cell)
+//   Group B (108): per-player × per-column derived + my-perspective duel features
+//   Group C (156): per-player × per-column × per-row 1-turn non-scratch probability
+//   Group D  (14): global aggregates and phase flags
+//   Group E (216): per-player × per-column × {T_min,T_mid,T_max} upper P/EV
+//   Group F (180): per-player × per-column × {T_min,T_mid,T_max} mid/low P/EV + P_clean
 // ---------------------------------------------------------------------------
 
 /// Total number of float features in the state observation tensor.
-constexpr int kTensorSize = 809;
+constexpr int kTensorSize = 986;
 
 /// Maximum possible score per row (used for normalisation denominators).
 /// Indexed by row (0–12): 1s, 2s, 3s, 4s, 5s, 6s, SS, LS, FH, K, STR, U8, Y

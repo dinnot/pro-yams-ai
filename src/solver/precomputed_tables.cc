@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <map>
+#include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -237,6 +240,26 @@ void init_precomputed_tables(PrecomputedTables& tables) {
 
     // Step 5: probability tables (mini-solver DP, depends on transitions + score tables)
     build_probability_tables(tables);
+
+    // Step 6: DP tables (V2.1) — auto-load from cache when present.
+    // If no cache is found, leave dp_tables empty; DP-dependent tensor
+    // features will fall back to safe defaults (0).
+    {
+        std::vector<std::string> candidates;
+        if (const char* env = std::getenv("DP_TABLES_CACHE"); env && env[0]) {
+            candidates.emplace_back(env);
+        }
+        candidates.emplace_back("cache/dp_tables/dp_v1.bin");
+        candidates.emplace_back("../cache/dp_tables/dp_v1.bin");
+        candidates.emplace_back("/home/sorin/pro_yams_ai/cache/dp_tables/dp_v1.bin");
+        for (const auto& path : candidates) {
+            std::error_code ec;
+            if (std::filesystem::exists(path, ec)) {
+                init_dp_tables(tables.dp_tables, tables, path);
+                break;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

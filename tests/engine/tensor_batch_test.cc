@@ -98,14 +98,13 @@ TEST_F(TensorBatchTest, MultipleAfterstates_CorrectPlacement) {
     std::vector<float> batch_out(n * kTensorSize, 0.0f);
     generate_tensor_batch(gs.board, ctx, p, buffers.requests, n, tables, batch_out.data());
 
-    // For each tensor, verify the cell corresponding to the placement is filled
+    // V2.1 Group A: 2 features per cell. Player 0 (me) is first.
     for (int i = 0; i < n; ++i) {
         const float* t = batch_out.data() + i * kTensorSize;
         int col = buffers.requests[i].placement.column;
         int row = buffers.requests[i].placement.row;
-        // Group A: player perspective = pi=0 (me first), so offset within [0, 234)
         int cell_idx  = col * kNumRows + row;
-        int feat_idx  = cell_idx * 3;  // is_filled feature
+        int feat_idx  = cell_idx * 2;  // is_filled feature
         EXPECT_NEAR(t[feat_idx], 1.0f, 1e-6f)
             << "Request " << i << " (col=" << col << ",row=" << row
             << "): is_filled should be 1 in batch tensor";
@@ -136,9 +135,9 @@ TEST_F(TensorBatchTest, BatchSingle_MatchesSingleTensor) {
 }
 
 // ---------------------------------------------------------------------------
-// Batch tensors: all features in [0, 1]
+// Batch tensors: all features in [-1, 1] (signed tanh / crush features allowed)
 // ---------------------------------------------------------------------------
-TEST_F(TensorBatchTest, BatchFeatures_InUnitRange) {
+TEST_F(TensorBatchTest, BatchFeatures_InSignedUnitRange) {
     gs.rolls_left = 0;
     SolverBuffers buffers;
     solver_get_requests(gs, ctx, tables, buffers);
@@ -153,10 +152,12 @@ TEST_F(TensorBatchTest, BatchFeatures_InUnitRange) {
     for (int i = 0; i < n; ++i) {
         const float* t = batch_out.data() + i * kTensorSize;
         for (int f = 0; f < kTensorSize; ++f) {
-            EXPECT_GE(t[f], 0.0f - 1e-5f)
-                << "Request " << i << " feature " << f << " below 0";
-            EXPECT_LE(t[f], 1.0f + 1e-5f)
+            EXPECT_GE(t[f], -1.0f - 1e-5f)
+                << "Request " << i << " feature " << f << " below -1";
+            EXPECT_LE(t[f],  1.0f + 1e-5f)
                 << "Request " << i << " feature " << f << " above 1";
+            EXPECT_FALSE(std::isnan(t[f]))
+                << "Request " << i << " feature " << f << " NaN";
         }
     }
 }

@@ -48,7 +48,7 @@ training:
     num_coordinators: 2
 
   model:
-    input_size: 809
+    input_size: 986
     hidden_layers: 3
     hidden_width:  256
     learning_rate: 0.00032

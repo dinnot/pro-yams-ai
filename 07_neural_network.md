@@ -20,8 +20,8 @@ The model library is the only component that depends on libtorch. It provides a 
 Feedforward MLP with configurable depth and width:
 
 ```
-Input (kTensorSize = 809)
-  → Linear(809, hidden_width) → ReLU
+Input (kTensorSize = 986)
+  → Linear(986, hidden_width) → ReLU
   → Linear(hidden_width, hidden_width) → ReLU
   → ... (repeated for hidden_layers total)
   → Linear(hidden_width, 1) → Sigmoid
@@ -34,7 +34,7 @@ Input (kTensorSize = 809)
 // src/model/model_config.h
 
 struct ModelConfig {
-    int input_size = 809;         // kTensorSize, should match tensor generation
+    int input_size = 986;         // kTensorSize, should match tensor generation
     int hidden_layers = 3;        // Number of hidden layers
     int hidden_width = 256;       // Neurons per hidden layer
     double learning_rate = 0.001; // Adam learning rate
@@ -445,7 +445,7 @@ During simultaneous self-play + training, the GPU holds:
 
 For a 3-layer, 256-width MLP: ~340K parameters × 4 bytes = ~1.4MB per model. With optimizer state (Adam stores 2 momentum terms per parameter): ~4.2MB for training. Plus the inference copy: ~1.4MB. Total model memory: ~7MB — negligible on the 5080 (16GB VRAM).
 
-Batch tensors: 512 samples × 809 features × 4 bytes = ~1.6MB per batch. Also negligible.
+Batch tensors: 512 samples × 986 features × 4 bytes = ~2.0MB per batch. Also negligible.
 
 GPU memory is not a constraint for this architecture.
 
@@ -489,9 +489,9 @@ The `engine` dependency is for `kTensorSize`. No other engine code is used.
 - Create with various configs (2 layers × 128, 4 layers × 512). Verify parameter counts.
 
 **Forward pass shape:**
-- Input shape [1, 809] → output shape [1, 1].
-- Input shape [64, 809] → output shape [64, 1].
-- Input shape [512, 809] → output shape [512, 1].
+- Input shape [1, 986] → output shape [1, 1].
+- Input shape [64, 986] → output shape [64, 1].
+- Input shape [512, 986] → output shape [512, 1].
 
 **Output range:**
 - Run forward on random input. Verify all outputs are in (0, 1) — sigmoid guarantees this but good to test.

@@ -118,7 +118,11 @@
       "Bash(time ./build/tests/solver/dp_tables_monotonicity_test)",
       "Bash(time ./tests/solver/dp_tables_monotonicity_test)",
       "Bash(awk NR>=540 && NR<=565 *)",
-      "Bash(cmake --build . --target solver_tests dp_tables_monotonicity_test -j)"
+      "Bash(cmake --build . --target solver_tests dp_tables_monotonicity_test -j)",
+      "Bash(xargs ls -la)",
+      "Bash(cmake --build . --target engine -j4)",
+      "Bash(cmake --build . --target tensor_tests -j4)",
+      "Bash(cmake --build . -j4)"
     ]
   }
 }

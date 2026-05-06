@@ -390,7 +390,7 @@ A fast, NN-free bot that uses the same solver logic but replaces the win probabi
 - Used exclusively as an **evaluation benchmark** to measure training progress
 
 ### No Supervised Bootstrapping
-The system starts from randomly initialized weights and goes straight to self-play. The feature-rich 809-dimension tensor (with precomputed probabilities, duel advantages, clean column eligibility, etc.) provides enough structure for the network to learn from scratch without teacher guidance. This avoids the risk of the network over-fitting to heuristic play patterns and getting stuck in local optima that are hard to escape. This follows the TD-gammon approach, which achieved world-class play starting from random weights.
+The system starts from randomly initialized weights and goes straight to self-play. The feature-rich 986-dimension tensor (with DP-derived expected values and probabilities, signed duel margins, crush-level projections, multi-horizon section forecasts, etc.) provides enough structure for the network to learn from scratch without teacher guidance. This avoids the risk of the network over-fitting to heuristic play patterns and getting stuck in local optima that are hard to escape. This follows the TD-gammon approach, which achieved world-class play starting from random weights.
 
 ---
 
@@ -552,7 +552,7 @@ This document covers the high-level architecture. The detailed implementation pl
 | 03 | `03_game_flow.md` | Game loop, dice rolling, hold/reroll, Turbo enforcement, RNG |
 | 04 | `04_solver_precomputed_tables.md` | Dice states, hold masks, transition probabilities, score tables |
 | 05 | `05_solver_heuristic.md` | Expectimax solver (two-step API), heuristic bot, exploration |
-| 06 | `06_state_tensor.md` | 809-feature tensor design, normalization, probability precomputation |
+| 06 | `06_state_tensor.md` | 986-feature V2.1 tensor design, DP-table integration, normalization |
 | 07 | `07_neural_network.md` | libtorch MLP, inference engine, trainer, checkpoints |
 | 08 | `08_solver_nn_async.md` | NN integration, async self-play architecture (workers + coordinator + queues) |
 | 09 | `09_replay_buffer_training.md` | Replay buffer, training loop, model swap, exploration decay, logging |

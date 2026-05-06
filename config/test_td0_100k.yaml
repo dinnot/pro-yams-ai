@@ -22,14 +22,14 @@ training:
   eval_interval: 10000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/test_td0_100k_new4
-  log_dir: ./logs/test_td0_100k_new4
-  log_path: ./logs/test_td0_100k_new4/training_log.csv
-  debug_mode: true
+  checkpoint_dir: checkpoints/test_td0_100k_new5
+  log_dir: ./logs/test_td0_100k_new5
+  log_path: ./logs/test_td0_100k_new5/training_log.csv
+  debug_mode: false
 
   initial_heuristic_weight: 1.0
   heuristic_decay_steps: 50000
-  logs_on_start: true
+  logs_on_start: false
 
   use_duel_margin_maximization: false
   duel_margin_maximization_scale: 4000
@@ -42,18 +42,18 @@ training:
     min_games_per_batch: 2
     batch_timeout_ms: 5
     num_workers: 24
-    num_games: 4096
+    num_games: 2048
     num_coordinators: 3
-    debug_mode: true
-    debug_log_path: "./logs/test_td0_100k_new4/debug_coordinator.log"
+    debug_mode: false
+    debug_log_path: "./logs/test_td0_100k_new5/debug_coordinator.log"
 
   model:
-    input_size: 809
+    input_size: 986
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.00032
     output_activation: sigmoid
     loss_function: bce
     architecture: mlp
-    debug_mode: true
-    debug_log_path: "./logs/test_td0_100k_new4/debug_batch.log"
+    debug_mode: false
+    debug_log_path: "./logs/test_td0_100k_new5/debug_batch.log"

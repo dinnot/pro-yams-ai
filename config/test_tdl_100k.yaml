@@ -48,7 +48,7 @@ training:
     debug_log_path: "./logs/test_tdl_100k_new1/debug_coordinator.log"
 
   model:
-    input_size: 809
+    input_size: 986
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.00032

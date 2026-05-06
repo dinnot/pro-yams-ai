@@ -7,6 +7,7 @@
 #include "engine/constants.h"
 #include "engine/probability_tables.h"
 #include "engine/solver_tables.h"
+#include "solver/dp_tables.h"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,6 +63,12 @@ struct PrecomputedTables {
     // === Probability tables (from Task 06 ProbabilityTables) ===
     // Probability of achieving score >= threshold in a given row with 2 or 3 rolls.
     ProbabilityTables prob_tables;
+
+    // === Dynamic Programming tables (V2.1 tensor) ===
+    // Six DP tables: upper P/EV, middle P/EV, lower P/EV.  Auto-loaded from
+    // disk cache by init_precomputed_tables when the cache file is present;
+    // otherwise left empty (DP-dependent tensor features will be 0).
+    DPTables dp_tables;
 };
 
 // ---------------------------------------------------------------------------
