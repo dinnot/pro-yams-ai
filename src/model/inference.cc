@@ -33,7 +33,7 @@ void InferenceEngine::batch_inference(torch::Tensor input_tensor, int batch_size
                                        double* output) {
     assert(batch_size > 0);
 
-    if (dummy_mode_) {
+    if (dummy_mode_.load(std::memory_order_relaxed)) {
         for (int i = 0; i < batch_size; ++i) {
             output[i] = 0.5;
         }

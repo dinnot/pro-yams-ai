@@ -268,7 +268,6 @@ void TrainingLoop::do_training_step() {
         if (f.is_open()) {
             f << "--- Queue Sizes & Timing @ Step " << training_step_ << " ---\n"
               << "Available : " << orchestrator_->available_queue_size() << "\n"
-              << "Pending   : " << orchestrator_->pending_queue_size() << "\n"
               << "Completed : " << orchestrator_->completed_queue_size() << "\n"
               << "Trainer train_step() time: " << train_ms << " ms for batch size " << n << "\n"
               << "sample_batch() time: " << sample_ms << " ms\n"

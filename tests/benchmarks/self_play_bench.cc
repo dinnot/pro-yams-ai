@@ -141,20 +141,19 @@ static void RunSelfPlayThroughput(benchmark::State& state, bool use_dummy) {
     int total_collected = 0;
     GameInstance* collect_buf[100];
 
-    // Drain initial completed games
+    // Drain initial completed games (don't count them toward throughput).
     while (orchestrator.completed_queue_size() > 0) {
         int n = orchestrator.collect_completed(collect_buf, 100);
         for (int i = 0; i < n; ++i) {
-            if(total_collected % 10000 == 0) std::cout << "Traj len: " << collect_buf[i]->trajectory_length << "\n"; orchestrator.recycle_game(collect_buf[i], 42);
+            orchestrator.recycle_game(collect_buf[i], 42);
         }
     }
 
     for (auto _ : state) {
-        // Collect batches of completed games and recycle them immediately
         int n = orchestrator.collect_completed(collect_buf, 100);
         for (int i = 0; i < n; ++i) {
-            if(total_collected % 10000 == 0) std::cout << "Traj len: " << collect_buf[i]->trajectory_length << "\n"; orchestrator.recycle_game(collect_buf[i], 42);
-            total_collected++; if(total_collected % 10000 == 0) std::cout << "Traj len: " << collect_buf[i]->trajectory_length << "\n";
+            orchestrator.recycle_game(collect_buf[i], 42);
+            ++total_collected;
         }
         if (n == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

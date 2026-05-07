@@ -1,5 +1,6 @@
 #include "self_play/batch_manager.h"
 
+#include <cassert>
 #include <chrono>
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,9 @@ void BatchManager::shutdown() {
 }
 
 float* BatchManager::reserve(int req_count, InferenceBatch*& out_batch, int& out_offset) {
+    // A request larger than a whole batch would loop forever below.
+    assert(req_count > 0 && req_count <= max_tensors_);
+
     std::unique_lock<std::mutex> lock(active_mtx_);
 
     while (!shutdown_.load(std::memory_order_relaxed)) {

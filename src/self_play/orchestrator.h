@@ -17,7 +17,7 @@
 // SelfPlayOrchestrator — top-level self-play manager.
 //
 // Owns the game pool, queues, worker threads, and coordinator thread.
-// Games flow:  available → (worker: kNeedRequests) → pending
+// Games flow:  available → (worker: kNeedRequests) → BatchManager
 //              → (coordinator: GPU inference) → available
 //              → (worker: kNeedResolve) → available or completed
 // ---------------------------------------------------------------------------
@@ -45,7 +45,6 @@ public:
     void update_solver_config(const SolverConfig& config) { solver_config_ = config; }
 
     int available_queue_size() const { return available_queue_.size(); }
-    int pending_queue_size() const { return 0; }
     int completed_queue_size() const { return completed_queue_.size(); }
 
 private:

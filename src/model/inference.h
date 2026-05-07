@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <torch/torch.h>
@@ -37,7 +38,7 @@ public:
     void swap_model(std::shared_ptr<ProYamsNet> new_model);
 
     /// Enable dummy mode for benchmarking (bypasses PyTorch).
-    void set_dummy_mode(bool dummy) { dummy_mode_ = dummy; }
+    void set_dummy_mode(bool dummy) { dummy_mode_.store(dummy, std::memory_order_relaxed); }
 
     /// The device this engine runs on.
     torch::Device device() const { return device_; }
@@ -46,7 +47,7 @@ private:
     std::shared_ptr<ProYamsNet> model_;
     torch::Device device_;
     std::mutex inference_mutex_;
-    bool dummy_mode_ = false;
+    std::atomic<bool> dummy_mode_{false};
 };
 
 // ---------------------------------------------------------------------------
