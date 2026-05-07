@@ -41,7 +41,8 @@ static std::unique_ptr<GameInstance> make_game(int id = 0) {
 // ---------------------------------------------------------------------------
 TEST(WorkerTest, NeedRequests_PushesToPending) {
     ensure_tables();
-    GameQueue available, pending, completed;
+    GameQueue available, completed;
+    BatchManager bm(1, 4096, false, 5);
     std::atomic<bool> shutdown{false};
 
     auto game = make_game();
@@ -49,15 +50,13 @@ TEST(WorkerTest, NeedRequests_PushesToPending) {
     available.push(nullptr);  // sentinel
 
     std::thread wt(worker_thread,
-                   std::ref(available), std::ref(pending), std::ref(completed),
+                   std::ref(available), std::ref(bm), std::ref(completed),
                    std::ref(*g_tables), greedy_config(), std::ref(shutdown));
     wt.join();
 
-    GameInstance* out = pending.try_pop();
-    ASSERT_NE(out, nullptr);
-    EXPECT_EQ(out->phase, GamePhase::kWaitingInference);
-    EXPECT_GT(out->solver_buffers.request_count, 0);
-    EXPECT_LE(out->solver_buffers.request_count, GameInstance::kMaxAfterstates);
+    EXPECT_EQ(game->phase, GamePhase::kWaitingInference);
+    EXPECT_GT(game->solver_buffers.request_count, 0);
+    EXPECT_LE(game->solver_buffers.request_count, kMaxAfterstateRequests);
     EXPECT_EQ(completed.size(), 0);
 }
 
@@ -66,18 +65,14 @@ TEST(WorkerTest, NeedRequests_PushesToPending) {
 // ---------------------------------------------------------------------------
 TEST(WorkerTest, NeedResolve_RecordsTrajectory) {
     ensure_tables();
-    GameQueue available, pending, completed;
+    GameQueue available, completed;
+    BatchManager bm(1, 4096, false, 5);
     std::atomic<bool> shutdown{false};
 
     auto game = make_game(1);
 
     // Generate requests first.
     solver_get_requests(game->state, game->ctx, *g_tables, game->solver_buffers);
-    generate_tensor_batch(game->state.board, game->ctx,
-                          game->state.board.current_player,
-                          game->solver_buffers.requests,
-                          game->solver_buffers.request_count,
-                          *g_tables, game->tensor_buffer);
 
     // Fill EVs with constant 0.5.
     for (int i = 0; i < game->solver_buffers.request_count; ++i)
@@ -91,14 +86,14 @@ TEST(WorkerTest, NeedResolve_RecordsTrajectory) {
     available.push(nullptr);  // sentinel
 
     std::thread wt(worker_thread,
-                   std::ref(available), std::ref(pending), std::ref(completed),
+                   std::ref(available), std::ref(bm), std::ref(completed),
                    std::ref(*g_tables), greedy_config(), std::ref(shutdown));
     wt.join();
 
     // With rolls_left=0 solver always places, so trajectory must have 1 step.
     EXPECT_EQ(game->trajectory_length, 1);
     // Game should be in exactly one queue (available=kNeedRequests or completed).
-    int total_out = available.size() + pending.size() + completed.size();
+    int total_out = available.size() + completed.size();
     EXPECT_EQ(total_out, 1);
 }
 
@@ -122,13 +117,7 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
             game->solver_buffers.dp_computed = false;
             solver_get_requests(game->state, game->ctx, *g_tables,
                                 game->solver_buffers);
-            ASSERT_LE(game->solver_buffers.request_count,
-                      GameInstance::kMaxAfterstates);
-            generate_tensor_batch(game->state.board, game->ctx,
-                                  game->state.board.current_player,
-                                  game->solver_buffers.requests,
-                                  game->solver_buffers.request_count,
-                                  *g_tables, game->tensor_buffer);
+            ASSERT_LE(game->solver_buffers.request_count, kMaxAfterstateRequests);
             // Simulate coordinator: fill EVs.
             for (int i = 0; i < game->solver_buffers.request_count; ++i)
                 game->solver_buffers.evs[i] = 0.5;
@@ -147,9 +136,13 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
                 TrajectoryStep& step = game->trajectory[game->trajectory_length];
                 step.value  = game->current_turn_start_ev;
                 step.player = static_cast<int8_t>(game->state.board.current_player);
-                std::memcpy(step.tensor,
-                            game->tensor_buffer + res.chosen_request_idx * kTensorSize,
-                            kTensorSize * sizeof(float));
+                
+                generate_tensor_batch(
+                    game->state.board, game->ctx, game->state.board.current_player,
+                    &game->solver_buffers.requests[res.chosen_request_idx], 1,
+                    *g_tables, step.tensor
+                );
+                
                 ++game->trajectory_length;
 
                 perform_placement(game->state, game->ctx,
@@ -179,7 +172,8 @@ TEST(WorkerTest, FullGame_TrajectoryLength) {
 
 TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     ensure_tables();
-    GameQueue available, pending, completed;
+    GameQueue available, completed;
+    BatchManager bm(1, 4096, false, 5);
     std::atomic<bool> shutdown{false};
 
     auto game = make_game(42);
@@ -190,7 +184,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     game->phase = GamePhase::kNeedRequests;
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+    worker_thread(available, bm, completed, *g_tables, config, shutdown);
     
     EXPECT_FALSE(game->solver_buffers.dp_computed);
     EXPECT_FALSE(game->solver_buffers.evs_blended);
@@ -200,7 +194,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     for (int i = 0; i < game->solver_buffers.request_count; ++i) game->solver_buffers.evs[i] = 0.6;
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+    worker_thread(available, bm, completed, *g_tables, config, shutdown);
 
     EXPECT_TRUE(game->solver_buffers.evs_blended);
     double blended_ev = game->solver_buffers.evs[0];
@@ -211,7 +205,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     // If it blends again, the EV will change. If it doesn't, it stays same.
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, pending, completed, *g_tables, config, shutdown);
+    worker_thread(available, bm, completed, *g_tables, config, shutdown);
 
     EXPECT_EQ(game->solver_buffers.evs[0], blended_ev) << "EV should not change on second resolve (reroll)";
 }

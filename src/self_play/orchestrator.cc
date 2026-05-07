@@ -59,11 +59,18 @@ void SelfPlayOrchestrator::start() {
         games_.push_back(std::move(game));
     }
 
+    // Number of active batches must be enough to keep all coordinators and workers busy.
+    // 2x coordinators is a good heuristic to allow one to be sent to GPU while workers fill another.
+    int num_batches = config_.num_coordinators * 2;
+    bool use_pinned = inference_.device().is_cuda();
+    batch_manager_ = std::make_unique<BatchManager>(
+        num_batches, config_.max_inference_batch, use_pinned, config_.batch_timeout_ms);
+
     // Launch worker threads.
     workers_.reserve(config_.num_workers);
     for (int i = 0; i < config_.num_workers; ++i) {
         workers_.emplace_back(worker_thread,
-            std::ref(available_queue_), std::ref(pending_queue_),
+            std::ref(available_queue_), std::ref(*batch_manager_),
             std::ref(completed_queue_),
             std::ref(tables_), std::ref(solver_config_),
             std::ref(shutdown_));
@@ -73,7 +80,7 @@ void SelfPlayOrchestrator::start() {
     coordinators_.reserve(config_.num_coordinators);
     for (int i = 0; i < config_.num_coordinators; ++i) {
         coordinators_.emplace_back(coordinator_thread,
-            std::ref(pending_queue_), std::ref(available_queue_),
+            std::ref(*batch_manager_), std::ref(available_queue_),
             std::ref(inference_), std::ref(config_),
             std::ref(shutdown_), i);
     }
@@ -89,6 +96,10 @@ void SelfPlayOrchestrator::stop() {
     // Push nullptr sentinels to wake up all blocked workers.
     for (int i = 0; i < static_cast<int>(workers_.size()); ++i)
         available_queue_.push(nullptr);
+
+    if (batch_manager_) {
+        batch_manager_->shutdown();
+    }
 
     // Join coordinators (they check shutdown_ and use pop_with_timeout).
     for (auto& c : coordinators_)

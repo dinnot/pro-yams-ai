@@ -145,7 +145,10 @@ void TrainingLoop::run(int num_steps) {
         // This is decoupled from training so games return to the pool ASAP
         // and don't pile up in the completed queue.
         // ---------------------------------------------------------------
+        auto t_collect_start = std::chrono::steady_clock::now();
         int collected = collect_completed_games();
+        auto t_collect_end = std::chrono::steady_clock::now();
+        double collect_ms = std::chrono::duration<double, std::milli>(t_collect_end - t_collect_start).count();
 
         // ---------------------------------------------------------------
         // Phase 2: Train if the buffer has enough data.
@@ -161,13 +164,26 @@ void TrainingLoop::run(int num_steps) {
             int steps_to_do = static_cast<int>(pending_train_steps_);
             pending_train_steps_ -= steps_to_do;
 
+            double total_train_ms = 0;
             for (int i = 0; i < steps_to_do; ++i) {
+                auto t_train_start = std::chrono::steady_clock::now();
                 do_training_step();
+                auto t_train_end = std::chrono::steady_clock::now();
+                total_train_ms += std::chrono::duration<double, std::milli>(t_train_end - t_train_start).count();
+                
                 maybe_swap_model();
                 maybe_checkpoint();
                 maybe_evaluate();
                 if (training_step_ >= num_steps || stop_flag_.load(std::memory_order_relaxed)) {
                     break;
+                }
+            }
+            if (steps_to_do > 0 && config_.debug_mode) {
+                std::string queue_log_path = config_.log_dir + "/debug_queues.log";
+                std::ofstream f(queue_log_path, std::ios::app);
+                if (f.is_open()) {
+                    f << "Collected " << collected << " games in " << collect_ms << " ms\n"
+                      << "Ran " << steps_to_do << " full train steps in " << total_train_ms << " ms\n\n";
                 }
             }
         }
@@ -219,31 +235,44 @@ int TrainingLoop::collect_completed_games() {
 
 void TrainingLoop::do_training_step() {
     std::vector<TrainingSample> batch(static_cast<size_t>(config_.train_batch_size));
-    int n = buffer_->sample_batch(batch.data(), config_.train_batch_size,
-                                  sample_rng_);
+    auto t1 = std::chrono::steady_clock::now();
+    int n = buffer_->sample_batch(batch.data(), config_.train_batch_size, sample_rng_);
+    auto t2 = std::chrono::steady_clock::now();
+    
     if (n <= 0) return;
 
     // Interleaved layout → split into flat arrays for ModelTrainer
     std::vector<float>  states(static_cast<size_t>(n) * kTensorSize);
     std::vector<double> targets(static_cast<size_t>(n));
 
+    auto t3 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; ++i) {
         std::memcpy(states.data() + i * kTensorSize,
                     batch[static_cast<size_t>(i)].state,
                     kTensorSize * sizeof(float));
         targets[static_cast<size_t>(i)] = batch[static_cast<size_t>(i)].target;
     }
+    auto t4 = std::chrono::steady_clock::now();
 
+    auto t_start = std::chrono::steady_clock::now();
     last_loss_ = trainer_->train_step(states.data(), targets.data(), n);
+    auto t_end = std::chrono::steady_clock::now();
+    
+    double sample_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    double memcpy_ms = std::chrono::duration<double, std::milli>(t4 - t3).count();
+    double train_ms  = std::chrono::duration<double, std::milli>(t_end - t_start).count();
     
     if (config_.debug_mode && training_step_ % 200 == 0) {
         std::string queue_log_path = config_.log_dir + "/debug_queues.log";
         std::ofstream f(queue_log_path, std::ios::app);
         if (f.is_open()) {
-            f << "--- Queue Sizes @ Step " << training_step_ << " ---\n"
+            f << "--- Queue Sizes & Timing @ Step " << training_step_ << " ---\n"
               << "Available : " << orchestrator_->available_queue_size() << "\n"
               << "Pending   : " << orchestrator_->pending_queue_size() << "\n"
-              << "Completed : " << orchestrator_->completed_queue_size() << "\n\n";
+              << "Completed : " << orchestrator_->completed_queue_size() << "\n"
+              << "Trainer train_step() time: " << train_ms << " ms for batch size " << n << "\n"
+              << "sample_batch() time: " << sample_ms << " ms\n"
+              << "memcpy loop time: " << memcpy_ms << " ms\n\n";
         }
     }
     

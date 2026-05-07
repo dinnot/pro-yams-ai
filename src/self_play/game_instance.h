@@ -54,9 +54,7 @@ struct GameInstance {
     SolverBuffers solver_buffers;
 
     // === Tensor buffer for afterstate evaluation ===
-    // Written by worker (tensor generation), read by coordinator (GPU batching).
-    static constexpr int kMaxAfterstates = 512;
-    float tensor_buffer[kMaxAfterstates * kTensorSize];
+    // Removed: Tensors are now generated directly into the central PyTorch batch (Zero-Copy).
 
     // === Trajectory for training data ===
     // One entry per placement over the entire game (max 156 placements).

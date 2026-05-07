@@ -41,14 +41,19 @@ static std::shared_ptr<InferenceEngine> make_inference_cpu_with_activation(
     return std::make_shared<InferenceEngine>(model, torch::Device(torch::kCPU));
 }
 
-// Helpers to create fake game instances with known request counts.
-static std::unique_ptr<GameInstance> make_fake_game(int req_count, int id = 0) {
+// Helpers to create fake game instances with known request counts and push to BatchManager.
+static std::unique_ptr<GameInstance> make_fake_game(BatchManager& bm, int req_count, int id = 0) {
     auto game = std::make_unique<GameInstance>();
     game->game_id = id;
     game->solver_buffers.request_count = req_count;
-    // Fill tensor_buffer with identifiable values.
-    for (int i = 0; i < req_count * kTensorSize; ++i)
-        game->tensor_buffer[i] = static_cast<float>(id + 1);
+    InferenceBatch* batch;
+    int offset;
+    float* out = bm.reserve(req_count, batch, offset);
+    if (out) {
+        for (int i = 0; i < req_count * kTensorSize; ++i)
+            out[i] = static_cast<float>(id + 1);
+        bm.commit(batch, game.get(), offset, req_count);
+    }
     return game;
 }
 
@@ -75,19 +80,16 @@ TEST_P(CoordinatorActivationTest, BatchAssembly_DistributesEVs) {
     cfg.min_games_per_batch = 2;
     cfg.batch_timeout_ms    = 50;
 
-    GameQueue pending, available;
+    GameQueue available;
+    BatchManager bm(1, 1024, false, 50);
     std::atomic<bool> shutdown{false};
 
-    auto g0 = make_fake_game(10, 0);
-    auto g1 = make_fake_game(20, 1);
-    auto g2 = make_fake_game(15, 2);
-
-    pending.push(g0.get());
-    pending.push(g1.get());
-    pending.push(g2.get());
+    auto g0 = make_fake_game(bm, 10, 0);
+    auto g1 = make_fake_game(bm, 20, 1);
+    auto g2 = make_fake_game(bm, 15, 2);
 
     std::thread ct(coordinator_thread,
-                   std::ref(pending), std::ref(available),
+                   std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
                    std::ref(shutdown), 0);
 
@@ -97,10 +99,10 @@ TEST_P(CoordinatorActivationTest, BatchAssembly_DistributesEVs) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     shutdown = true;
+    bm.shutdown();
     ct.join();
 
     EXPECT_EQ(available.size(), 3);
-    EXPECT_EQ(pending.size(), 0);
 
     while (auto* g = available.try_pop()) {
         EXPECT_EQ(g->phase, GamePhase::kNeedResolve);
@@ -124,46 +126,37 @@ INSTANTIATE_TEST_SUITE_P(
     }
 );
 
-// ---------------------------------------------------------------------------
-// Batch overflow — excess games go back to pending
-// ---------------------------------------------------------------------------
-TEST(CoordinatorTest, BatchOverflow_ExcessGoesBackToPending) {
+TEST(CoordinatorTest, BatchOverflow_FlowsToMultipleBatches) {
     auto engine = make_inference_cpu();
     SelfPlayConfig cfg;
     cfg.max_inference_batch = 50;  // very small
     cfg.min_games_per_batch = 1;
     cfg.batch_timeout_ms    = 30;
 
-    GameQueue pending, available;
+    GameQueue available;
+    BatchManager bm(2, 50, false, 30);
     std::atomic<bool> shutdown{false};
 
-    // Each game has 30 tensors. max_batch=50 → first game fits, second doesn't.
-    auto g0 = make_fake_game(30, 0);
-    auto g1 = make_fake_game(30, 1);
-    pending.push(g0.get());
-    pending.push(g1.get());
+    // Each game has 30 tensors. max_batch=50 → first game fits, second flushes the first.
+    auto g0 = make_fake_game(bm, 30, 0);
+    auto g1 = make_fake_game(bm, 30, 1);
 
     std::thread ct(coordinator_thread,
-                   std::ref(pending), std::ref(available),
+                   std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
                    std::ref(shutdown), 0);
 
-    // Wait for at least one game to flow through.
+    // Wait for BOTH games to flow through.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (available.size() < 1 &&
+    while (available.size() < 2 &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     shutdown = true;
+    bm.shutdown();
     ct.join();
 
-    // At least one game should have been processed; no games should be lost.
-    int processed = available.size();
-    int remaining = pending.size();
-    EXPECT_GT(processed, 0);
-    EXPECT_EQ(processed + remaining, 2)
-        << "Games must not be lost (processed=" << processed
-        << " remaining=" << remaining << ")";
+    EXPECT_EQ(available.size(), 2) << "Both games should be processed since BatchManager handles splitting.";
 }
 
 // ---------------------------------------------------------------------------
@@ -176,14 +169,14 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
     cfg.min_games_per_batch = 5;   // need 5, but only 1 will be pushed
     cfg.batch_timeout_ms    = 50;
 
-    GameQueue pending, available;
+    GameQueue available;
+    BatchManager bm(1, 1024, false, 50);
     std::atomic<bool> shutdown{false};
 
-    auto g = make_fake_game(8, 0);
-    pending.push(g.get());
+    auto g = make_fake_game(bm, 8, 0);
 
     std::thread ct(coordinator_thread,
-                   std::ref(pending), std::ref(available),
+                   std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
                    std::ref(shutdown), 0);
 
@@ -193,6 +186,7 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     shutdown = true;
+    bm.shutdown();
     ct.join();
 
     EXPECT_GE(available.size(), 1) << "Game should have been processed after timeout";
@@ -213,19 +207,19 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     // Clean up any stale log
     std::filesystem::remove(cfg.debug_log_path);
 
-    GameQueue pending, available;
+    GameQueue available;
+    BatchManager bm(10, 1000, false, 1); // Timeout is 1ms
     std::atomic<bool> shutdown{false};
 
     std::thread ct(coordinator_thread,
-                   std::ref(pending), std::ref(available),
+                   std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
                    std::ref(shutdown), 0);
 
     // Pump 1001 games through to trigger the % 1000 reporting.
     // Each game will be a tiny batch.
     for (int i = 0; i < 1005; ++i) {
-        auto g = make_fake_game(1, i);
-        pending.push(g.get());
+        auto g = make_fake_game(bm, 1, i);
         
         // Block until it pops out to avoid flooding the queue too much
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -236,6 +230,7 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     }
 
     shutdown = true;
+    bm.shutdown();
     ct.join();
 
     // Verify file exists and has content

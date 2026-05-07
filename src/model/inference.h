@@ -36,6 +36,9 @@ public:
     /// Safe to call while another thread is inside batch_inference.
     void swap_model(std::shared_ptr<ProYamsNet> new_model);
 
+    /// Enable dummy mode for benchmarking (bypasses PyTorch).
+    void set_dummy_mode(bool dummy) { dummy_mode_ = dummy; }
+
     /// The device this engine runs on.
     torch::Device device() const { return device_; }
 
@@ -43,6 +46,7 @@ private:
     std::shared_ptr<ProYamsNet> model_;
     torch::Device device_;
     std::mutex inference_mutex_;
+    bool dummy_mode_ = false;
 };
 
 // ---------------------------------------------------------------------------

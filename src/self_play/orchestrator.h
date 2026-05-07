@@ -8,6 +8,7 @@
 #include "self_play/coordinator.h"
 #include "self_play/game_instance.h"
 #include "self_play/game_queues.h"
+#include "self_play/batch_manager.h"
 #include "solver/precomputed_tables.h"
 #include "solver/solver.h"
 #include "model/inference.h"
@@ -44,7 +45,7 @@ public:
     void update_solver_config(const SolverConfig& config) { solver_config_ = config; }
 
     int available_queue_size() const { return available_queue_.size(); }
-    int pending_queue_size() const { return pending_queue_.size(); }
+    int pending_queue_size() const { return 0; }
     int completed_queue_size() const { return completed_queue_.size(); }
 
 private:
@@ -56,7 +57,7 @@ private:
     std::vector<std::unique_ptr<GameInstance>> games_;
 
     GameQueue available_queue_;
-    GameQueue pending_queue_;
+    std::unique_ptr<BatchManager> batch_manager_;
     GameQueue completed_queue_;
 
     std::vector<std::thread> workers_;

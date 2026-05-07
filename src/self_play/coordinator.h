@@ -4,6 +4,8 @@
 #include "self_play/game_queues.h"
 #include "model/inference.h"
 
+#include "self_play/batch_manager.h"
+
 // ---------------------------------------------------------------------------
 // SelfPlayConfig — tuning parameters for the async self-play pipeline.
 // ---------------------------------------------------------------------------
@@ -21,13 +23,13 @@ struct SelfPlayConfig {
 // ---------------------------------------------------------------------------
 // coordinator_thread — manages GPU inference batching.
 //
-// Collects pending games from `pending`, assembles a contiguous tensor batch,
+// Collects pending games from `batch_manager`, assembles a contiguous tensor batch,
 // runs GPU inference via `inference`, distributes EVs back to each game's
 // SolverBuffers, and pushes games to `available` with kNeedResolve phase.
 //
 // Runs until shutdown.load() returns true.
 // ---------------------------------------------------------------------------
-void coordinator_thread(GameQueue& pending, GameQueue& available,
+void coordinator_thread(BatchManager& batch_manager, GameQueue& available,
                         InferenceEngine& inference,
                         const SelfPlayConfig& config,
                         std::atomic<bool>& shutdown,

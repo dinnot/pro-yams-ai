@@ -1,4 +1,4 @@
-num_steps: 50000
+num_steps: 100
 
 training:
   replay_capacity: 200000
@@ -22,9 +22,9 @@ training:
   eval_interval: 5000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/test_td0_100k_new5
-  log_dir: ./logs/test_td0_100k_new5
-  log_path: ./logs/test_td0_100k_new5/training_log.csv
+  checkpoint_dir: checkpoints/test_timing
+  log_dir: ./logs/test_timing
+  log_path: ./logs/test_timing/training_log.csv
   debug_mode: true
 
   initial_heuristic_weight: 1.0
@@ -45,7 +45,7 @@ training:
     num_games: 2048
     num_coordinators: 3
     debug_mode: true
-    debug_log_path: "./logs/test_td0_100k_new5/debug_coordinator.log"
+    debug_log_path: "./logs/test_timing/debug_coordinator.log"
 
   model:
     input_size: 986
@@ -56,4 +56,4 @@ training:
     loss_function: bce
     architecture: mlp
     debug_mode: true
-    debug_log_path: "./logs/test_td0_100k_new5/debug_batch.log"
+    debug_log_path: "./logs/test_timing/debug_batch.log"

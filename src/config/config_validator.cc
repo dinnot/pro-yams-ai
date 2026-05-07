@@ -63,9 +63,9 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.self_play.num_workers must be positive");
     if (sp.num_games <= 0)
         r.fail("training.self_play.num_games must be positive");
-    if (sp.max_inference_batch < GameInstance::kMaxAfterstates)
-        r.fail("training.self_play.max_inference_batch must be >= kMaxAfterstates (" +
-               std::to_string(GameInstance::kMaxAfterstates) + ")");
+    if (sp.max_inference_batch < kMaxAfterstateRequests)
+        r.fail("training.self_play.max_inference_batch must be >= kMaxAfterstateRequests (" +
+               std::to_string(kMaxAfterstateRequests) + ")");
     if (sp.min_games_per_batch <= 0)
         r.fail("training.self_play.min_games_per_batch must be positive");
     if (sp.batch_timeout_ms <= 0)

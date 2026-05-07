@@ -15,14 +15,24 @@
 #include "engine/scoring.h"
 #include "engine/tensor.h"
 
-void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& completed,
+void worker_thread(GameQueue& available, BatchManager& batch_manager, GameQueue& completed,
                    const PrecomputedTables& tables, const SolverConfig& config,
                    std::atomic<bool>& shutdown) {
     (void)shutdown;  // checked via nullptr sentinel from available queue
+    
+    double total_pop_wait_ms = 0.0;
+    double total_compute_ms = 0.0;
 
     while (true) {
+        auto t_pop_start = std::chrono::steady_clock::now();
         GameInstance* game = available.pop();
+        auto t_pop_end = std::chrono::steady_clock::now();
+        double pop_ms = std::chrono::duration<double, std::milli>(t_pop_end - t_pop_start).count();
+        total_pop_wait_ms += pop_ms;
+        
         if (game == nullptr) break;  // shutdown sentinel
+
+        auto t_compute_start = std::chrono::steady_clock::now();
 
         if (game->phase == GamePhase::kNeedRequests) {
             // -----------------------------------------------------------
@@ -30,8 +40,12 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             // -----------------------------------------------------------
             game->solver_buffers.dp_computed = false;
             game->solver_buffers.evs_blended = false;
+            
+            auto t_solver_start = std::chrono::steady_clock::now();
             solver_get_requests(game->state, game->ctx, tables,
                                 game->solver_buffers);
+            auto t_solver_end = std::chrono::steady_clock::now();
+            double solver_ms = std::chrono::duration<double, std::milli>(t_solver_end - t_solver_start).count();
 
             if (game->solver_buffers.request_count == 0) {
                 // No placements available. With corrected Turbo logic this
@@ -66,21 +80,66 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 continue;
             }
 
-            assert(game->solver_buffers.request_count <= GameInstance::kMaxAfterstates);
+            assert(game->solver_buffers.request_count <= kMaxAfterstateRequests);
 
             // -----------------------------------------------------------
             // Step 2: generate tensors for all requests.
             // -----------------------------------------------------------
+            auto t_tensor_start = std::chrono::steady_clock::now();
+            
+            InferenceBatch* reserved_batch = nullptr;
+            int batch_offset = 0;
+            float* dest_ptr = batch_manager.reserve(game->solver_buffers.request_count, reserved_batch, batch_offset);
+            
+            if (dest_ptr == nullptr) {
+                // Should only happen on shutdown
+                break;
+            }
+
             generate_tensor_batch(
                 game->state.board, game->ctx,
                 game->state.board.current_player,
                 game->solver_buffers.requests,
                 game->solver_buffers.request_count,
                 tables,
-                game->tensor_buffer);
+                dest_ptr);
+                
+            // Store the pointer and offset temporarily in solver_buffers so resolve can access it
+            // for the trajectory! Wait, we can't easily add pointers to solver_buffers without modifying it.
+            // But we need to save the `dest_ptr` or at least the generated tensors so we can copy
+            // the chosen one to the trajectory later!
+            // Wait, if we use Zero-Copy, `trajectory` recording in `kNeedResolve` needs to copy FROM the batch!
+            // But by the time we are in `kNeedResolve`, the batch has been sent to GPU and recycled!
+            // The memory might have been overwritten!
+            // Oh no!
+            // We MUST copy the chosen tensor BEFORE the batch is recycled, OR we must save the generated
+            // tensors locally if we want to record them!
+            // But wait, the Worker only knows WHICH tensor is chosen AFTER `solver_resolve`!
+            // And `solver_resolve` requires the GPU EV predictions!
+            // So the GPU inference MUST happen BEFORE we know which tensor to save!
+            // Can we just regenerate the single chosen tensor during `kNeedResolve`?!
+            // YES! `generate_tensor` takes microseconds for a single tensor!
+            
+            auto t_tensor_end = std::chrono::steady_clock::now();
+            double tensor_ms = std::chrono::duration<double, std::milli>(t_tensor_end - t_tensor_start).count();
 
             game->phase = GamePhase::kWaitingInference;
-            pending.push(game);
+            
+            auto t_push_start = std::chrono::steady_clock::now();
+            batch_manager.commit(reserved_batch, game, batch_offset, game->solver_buffers.request_count);
+            auto t_push_end = std::chrono::steady_clock::now();
+            double push_ms = std::chrono::duration<double, std::milli>(t_push_end - t_push_start).count();
+            
+            if (config.debug_mode) {
+                static std::atomic<int> log_counter{0};
+                if (++log_counter % 10000 == 0) {
+                    std::ofstream f(config.debug_log_path + "_worker.log", std::ios::app);
+                    if (f.is_open()) {
+                        f << "PopWait: " << pop_ms << " ms | Solver: " << solver_ms 
+                          << " ms | Tensor: " << tensor_ms << " ms | PushWait: " << push_ms << " ms\n";
+                    }
+                }
+            }
 
         } else if (game->phase == GamePhase::kNeedResolve) {
             // Capture if this is the first resolve of the turn BEFORE we run solver_resolve
@@ -105,7 +164,7 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs, 
                             game->solver_buffers.request_count * sizeof(double));
 
-                double heuristic_evs[GameInstance::kMaxAfterstates];
+                double heuristic_evs[kMaxAfterstateRequests];
                 heuristic_evaluate(game->state.board, game->ctx,
                                    game->solver_buffers.requests,
                                    game->solver_buffers.request_count,
@@ -221,13 +280,18 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
                 step.player = static_cast<int8_t>(game->state.board.current_player);
                 step.is_exploratory = game->current_turn_is_exploratory;
 
-                // Copy the chosen afterstate tensor from tensor_buffer.
+                // Copy the chosen afterstate tensor.
+                // Because we use Zero-Copy batching, the original tensor memory in the BatchManager
+                // might have already been recycled and overwritten.
+                // We regenerate the chosen tensor here. It's extremely fast for a single tensor.
                 assert(result.chosen_request_idx >= 0);
                 assert(result.chosen_request_idx < game->solver_buffers.request_count);
-                std::memcpy(step.tensor,
-                            game->tensor_buffer
-                                + static_cast<size_t>(result.chosen_request_idx) * kTensorSize,
-                            kTensorSize * sizeof(float));
+                generate_tensor_batch(
+                    game->state.board, game->ctx, game->state.board.current_player,
+                    &game->solver_buffers.requests[result.chosen_request_idx], 1,
+                    tables,
+                    step.tensor
+                );
                 ++game->trajectory_length;
 
                 // Apply placement (switches player, rolls dice for next turn).
@@ -277,5 +341,14 @@ void worker_thread(GameQueue& available, GameQueue& pending, GameQueue& complete
             }
         }
         // Unknown phase: ignore (shouldn't happen in well-formed usage).
+        
+        auto t_compute_end = std::chrono::steady_clock::now();
+        total_compute_ms += std::chrono::duration<double, std::milli>(t_compute_end - t_compute_start).count();
+    }
+    
+    std::ofstream f(config.debug_log_path + "_worker_totals.log", std::ios::app);
+    if (f.is_open()) {
+        f << "Worker Shutdown | Total Pop Wait: " << total_pop_wait_ms 
+          << " ms | Total Compute: " << total_compute_ms << " ms\n";
     }
 }

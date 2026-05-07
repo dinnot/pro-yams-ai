@@ -1,6 +1,7 @@
 # Self-play library — depends on engine, solver, and model.
 add_library(self_play STATIC
     game_queues.cc
+    batch_manager.cc
     worker.cc
     coordinator.cc
     orchestrator.cc
