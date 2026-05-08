@@ -38,6 +38,12 @@ public:
     std::mutex entries_mtx;
     std::vector<Entry> entries;
 
+    // Single-pusher flag: protected by BatchManager::active_mtx_. The first
+    // thread (committer or flusher) to observe reserved==committed flips it
+    // and is the sole pusher to ready_batches_. Reset when the batch is
+    // pulled back out of the free pool.
+    bool push_claimed = false;
+
     void reset();
 };
 

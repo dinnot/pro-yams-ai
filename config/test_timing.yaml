@@ -1,12 +1,12 @@
-num_steps: 100
+num_steps: 500
 
 training:
-  replay_capacity: 200000
-  min_buffer_size: 50000
+  replay_capacity: 50000
+  min_buffer_size: 10000
   train_batch_size: 8192
   train_steps_per_collect: 0.041
-  model_swap_interval: 10
-  checkpoint_interval: 5000
+  model_swap_interval: 100
+  checkpoint_interval: 500
   max_checkpoints: 2
 
   td_mode: td0
@@ -20,7 +20,7 @@ training:
   initial_epsilon: 0
 
   eval_interval: 5000
-  eval_games: 500
+  eval_games: 50
 
   checkpoint_dir: checkpoints/test_timing
   log_dir: ./logs/test_timing
@@ -41,9 +41,9 @@ training:
     max_inference_batch: 4096
     min_games_per_batch: 2
     batch_timeout_ms: 5
-    num_workers: 24
+    num_workers: 20
     num_games: 2048
-    num_coordinators: 3
+    num_coordinators: 5
     debug_mode: true
     debug_log_path: "./logs/test_timing/debug_coordinator.log"
 

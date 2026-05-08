@@ -4,6 +4,7 @@ add_executable(self_play_tests
     coordinator_test.cc
     integration_test.cc
     trajectory_test.cc
+    batch_manager_test.cc
 )
 target_link_libraries(self_play_tests
     PRIVATE self_play engine solver model gtest_main ${TORCH_LIBRARIES})

@@ -20,6 +20,7 @@ void InferenceBatch::reset() {
     reserved_count.store(0, std::memory_order_relaxed);
     committed_count.store(0, std::memory_order_relaxed);
     entries.clear();
+    push_claimed = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,40 +50,68 @@ float* BatchManager::reserve(int req_count, InferenceBatch*& out_batch, int& out
     // A request larger than a whole batch would loop forever below.
     assert(req_count > 0 && req_count <= max_tensors_);
 
-    std::unique_lock<std::mutex> lock(active_mtx_);
-
     while (!shutdown_.load(std::memory_order_relaxed)) {
-        if (!active_batch_) {
-            // Get a free batch from the pool
-            std::unique_lock<std::mutex> pool_lock(pool_mtx_);
-            pool_cv_.wait(pool_lock, [this]() { return !free_batches_.empty() || shutdown_.load(std::memory_order_relaxed); });
-            if (shutdown_.load(std::memory_order_relaxed)) return nullptr;
-
-            active_batch_ = free_batches_.back();
-            free_batches_.pop_back();
-            pool_lock.unlock();
-
-            active_batch_->reset();
-            active_batch_start_ = std::chrono::steady_clock::now();
+        // Phase 1: try to reserve in the current active batch (or flush it if full).
+        InferenceBatch* batch_to_push = nullptr;
+        {
+            std::lock_guard<std::mutex> active_lock(active_mtx_);
+            if (active_batch_) {
+                int current = active_batch_->reserved_count.load(std::memory_order_relaxed);
+                if (current + req_count <= max_tensors_) {
+                    out_offset = current;
+                    active_batch_->reserved_count.fetch_add(req_count, std::memory_order_relaxed);
+                    out_batch = active_batch_;
+                    return active_batch_->data_ptr + (out_offset * kTensorSize);
+                }
+                // Active batch can't fit this reservation. Flush it.
+                batch_to_push = flush_active_batch_locked();
+            }
         }
 
-        // Try to reserve
-        int current_reserved = active_batch_->reserved_count.load(std::memory_order_relaxed);
-        if (current_reserved + req_count <= max_tensors_) {
-            // Success
-            out_offset = current_reserved;
-            active_batch_->reserved_count.fetch_add(req_count, std::memory_order_relaxed);
-            out_batch = active_batch_;
-            return active_batch_->data_ptr + (out_offset * kTensorSize);
-        }
-
-        // Active batch is full, flush it and try again in the next loop
-        InferenceBatch* flushed = flush_active_batch_locked();
-        if (flushed) {
+        if (batch_to_push) {
             std::lock_guard<std::mutex> ready_lock(ready_mtx_);
-            ready_batches_.push_back(flushed);
+            ready_batches_.push_back(batch_to_push);
             ready_cv_.notify_one();
         }
+
+        // Phase 2: get a free batch from the pool. We MUST NOT hold active_mtx_
+        // during this wait — committers acquire active_mtx_ briefly, and if we
+        // held it we'd block them. The committers may include the last-committer
+        // for a still-uncommitted limbo batch whose push would unblock a coord
+        // that would in turn recycle a batch that would unblock us. Holding
+        // active_mtx_ across the wait turns that chain into a deadlock.
+        InferenceBatch* candidate = nullptr;
+        {
+            std::unique_lock<std::mutex> pool_lock(pool_mtx_);
+            pool_cv_.wait(pool_lock, [this]() {
+                return !free_batches_.empty() || shutdown_.load(std::memory_order_relaxed);
+            });
+            if (shutdown_.load(std::memory_order_relaxed)) return nullptr;
+            candidate = free_batches_.back();
+            free_batches_.pop_back();
+        }
+
+        // Phase 3: install the candidate as the active batch (or return it to
+        // the pool if another reserver beat us to it).
+        bool installed = false;
+        {
+            std::lock_guard<std::mutex> active_lock(active_mtx_);
+            if (!active_batch_) {
+                candidate->reset();
+                active_batch_ = candidate;
+                active_batch_start_ = std::chrono::steady_clock::now();
+                installed = true;
+            }
+        }
+
+        if (!installed) {
+            // Another reserver installed an active batch first. Return ours to
+            // the pool so other waiters can use it.
+            std::lock_guard<std::mutex> pool_lock(pool_mtx_);
+            free_batches_.push_back(candidate);
+            pool_cv_.notify_one();
+        }
+        // Loop back: phase 1 will now see active_batch_ set and reserve into it.
     }
 
     return nullptr;
@@ -107,7 +136,13 @@ InferenceBatch* BatchManager::flush_active_batch_locked() {
         pool_cv_.notify_one();
         return nullptr;
     } else if (reserved == committed) {
-        // All reserved slots are already committed. Ready to push!
+        // All reserved slots are already committed. Race: a committer that
+        // just brought committed up to reserved may still be on its way into
+        // commit()'s active_mtx_ section, where it would also try to push.
+        // Whoever flips push_claimed first (under active_mtx_) is the sole
+        // pusher; the other path bails out.
+        if (b->push_claimed) return nullptr;
+        b->push_claimed = true;
         return b;
     }
     // Else: there are outstanding commits. The worker calling commit() will push it.
@@ -130,19 +165,30 @@ void BatchManager::commit(InferenceBatch* batch, GameInstance* game, int offset,
     // Actually, if new_committed == max_tensors_, it's definitively full!
     
     bool should_push = false;
-    
+
     if (new_committed == max_tensors_) {
         // It's perfectly full. If it's still active, we must flush it.
         std::lock_guard<std::mutex> lock(active_mtx_);
         if (active_batch_ == batch) {
             active_batch_ = nullptr;
         }
-        should_push = true;
+        // A flusher running concurrently may already have claimed the push
+        // (saw reserved == committed and seized push_claimed). In that case,
+        // we must NOT push again — double-push would land the same batch in
+        // ready_batches_ twice and corrupt the pool.
+        if (!batch->push_claimed) {
+            batch->push_claimed = true;
+            should_push = true;
+        }
     } else {
         // It's not perfectly full. Did it get flushed due to timeout or being nearly full?
-        // If it's not the active batch AND all reserved are committed, push it.
+        // If it's not the active batch AND all reserved are committed, push it
+        // — but only if no other path has already claimed the push.
         std::lock_guard<std::mutex> lock(active_mtx_);
-        if (active_batch_ != batch && new_committed == batch->reserved_count.load(std::memory_order_relaxed)) {
+        if (active_batch_ != batch &&
+            new_committed == batch->reserved_count.load(std::memory_order_relaxed) &&
+            !batch->push_claimed) {
+            batch->push_claimed = true;
             should_push = true;
         }
     }
@@ -162,11 +208,20 @@ InferenceBatch* BatchManager::pop_ready_batch() {
 
         auto now = std::chrono::steady_clock::now();
         bool flushed = false;
-        
+
         InferenceBatch* flushed_batch = nullptr;
         {
-            std::lock_guard<std::mutex> act_lock(active_mtx_);
-            if (active_batch_ && active_batch_->reserved_count.load(std::memory_order_relaxed) > 0) {
+            // try_lock instead of lock: a worker in reserve() can hold
+            // active_mtx_ for a long time while waiting on pool_cv_ for a
+            // free batch. If we blocked here, both coordinators could end up
+            // parked on active_mtx_ while a freshly-pushed batch sits in
+            // ready_batches_ — recycle never happens, pool_cv_ never fires,
+            // reserve never wakes. Skip the timeout-flush this iteration and
+            // re-check ready_batches_ instead.
+            std::unique_lock<std::mutex> act_lock(active_mtx_, std::try_to_lock);
+            if (act_lock.owns_lock() &&
+                active_batch_ &&
+                active_batch_->reserved_count.load(std::memory_order_relaxed) > 0) {
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - active_batch_start_).count();
                 if (elapsed >= timeout_ms_) {
                     flushed_batch = flush_active_batch_locked();
