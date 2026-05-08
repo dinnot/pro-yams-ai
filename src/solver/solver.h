@@ -42,6 +42,7 @@ struct SolverConfig {
     bool   exploration_enabled = false;   // Master switch (false = always greedy)
     bool   debug_mode = false;
     double heuristic_weight = 0.0;
+    int    heuristic_version = 2;  // 1 = V1 (greedy), 2 = V2 (DP-driven duel margin)
     bool   use_duel_margin_maximization = false;
     double duel_margin_maximization_scale = 4000.0;
     bool   use_pbrs          = false;

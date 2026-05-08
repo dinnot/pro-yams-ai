@@ -159,10 +159,11 @@ json game_state_to_json(const GameSession& session) {
     // Player types
     auto pt_str = [](PlayerType pt) -> const char* {
         switch (pt) {
-            case PlayerType::kHuman:     return "human";
-            case PlayerType::kHeuristic: return "heuristic";
-            case PlayerType::kNNSolver:  return "nn";
-            case PlayerType::kMCRollout: return "mc";
+            case PlayerType::kHuman:        return "human";
+            case PlayerType::kHeuristic:    return "heuristic_v1";
+            case PlayerType::kHeuristicV2:  return "heuristic_v2";
+            case PlayerType::kNNSolver:     return "nn";
+            case PlayerType::kMCRollout:    return "mc";
         }
         return "unknown";
     };

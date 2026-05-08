@@ -43,9 +43,16 @@ struct TrainingConfig {
     // --- Heuristic Bootstrapping ---
     double initial_heuristic_weight = 1.0;
     int heuristic_decay_steps       = 50000;
+    int heuristic_version           = 2;  // 1 = V1 (greedy), 2 = V2 (DP-driven duel margin)
 
     // --- Initial epsilon (reserved for future ε-greedy exploration) ---
     double initial_epsilon = 0.0;
+
+    // --- Past-opponent rotation (catastrophic-forgetting mitigation) ---
+    // Probability that a freshly-recycled game pits the current model against
+    // a randomly-chosen older checkpoint (uniform over the newest 5 on disk).
+    // 0.0 disables the feature.
+    double past_opponent_probability = 0.0;
 
     // --- Evaluation ---
     int eval_interval = 1000;   // Training steps between evaluation runs

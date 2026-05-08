@@ -9,8 +9,9 @@ int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
                               bool use_margin, double margin_scale,
                               bool use_pbrs,
-                              TrainingSample* samples, int max_samples) {
-    int n = std::min(game.trajectory_length, max_samples);
+                              TrainingSample* samples, int max_samples,
+                              int exclude_player) {
+    int traj_len = game.trajectory_length;
 
     // Terminal target from the perspective of player 0.
     const double terminal_p0 = use_margin
@@ -29,11 +30,13 @@ int extract_training_samples(const GameInstance& game,
         return use_margin ? -v : 1.0 - v;
     };
 
-    for (int i = 0; i < n; ++i) {
+    int out = 0;
+    for (int i = 0; i < traj_len && out < max_samples; ++i) {
         const TrajectoryStep& step = game.trajectory[i];
         int8_t my_player = step.player;
+        if (exclude_player >= 0 && my_player == exclude_player) continue;
 
-        std::memcpy(samples[i].state, step.tensor, kTensorSize * sizeof(float));
+        std::memcpy(samples[out].state, step.tensor, kTensorSize * sizeof(float));
 
         double target = 0.0;
 
@@ -94,11 +97,12 @@ int extract_training_samples(const GameInstance& game,
         }
 
         if (use_margin) {
-            samples[i].target = std::max(-1.0, std::min(1.0, target));
+            samples[out].target = std::max(-1.0, std::min(1.0, target));
         } else {
-            samples[i].target = std::max(0.0, std::min(1.0, target));
+            samples[out].target = std::max(0.0, std::min(1.0, target));
         }
+        ++out;
     }
 
-    return n;
+    return out;
 }

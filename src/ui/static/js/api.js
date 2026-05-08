@@ -89,5 +89,34 @@ const API = {
     async getLogList() {
         const res = await fetch('/api/logs/list');
         return res.json();
+    },
+
+    // Tournament
+    async listModels(dir) {
+        const url = dir ? `/api/models/list?dir=${encodeURIComponent(dir)}` : '/api/models/list';
+        const res = await fetch(url);
+        return res.json();
+    },
+
+    async startTournament(participants, gamesPerMatchup) {
+        const res = await fetch('/api/tournament/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                participants,
+                games_per_matchup: gamesPerMatchup
+            })
+        });
+        return res.json();
+    },
+
+    async getTournamentStatus() {
+        const res = await fetch('/api/tournament/status');
+        return res.json();
+    },
+
+    async stopTournament() {
+        const res = await fetch('/api/tournament/stop', { method: 'POST' });
+        return res.json();
     }
 };

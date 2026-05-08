@@ -28,6 +28,12 @@ training:
   pbrs_upper_reward: 0.1
   pbrs_clean_reward: 0.2
 
+  # Past-opponent rotation (mitigates catastrophic forgetting in self-play).
+  # Probability that a recycled game uses an older checkpoint as opponent
+  # (uniform over the 5 newest checkpoints in checkpoint_dir, randomized to
+  # P0 or P1 50/50). 0.0 disables. Typical value when enabled: 0.2.
+  past_opponent_probability: 0.0
+
   # Exploration (softmax temperature applied by solver)
   initial_temperature: 1.0
   min_temperature: 0.1

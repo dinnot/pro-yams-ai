@@ -66,11 +66,13 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "debug_mode",          tc.debug_mode);
     maybe_assign(n, "initial_heuristic_weight", tc.initial_heuristic_weight);
     maybe_assign(n, "heuristic_decay_steps", tc.heuristic_decay_steps);
+    maybe_assign(n, "heuristic_version", tc.heuristic_version);
     maybe_assign(n, "use_duel_margin_maximization",   tc.use_duel_margin_maximization);
     maybe_assign(n, "duel_margin_maximization_scale", tc.duel_margin_maximization_scale);
     maybe_assign(n, "use_pbrs",          tc.use_pbrs);
     maybe_assign(n, "pbrs_upper_reward", tc.pbrs_upper_reward);
     maybe_assign(n, "pbrs_clean_reward", tc.pbrs_clean_reward);
+    maybe_assign(n, "past_opponent_probability", tc.past_opponent_probability);
     maybe_assign(n, "logs_on_start",     tc.logs_on_start);
     if (n["td_mode"])   tc.td_mode = parse_td_mode(n["td_mode"].as<std::string>());
     if (n["self_play"]) load_self_play_config(n["self_play"], tc.self_play);
@@ -112,8 +114,10 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--debug_mode" && i + 1 < argc) config.training.debug_mode = (std::stoi(argv[++i]) != 0);
         else if (arg == "--initial_heuristic_weight" && i + 1 < argc) config.training.initial_heuristic_weight = std::stod(argv[++i]);
         else if (arg == "--heuristic_decay_steps" && i + 1 < argc) config.training.heuristic_decay_steps = std::stoi(argv[++i]);
+        else if (arg == "--heuristic_version" && i + 1 < argc) config.training.heuristic_version = std::stoi(argv[++i]);
         else if (arg == "--use_duel_margin_maximization" && i + 1 < argc) config.training.use_duel_margin_maximization = (std::stoi(argv[++i]) != 0);
         else if (arg == "--duel_margin_maximization_scale" && i + 1 < argc) config.training.duel_margin_maximization_scale = std::stod(argv[++i]);
+        else if (arg == "--past_opponent_probability" && i + 1 < argc) config.training.past_opponent_probability = std::stod(argv[++i]);
     }
 }
 

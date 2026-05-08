@@ -1,5 +1,6 @@
 #include "ui/server.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -19,8 +20,11 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 
 UIServer::UIServer(int port, const std::string& static_dir,
-                   SessionManager& sessions, const std::string& log_dir)
+                   SessionManager& sessions, const std::string& log_dir,
+                   const std::string& checkpoints_dir,
+                   TournamentManager* tournament)
     : sessions_(sessions), log_dir_(log_dir), static_dir_(static_dir),
+      checkpoints_dir_(checkpoints_dir), tournament_(tournament),
       port_(port) {
     register_routes();
 }
@@ -143,6 +147,24 @@ void UIServer::register_routes() {
             handle_log_list(req, res);
         });
 
+    // --- Tournament ---
+    server_.Get("/api/models/list",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_models_list(req, res);
+        });
+    server_.Post("/api/tournament/start",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_tournament_start(req, res);
+        });
+    server_.Get("/api/tournament/status",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_tournament_status(req, res);
+        });
+    server_.Post("/api/tournament/stop",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_tournament_stop(req, res);
+        });
+
     // --- Static files ---
     // Mount the static directory; files are served as-is.
     if (!static_dir_.empty() && fs::exists(static_dir_)) {
@@ -174,9 +196,12 @@ void UIServer::handle_new_game(const httplib::Request& req,
     catch (...) { error_response(res, "invalid JSON body"); return; }
 
     auto parse_player = [](const std::string& s) -> PlayerType {
-        if (s == "human")     return PlayerType::kHuman;
-        if (s == "nn")        return PlayerType::kNNSolver;
-        if (s == "mc")        return PlayerType::kMCRollout;
+        if (s == "human")        return PlayerType::kHuman;
+        if (s == "nn")           return PlayerType::kNNSolver;
+        if (s == "mc")           return PlayerType::kMCRollout;
+        if (s == "heuristic_v2") return PlayerType::kHeuristicV2;
+        if (s == "heuristic_v1") return PlayerType::kHeuristic;
+        // "heuristic" legacy alias defaults to V1.
         return PlayerType::kHeuristic;
     };
 
@@ -396,4 +421,142 @@ void UIServer::handle_log_list(const httplib::Request&,
     // Always include the default log dir itself.
     dirs.push_back(log_dir_);
     json_response(res, {{"directories", dirs}});
+}
+
+// ---------------------------------------------------------------------------
+// Tournament endpoints
+// ---------------------------------------------------------------------------
+
+void UIServer::handle_models_list(const httplib::Request& req,
+                                   httplib::Response& res) {
+    std::string dir = checkpoints_dir_;
+    if (req.has_param("dir")) dir = req.get_param_value("dir");
+
+    json models = json::array();
+    std::error_code ec;
+    if (fs::exists(dir, ec) && fs::is_directory(dir, ec)) {
+        // Recursively walk the directory so nested run folders (e.g.
+        // checkpoints/<run>/checkpoint_step_N.model) all show up.
+        for (auto it = fs::recursive_directory_iterator(dir, ec);
+             it != fs::recursive_directory_iterator();
+             it.increment(ec)) {
+            if (ec) break;
+            if (!it->is_regular_file(ec)) continue;
+            const auto& path = it->path();
+            if (path.extension() != ".model") continue;
+            auto stem = path.parent_path() / path.stem();
+
+            // Build a display name relative to the root: "<run>/<step>" when
+            // the file lives under a subdirectory, just "<step>" otherwise.
+            fs::path rel = fs::relative(stem, dir, ec);
+            std::string display = rel.empty() ? path.stem().string() : rel.string();
+
+            json m;
+            m["path"] = stem.string();
+            m["filename"] = path.filename().string();
+            m["display_name"] = display;
+            models.push_back(m);
+        }
+    }
+    // Sort by display name for stable display.
+    std::sort(models.begin(), models.end(),
+              [](const json& a, const json& b) {
+                  return a.value("display_name", "") < b.value("display_name", "");
+              });
+    json_response(res, {{"models", models}, {"directory", dir}});
+}
+
+void UIServer::handle_tournament_start(const httplib::Request& req,
+                                        httplib::Response& res) {
+    if (tournament_ == nullptr) {
+        error_response(res, "tournament manager unavailable", 503);
+        return;
+    }
+
+    json body;
+    try { body = json::parse(req.body); }
+    catch (...) { error_response(res, "invalid JSON body"); return; }
+
+    int games_per_matchup = body.value("games_per_matchup", 100);
+    if (!body.contains("participants") || !body["participants"].is_array()) {
+        error_response(res, "missing 'participants' array");
+        return;
+    }
+
+    std::vector<TournamentParticipant> participants;
+    for (const auto& p : body["participants"]) {
+        TournamentParticipant tp;
+        tp.id   = p.value("id",   std::string{});
+        tp.name = p.value("name", tp.id);
+        std::string type_str = p.value("type", std::string{});
+        if (!parse_agent_type(type_str, tp.type)) {
+            error_response(res, "unknown agent type: " + type_str);
+            return;
+        }
+        tp.path = p.value("path", std::string{});
+        participants.push_back(std::move(tp));
+    }
+
+    std::string err;
+    if (!tournament_->start_tournament(std::move(participants),
+                                       games_per_matchup, err)) {
+        error_response(res, err);
+        return;
+    }
+    json_response(res, {{"ok", true}});
+}
+
+void UIServer::handle_tournament_status(const httplib::Request&,
+                                         httplib::Response& res) {
+    if (tournament_ == nullptr) {
+        error_response(res, "tournament manager unavailable", 503);
+        return;
+    }
+    TournamentState st = tournament_->get_status();
+
+    json participants = json::array();
+    for (const auto& p : st.participants) {
+        participants.push_back({
+            {"id",   p.id},
+            {"name", p.name},
+            {"type", agent_type_to_string(p.type)},
+            {"path", p.path},
+        });
+    }
+
+    json grid = json::object();
+    for (const auto& [a_id, row] : st.grid) {
+        json row_obj = json::object();
+        for (const auto& [b_id, m] : row) {
+            row_obj[b_id] = {
+                {"wins_a",       m.wins_a},
+                {"wins_b",       m.wins_b},
+                {"draws",        m.draws},
+                {"games",        m.games},
+                {"avg_margin_a", m.avg_margin_a},
+            };
+        }
+        grid[a_id] = row_obj;
+    }
+
+    json out = {
+        {"is_running",        st.is_running},
+        {"games_completed",   st.games_completed},
+        {"total_games",       st.total_games},
+        {"games_per_matchup", st.games_per_matchup},
+        {"participants",      participants},
+        {"grid",              grid},
+    };
+    if (!st.error.empty()) out["error"] = st.error;
+    json_response(res, out);
+}
+
+void UIServer::handle_tournament_stop(const httplib::Request&,
+                                       httplib::Response& res) {
+    if (tournament_ == nullptr) {
+        error_response(res, "tournament manager unavailable", 503);
+        return;
+    }
+    tournament_->stop();
+    json_response(res, {{"ok", true}});
 }

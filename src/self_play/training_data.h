@@ -27,15 +27,24 @@ struct TrainingSample {
 // to td_mode, with proper perspective flipping (targets are always P(player
 // who placed wins)).
 //
-// @param game        Completed game (trajectory must be fully populated)
-// @param td_mode     Target computation mode
-// @param td_lambda   Lambda for kTDLambda mode (ignored for kTD0 / kMC)
-// @param samples     Pre-allocated output array
-// @param max_samples Maximum number of samples to write
-// @return            Number of samples written
+// `exclude_player` (-1 = none) skips trajectory steps belonging to that player
+// when emitting samples; used for past-opponent games so the current model is
+// not trained on the older opponent's decisions. Bootstrapping (TD0/TDLambda)
+// still walks the full trajectory, so values from the excluded player's steps
+// are reachable as bootstrap targets — note that those values come from the
+// older model and are mildly biased; MC mode is unaffected.
+//
+// @param game           Completed game (trajectory must be fully populated)
+// @param td_mode        Target computation mode
+// @param td_lambda      Lambda for kTDLambda mode (ignored for kTD0 / kMC)
+// @param samples        Pre-allocated output array
+// @param max_samples    Maximum number of samples to write
+// @param exclude_player Player whose steps are skipped (-1 = include all)
+// @return               Number of samples written
 // ---------------------------------------------------------------------------
 int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
                               bool use_margin, double margin_scale,
                               bool use_pbrs,
-                              TrainingSample* samples, int max_samples);
+                              TrainingSample* samples, int max_samples,
+                              int exclude_player = -1);

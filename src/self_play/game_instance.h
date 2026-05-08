@@ -68,4 +68,11 @@ struct GameInstance {
 
     double current_turn_start_ev = 0.0;
     bool   current_turn_is_exploratory = false;
+
+    // === Past-opponent rotation ===
+    // When use_past_opponent is true, the player whose seat == past_opponent_player
+    // has its inference requests routed to the opponent BatchManager (loaded from
+    // an older checkpoint). The other seat plays the current model.
+    bool use_past_opponent      = false;
+    int  past_opponent_player   = -1;  // 0 or 1 when active; -1 otherwise
 };

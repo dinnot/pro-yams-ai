@@ -15,7 +15,9 @@
 #include "engine/scoring.h"
 #include "engine/tensor.h"
 
-void worker_thread(GameQueue& available, BatchManager& batch_manager, GameQueue& completed,
+void worker_thread(GameQueue& available, BatchManager& batch_manager,
+                   BatchManager* opponent_batch_manager,
+                   GameQueue& completed,
                    const PrecomputedTables& tables, const SolverConfig& config,
                    std::atomic<bool>& shutdown) {
     (void)shutdown;  // checked via nullptr sentinel from available queue
@@ -71,10 +73,19 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager, GameQueue&
 
             // -----------------------------------------------------------
             // Step 2: generate tensors directly into the shared batch buffer.
+            // Past-opponent games route the opponent seat's requests to the
+            // secondary batch manager (whose coordinator runs the older model).
             // -----------------------------------------------------------
+            BatchManager* target_bm = &batch_manager;
+            if (opponent_batch_manager != nullptr &&
+                game->use_past_opponent &&
+                game->state.board.current_player == game->past_opponent_player) {
+                target_bm = opponent_batch_manager;
+            }
+
             InferenceBatch* reserved_batch = nullptr;
             int batch_offset = 0;
-            float* dest_ptr = batch_manager.reserve(
+            float* dest_ptr = target_bm->reserve(
                 game->solver_buffers.request_count, reserved_batch, batch_offset);
 
             if (dest_ptr == nullptr) {
@@ -91,8 +102,8 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager, GameQueue&
                 dest_ptr);
 
             game->phase = GamePhase::kWaitingInference;
-            batch_manager.commit(reserved_batch, game, batch_offset,
-                                 game->solver_buffers.request_count);
+            target_bm->commit(reserved_batch, game, batch_offset,
+                              game->solver_buffers.request_count);
 
         } else if (game->phase == GamePhase::kNeedResolve) {
             // Capture if this is the first resolve of the turn BEFORE we run solver_resolve
@@ -114,22 +125,33 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager, GameQueue&
 
             if (config.heuristic_weight > 0.0 && !game->solver_buffers.evs_blended) {
                 // Save raw NN EVs for debugging
-                std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs, 
+                std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs,
                             game->solver_buffers.request_count * sizeof(double));
 
                 double heuristic_evs[kMaxAfterstateRequests];
-                heuristic_evaluate(game->state.board, game->ctx,
-                                   game->solver_buffers.requests,
-                                   game->solver_buffers.request_count,
-                                   heuristic_evs);
+                if (config.heuristic_version == 2) {
+                    heuristic_evaluate_v2(game->state.board, game->ctx,
+                                          game->solver_buffers.requests,
+                                          game->solver_buffers.request_count,
+                                          heuristic_evs, tables);
+                } else {
+                    heuristic_evaluate(game->state.board, game->ctx,
+                                       game->solver_buffers.requests,
+                                       game->solver_buffers.request_count,
+                                       heuristic_evs);
+                }
 
-                // Normalize heuristic EVs to [0, 1] using a fixed global maximum (1800.0).
-                // This preserves absolute scale, which is critical for TD learning. 
-                // Dynamic normalization (min/max of current list) would map every "best"
-                // move to 1.0, poisoning the value trajectory and destroying the signal.
+                // Normalize heuristic EVs to match the NN's output range, then
+                // blend. V2 emits raw expected duel margin (can be negative,
+                // ~±5000); V1 emits non-negative score×coeff (~0..1800).
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {
-                    if (config.use_duel_margin_maximization) {
+                    if (config.heuristic_version == 2) {
+                        // V2 → squash actual duel margin via tanh, matching
+                        // duel_margin_maximization NN targets in [-1, 1].
+                        heuristic_evs[i] = std::tanh(
+                            heuristic_evs[i] / config.duel_margin_maximization_scale);
+                    } else if (config.use_duel_margin_maximization) {
                         heuristic_evs[i] = std::tanh(
                             heuristic_evs[i] / config.duel_margin_maximization_scale);
                     } else {

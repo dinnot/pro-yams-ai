@@ -4,6 +4,7 @@ add_library(solver STATIC
     solver.cc
     dp_tables.cc
     dp_tables_compute.cc
+    dp_eval.cc
 )
 target_include_directories(solver PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(solver PUBLIC engine)

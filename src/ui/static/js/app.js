@@ -23,4 +23,5 @@ document.addEventListener('DOMContentLoaded', () => {
     Tensor.init();
     Dashboard.init();
     Comparison.init();
+    Tournament.init();
 });

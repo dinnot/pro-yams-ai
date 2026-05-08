@@ -6,6 +6,8 @@
 #include <cstring>
 
 #include "engine/duel.h"  // upper_section_bonus, crush_multiplier
+#include "engine/placement.h"
+#include "solver/dp_eval.h"
 #include "solver/dp_tables.h"
 
 // ---------------------------------------------------------------------------
@@ -87,128 +89,10 @@ int compute_total_potential(const BoardState& board, int player) {
 }
 
 // ---------------------------------------------------------------------------
-// V2.1 helpers — DP state encoders + horizon allocators
+// V2.1 helpers — DP state encoders + horizon allocators live in
+// solver/dp_eval (shared with the V2 heuristic bot).
 // ---------------------------------------------------------------------------
 namespace {
-
-constexpr int8_t kVals1s[]  = {-1, 0, 3, 4, 5};
-constexpr int8_t kVals2s[]  = {-1, 0, 6, 8, 10};
-constexpr int8_t kVals3s[]  = {-1, 0, 12, 15};
-constexpr int8_t kVals4s[]  = {-1, 0, 16, 20};
-constexpr int8_t kVals5s[]  = {-1, 0, 20, 25};
-constexpr int8_t kVals6s[]  = {-1, 0, 24, 30};
-constexpr int8_t kValsMid[] = {-1, 0, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
-constexpr int8_t kValsFH[]  = {-1, 0, 27, 28, 30, 31, 32, 33, 34, 35, 36, 37,
-                               38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50};
-constexpr int8_t kValsK[]   = {-1, 0, 38, 42, 46, 50, 54};
-constexpr int8_t kValsQ[]   = {-1, 0, 50};
-constexpr int8_t kValsU8[]  = {-1, 0, 65, 70, 75};
-constexpr int8_t kValsY[]   = {-1, 0, 80, 85, 90, 95, 100};
-
-// Snap a Golden Rule maximum (gmax) to the nearest legal Sc constraint value
-// at-or-above gmax.  Returns 0 if there is no constraint.
-int8_t snap_gmax(int gmax, const int8_t* vals, int count) {
-    if (gmax <= 0) return 0;
-    for (int i = 2; i < count; ++i) {
-        if (vals[i] >= gmax) return vals[i];
-    }
-    return vals[count - 1];
-}
-
-Variant get_variant(int col) {
-    if (col == kColDown)    return Variant::DOWN;
-    if (col == kColUp)      return Variant::UP;
-    if (col == kColMid)     return Variant::UPDOWN;
-    if (col == kColUpDown)  return Variant::UPDOWN;
-    if (col == kColTurbo)   return Variant::TURBO;
-    return Variant::FREE;
-}
-
-// Build the upper/middle/lower Sc[] arrays for a column from the live board.
-// Sets EU, EM, EL to the count of empty cells in each section.
-void build_Sc(int p, int col, const BoardState& board, const GameContext& ctx,
-              int8_t Sc_U[6], int8_t Sc_M[2], int8_t Sc_L[5],
-              int& EU, int& EM, int& EL) {
-    EU = 0; EM = 0; EL = 0;
-
-    const int8_t* u_vals[] = {kVals1s, kVals2s, kVals3s, kVals4s, kVals5s, kVals6s};
-    const int u_counts[] = {5, 5, 4, 4, 4, 4};
-    for (int i = 0; i < 6; ++i) {
-        if (board.cells[p][col][i] != kCellEmpty) {
-            Sc_U[i] = -1;
-        } else {
-            Sc_U[i] = snap_gmax(ctx.golden_max[col][i], u_vals[i], u_counts[i]);
-            ++EU;
-        }
-    }
-
-    if (board.cells[p][col][kRowSS] != kCellEmpty) {
-        Sc_M[0] = -1;
-    } else {
-        Sc_M[0] = snap_gmax(ctx.golden_max[col][kRowSS], kValsMid, 13);
-        if (ctx.ls_scratched[p][col]) Sc_M[0] = 31;
-        ++EM;
-    }
-    if (board.cells[p][col][kRowLS] != kCellEmpty) {
-        Sc_M[1] = -1;
-    } else {
-        Sc_M[1] = snap_gmax(ctx.golden_max[col][kRowLS], kValsMid, 13);
-        if (ctx.ss_scratched[p][col]) Sc_M[1] = 31;
-        ++EM;
-    }
-
-    const int8_t* l_vals[] = {kValsFH, kValsK, kValsQ, kValsU8, kValsY};
-    const int l_counts[] = {24, 7, 3, 5, 7};
-    for (int i = 0; i < 5; ++i) {
-        if (board.cells[p][col][8 + i] != kCellEmpty) {
-            Sc_L[i] = -1;
-        } else {
-            Sc_L[i] = snap_gmax(ctx.golden_max[col][8 + i], l_vals[i], l_counts[i]);
-            ++EL;
-        }
-    }
-}
-
-// Apportion T turns across the upper/middle/lower DP queries proportional
-// to the count of empty cells in each section.
-inline void apportion_turns(int T, int EU, int EM, int EL,
-                            int& TU, int& TM, int& TL) {
-    int Ecol = EU + EM + EL;
-    if (Ecol <= 0) {
-        TU = TM = TL = 0;
-        return;
-    }
-    TU = (T * EU) / Ecol;
-    TM = (T * EM) / Ecol;
-    TL = T - TU - TM;
-    if (TL < 0) TL = 0;
-}
-
-// Compute expected raw column score for player p in column col over T turns.
-// Includes upper-bonus expectation (from get_upper_ev), expected middle/lower
-// points, and already-filled cell scores in the lower section (rows 6-12).
-float get_E_raw(int p, int col, int T, const BoardState& board,
-                const GameContext& ctx, const DPTables& dp) {
-    if (dp.dp_t1.empty()) return 0.0f;
-
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
-    int EU, EM, EL;
-    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
-    int TU, TM, TL;
-    apportion_turns(T, EU, EM, EL, TU, TM, TL);
-
-    Variant v = get_variant(col);
-    float eu = get_upper_ev(dp, v, Sc_U, TU, ctx.upper_sum[p][col]);
-    float em = get_middle_ev(dp, v, Sc_M, TM);
-    float el = get_lower_ev(dp, v, Sc_L, TL);
-
-    int filled_score = 0;
-    for (int r = 6; r <= 12; ++r) {
-        int8_t cv = board.cells[p][col][r];
-        if (cv > 0) filled_score += cv;
-    }
-    return eu + em + el + static_cast<float>(filled_score);
-}
 
 // Crush-aware "points needed to crush at level N" projector, returned as a
 // signed, scale-normalised feature.
@@ -529,41 +413,7 @@ void generate_tensor_batch(const BoardState& board, const GameContext& ctx,
         int score = req.score;
         int p = player;
 
-        board_clone.cells[p][col][row] = static_cast<int8_t>(score);
-        board_clone.cells_filled++;
-
-        if (score > ctx_clone.golden_max[col][row])
-            ctx_clone.golden_max[col][row] = static_cast<int8_t>(score);
-
-        if (row <= kRow6s)
-            ctx_clone.upper_sum[p][col] += static_cast<int16_t>(score);
-
-        if (row == kRowSS && score == 0) {
-            ctx_clone.ss_scratched[p][col] = true;
-            int8_t ls_val = board.cells[p][col][kRowLS];
-            if (ls_val != kCellEmpty && ls_val != 0) {
-                board_clone.cells[p][col][kRowLS] = 0;
-                ctx_clone.ls_scratched[p][col] = true;
-                ctx_clone.lower_has_scratch[p][col] = true;
-                int8_t opp_ls = board.cells[1 - p][col][kRowLS];
-                int8_t new_max = (opp_ls > 0) ? opp_ls : 0;
-                ctx_clone.golden_max[col][kRowLS] = new_max;
-            }
-        } else if (row == kRowLS && score == 0) {
-            ctx_clone.ls_scratched[p][col] = true;
-            int8_t ss_val = board.cells[p][col][kRowSS];
-            if (ss_val != kCellEmpty && ss_val != 0) {
-                board_clone.cells[p][col][kRowSS] = 0;
-                ctx_clone.ss_scratched[p][col] = true;
-                ctx_clone.lower_has_scratch[p][col] = true;
-                int8_t opp_ss = board.cells[1 - p][col][kRowSS];
-                int8_t new_max = (opp_ss > 0) ? opp_ss : 0;
-                ctx_clone.golden_max[col][kRowSS] = new_max;
-            }
-        }
-
-        if (row >= kRowSS && score == 0)
-            ctx_clone.lower_has_scratch[p][col] = true;
+        apply_placement(p, col, row, score, board_clone, ctx_clone);
 
         PCData pc[2][6];
         for (int c = 0; c < 6; ++c) {

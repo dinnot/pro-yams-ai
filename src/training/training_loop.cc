@@ -15,6 +15,37 @@
 #include "self_play/training_data.h"     // extract_training_samples
 #include "training/logging.h"
 
+namespace {
+
+// List checkpoint stems (without .model suffix) sorted by step ascending.
+std::vector<std::string> list_checkpoint_stems(const std::string& dir) {
+    namespace fs = std::filesystem;
+    std::vector<std::pair<int, std::string>> found;
+    if (!fs::exists(dir)) return {};
+
+    const std::string prefix = "checkpoint_step_";
+    const std::string suffix = ".model";
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix, 0) != 0) continue;
+        if (name.size() <= prefix.size() + suffix.size()) continue;
+        if (name.substr(name.size() - suffix.size()) != suffix) continue;
+        try {
+            int s = std::stoi(name.substr(prefix.size(),
+                                          name.size() - prefix.size() - suffix.size()));
+            found.emplace_back(s, dir + "/" + name.substr(0, name.size() - suffix.size()));
+        } catch (...) {}
+    }
+    std::sort(found.begin(), found.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<std::string> out;
+    out.reserve(found.size());
+    for (auto& p : found) out.push_back(std::move(p.second));
+    return out;
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -48,12 +79,23 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     inf_model->eval();
     inference_ = std::make_shared<InferenceEngine>(inf_model, infer_device_);
 
+    // Past-opponent inference engine — only built when the feature is enabled.
+    // Initially shares the current weights; refresh_opponent_model() swaps in a
+    // random older checkpoint once one is available.
+    if (config_.past_opponent_probability > 0.0) {
+        opponent_loader_ = std::make_unique<ModelTrainer>(mc, infer_device_);
+        auto opp_model = opponent_loader_->clone_for_inference(infer_device_);
+        opp_model->eval();
+        opponent_inference_ = std::make_shared<InferenceEngine>(opp_model, infer_device_);
+    }
+
     // Solver config: enable exploration if temperature > 0
     solver_config_.placement_temperature = temperature_;
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
     solver_config_.debug_mode            = config_.debug_mode;
     solver_config_.heuristic_weight      = heuristic_weight_;
+    solver_config_.heuristic_version     = config_.heuristic_version;
     solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
     solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
     solver_config_.use_pbrs          = config_.use_pbrs;
@@ -68,7 +110,8 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     }
 
     orchestrator_ = std::make_unique<SelfPlayOrchestrator>(
-        config_.self_play, tables_, *inference_, solver_config_);
+        config_.self_play, tables_, *inference_, solver_config_,
+        opponent_inference_ ? opponent_inference_.get() : nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +165,11 @@ void TrainingLoop::run(int num_steps) {
             std::filesystem::create_directories(log_parent);
         }
     }
+
+    // If checkpoints already exist (e.g. on resume), prime the past-opponent
+    // model immediately so the first batch of recycles can use it. No-op when
+    // the feature is disabled or no checkpoints are on disk yet.
+    refresh_opponent_model();
 
     orchestrator_->start();
 
@@ -203,28 +251,48 @@ void TrainingLoop::run(int num_steps) {
 
 int TrainingLoop::collect_completed_games() {
     int n = orchestrator_->collect_completed(collect_buf_, kMaxCollectBatch);
+    const bool past_opp_enabled = orchestrator_->has_opponent_inference()
+                                  && opponent_ready_
+                                  && config_.past_opponent_probability > 0.0;
+
     for (int i = 0; i < n; ++i) {
         GameInstance* g = collect_buf_[i];
 
         int traj_len = g->trajectory_length;
         if (traj_len > 0) {
-            // Use stack allocation for small trajectories; heap otherwise.
+            // For past-opponent games we drop the older model's trajectory
+            // steps so the current model isn't trained on them.
+            int exclude = g->use_past_opponent ? g->past_opponent_player : -1;
             std::vector<TrainingSample> samples(static_cast<size_t>(traj_len));
             int ns = extract_training_samples(*g, config_.td_mode,
                                               config_.td_lambda,
                                               config_.use_duel_margin_maximization,
                                               config_.duel_margin_maximization_scale,
                                               config_.use_pbrs,
-                                              samples.data(), traj_len);
+                                              samples.data(), traj_len,
+                                              exclude);
             buffer_->add_batch(samples.data(), ns);
         }
 
         ++games_played_;
 
+        // Decide past-opponent assignment for the next game.
+        bool use_past = false;
+        int  past_player = -1;
+        if (past_opp_enabled) {
+            // Two independent uniform draws: roll the dice for activation,
+            // then 50/50 for which seat plays the older model.
+            double activate = opponent_rng_.uniform_double();
+            if (activate < config_.past_opponent_probability) {
+                use_past = true;
+                past_player = (opponent_rng_.uniform_double() < 0.5) ? 0 : 1;
+            }
+        }
+
         // Recycle: new seed derived from games_played to stay deterministic
         uint64_t new_seed = static_cast<uint64_t>(games_played_)
                             * 6364136223846793005ULL;
-        orchestrator_->recycle_game(g, new_seed);
+        orchestrator_->recycle_game(g, new_seed, use_past, past_player);
     }
     return n;
 }
@@ -302,6 +370,7 @@ void TrainingLoop::do_training_step() {
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
     solver_config_.heuristic_weight      = heuristic_weight_;
+    solver_config_.heuristic_version     = config_.heuristic_version;
     solver_config_.use_duel_margin_maximization   = config_.use_duel_margin_maximization;
     solver_config_.duel_margin_maximization_scale = config_.duel_margin_maximization_scale;
     solver_config_.use_pbrs          = config_.use_pbrs;
@@ -341,8 +410,39 @@ void TrainingLoop::maybe_checkpoint() {
     // Prune old checkpoints (handles .model, .optimizer, .buffer)
     prune_old_checkpoints(config_.checkpoint_dir, config_.max_checkpoints);
 
+    // Refresh the past-opponent model now that the on-disk pool changed.
+    refresh_opponent_model();
+
     // Append metrics to log
     log_metrics(config_.log_path, metrics());
+}
+
+// ---------------------------------------------------------------------------
+// refresh_opponent_model — pick a random checkpoint and load it as the past
+// opponent. Called after each checkpoint save. No-op when the feature is off
+// or no checkpoint exists yet.
+// ---------------------------------------------------------------------------
+
+void TrainingLoop::refresh_opponent_model() {
+    if (!opponent_inference_ || !opponent_loader_) return;
+
+    auto stems = list_checkpoint_stems(config_.checkpoint_dir);
+    if (stems.empty()) return;
+
+    // The pool is already capped on disk by max_checkpoints (default 5), so we
+    // sample uniformly over whatever's available — newest 5 by construction.
+    int idx = opponent_rng_.uniform_int(0, static_cast<int>(stems.size()) - 1);
+    try {
+        opponent_loader_->load_weights(stems[static_cast<size_t>(idx)]);
+        auto opp_clone = opponent_loader_->clone_for_inference(infer_device_);
+        opp_clone->eval();
+        opponent_inference_->swap_model(opp_clone);
+        opponent_ready_ = true;
+    } catch (const std::exception& e) {
+        // Don't crash training on a bad checkpoint; just leave the previous
+        // opponent weights in place and try again on the next refresh.
+        (void)e;
+    }
 }
 
 // ---------------------------------------------------------------------------

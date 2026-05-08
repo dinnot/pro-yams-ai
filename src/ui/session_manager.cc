@@ -114,7 +114,7 @@ bool SessionManager::get_session_copy(int id, GameSession& out) const {
 // Caller must hold the session's mutex.
 // ---------------------------------------------------------------------------
 
-void SessionManager::play_heuristic_turn(GameSession& session) {
+void SessionManager::play_heuristic_turn(GameSession& session, bool use_v2) {
     GameSession::TurnRecord record;
     record.player = static_cast<int>(session.state.board.current_player);
     std::memcpy(record.initial_dice, session.state.dice, sizeof(session.state.dice));
@@ -147,10 +147,17 @@ void SessionManager::play_heuristic_turn(GameSession& session) {
     }
 
     // Evaluate ONCE
-    heuristic_evaluate(session.state.board, session.ctx,
-                       session.buffers.requests,
-                       session.buffers.request_count,
-                       session.buffers.evs);
+    if (use_v2) {
+        heuristic_evaluate_v2(session.state.board, session.ctx,
+                              session.buffers.requests,
+                              session.buffers.request_count,
+                              session.buffers.evs, tables_);
+    } else {
+        heuristic_evaluate(session.state.board, session.ctx,
+                           session.buffers.requests,
+                           session.buffers.request_count,
+                           session.buffers.evs);
+    }
 
     // Loop only to resolve and reroll dice
     while (true) {
@@ -371,13 +378,15 @@ bool SessionManager::play_one_bot_turn(GameSession& s) {
     PlayerType pt = s.player_types[player];
 
     if (pt == PlayerType::kHeuristic)
-        play_heuristic_turn(s);
+        play_heuristic_turn(s, /*use_v2=*/false);
+    else if (pt == PlayerType::kHeuristicV2)
+        play_heuristic_turn(s, /*use_v2=*/true);
     else if (pt == PlayerType::kNNSolver && nn_model_)
         play_nn_turn(s);
     else if (pt == PlayerType::kMCRollout && nn_model_)
         play_mc_turn(s);
     else
-        play_heuristic_turn(s);  // fallback when NN unavailable
+        play_heuristic_turn(s, /*use_v2=*/true);  // fallback when NN unavailable
 
     if (is_terminal(s.state.board)) {
         s.game_over = true;

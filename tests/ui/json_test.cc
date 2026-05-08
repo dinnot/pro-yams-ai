@@ -183,7 +183,7 @@ TEST_F(JsonSerializationTest, PlayerTypesCorrect) {
     json j = game_state_to_json(copy);
 
     EXPECT_EQ(j["player_types"][0], "human");
-    EXPECT_EQ(j["player_types"][1], "heuristic");
+    EXPECT_EQ(j["player_types"][1], "heuristic_v1");
 }
 
 TEST_F(JsonSerializationTest, GameOverState) {

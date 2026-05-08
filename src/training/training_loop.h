@@ -58,6 +58,10 @@ private:
     void maybe_checkpoint();
     void maybe_evaluate();
 
+    // Pick a random checkpoint from disk and load its weights into the
+    // opponent inference engine. No-op if no checkpoints exist yet.
+    void refresh_opponent_model();
+
     TrainingConfig            config_;
     const PrecomputedTables&  tables_;
     torch::Device             train_device_;
@@ -66,6 +70,10 @@ private:
     std::unique_ptr<ReplayBuffer>           buffer_;
     std::unique_ptr<ModelTrainer>           trainer_;
     std::shared_ptr<InferenceEngine>        inference_;
+    std::shared_ptr<InferenceEngine>        opponent_inference_;  // null when feature disabled
+    std::unique_ptr<ModelTrainer>           opponent_loader_;     // owns the past-opponent model + lets us load weights
+    bool                                    opponent_ready_ = false;  // true once a checkpoint has been loaded into opponent_inference_
+    RNG                                     opponent_rng_{0xA5A5A5A5C3C3C3C3ULL};
     std::unique_ptr<SelfPlayOrchestrator>   orchestrator_;
 
     SolverConfig  solver_config_;

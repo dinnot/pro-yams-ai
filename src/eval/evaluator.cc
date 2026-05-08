@@ -121,7 +121,8 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
             nn_play_turn(model, device, state, ctx, tables,
                          buffers, tensor_buffer, greedy_cfg, rng);
         } else {
-            heuristic_play_turn(state, ctx, tables, buffers, rng);
+            heuristic_play_turn(state, ctx, tables, buffers, rng,
+                                HeuristicVersion::V2);
         }
     }
 

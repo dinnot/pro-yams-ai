@@ -1,10 +1,12 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "eval/tournament.h"
 #include "ui/session_manager.h"
 
 // ---------------------------------------------------------------------------
@@ -19,7 +21,9 @@ public:
     UIServer(int port,
              const std::string& static_dir,
              SessionManager& sessions,
-             const std::string& log_dir);
+             const std::string& log_dir,
+             const std::string& checkpoints_dir,
+             TournamentManager* tournament);
 
     /// Start serving (blocks until stop() is called).
     void start();
@@ -47,6 +51,10 @@ private:
     void handle_training_log(const httplib::Request&, httplib::Response&);
     void handle_eval_log    (const httplib::Request&, httplib::Response&);
     void handle_log_list    (const httplib::Request&, httplib::Response&);
+    void handle_models_list (const httplib::Request&, httplib::Response&);
+    void handle_tournament_start (const httplib::Request&, httplib::Response&);
+    void handle_tournament_status(const httplib::Request&, httplib::Response&);
+    void handle_tournament_stop  (const httplib::Request&, httplib::Response&);
 
     // Helpers
     static int  parse_session_id(const httplib::Request& req);
@@ -63,5 +71,7 @@ private:
     SessionManager& sessions_;
     std::string     log_dir_;
     std::string     static_dir_;
+    std::string     checkpoints_dir_;
+    TournamentManager* tournament_;
     int             port_;
 };

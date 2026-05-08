@@ -14,6 +14,7 @@
     <button class="tab-btn active" data-tab="game">Game</button>
     <button class="tab-btn" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="comparison">Run Comparison</button>
+    <button class="tab-btn" data-tab="tournament">Tournament</button>
   </nav>
 </header>
 
@@ -23,13 +24,15 @@
     <div class="game-controls">
       <button id="btn-new-game">New Game</button>
       <select id="sel-p0">
-        <option value="heuristic">P0: Heuristic</option>
+        <option value="heuristic_v2">P0: Heuristic V2 (DP)</option>
+        <option value="heuristic_v1">P0: Heuristic V1 (Greedy)</option>
         <option value="human">P0: Human</option>
         <option value="nn">P0: NN</option>
         <option value="mc">P0: MC Rollout</option>
       </select>
       <select id="sel-p1">
-        <option value="heuristic">P1: Heuristic</option>
+        <option value="heuristic_v2">P1: Heuristic V2 (DP)</option>
+        <option value="heuristic_v1">P1: Heuristic V1 (Greedy)</option>
         <option value="human">P1: Human</option>
         <option value="nn">P1: NN</option>
         <option value="mc">P1: MC Rollout</option>
@@ -129,6 +132,44 @@
     </div>
   </section>
 
+  <!-- ===== TOURNAMENT ===== -->
+  <section id="tab-tournament" class="tab-section">
+    <div class="tour-setup">
+      <h3>Add Participant</h3>
+      <div class="tour-add-row">
+        <select id="tour-part-type">
+          <option value="kHeuristicV2">Heuristic V2 (DP)</option>
+          <option value="kHeuristicV1">Heuristic V1 (Greedy)</option>
+          <option value="kNN">Neural Net (Checkpoint)</option>
+        </select>
+        <select id="tour-part-ckpt" style="display:none"></select>
+        <input type="text" id="tour-part-name" placeholder="Display Name">
+        <button id="btn-tour-add">Add Bot</button>
+        <button id="btn-tour-refresh-models" type="button" title="Reload checkpoint list">↻</button>
+      </div>
+      <ul id="tour-participants-list" class="tour-participants"></ul>
+    </div>
+
+    <div class="tour-launch">
+      <label>Games per matchup:
+        <input type="number" id="tour-games" value="100" min="1" max="10000">
+      </label>
+      <button id="btn-tour-start">Start Tournament</button>
+      <button id="btn-tour-stop" disabled>Stop</button>
+    </div>
+
+    <div class="tour-results">
+      <div id="tour-progress" class="tour-progress" style="display:none">
+        <progress id="tour-progress-bar" value="0" max="100"></progress>
+        <span id="tour-progress-text"></span>
+      </div>
+      <div id="tour-error" class="tour-error" style="display:none"></div>
+      <div class="tour-matrix-wrap">
+        <table id="tour-matrix" class="tour-table"></table>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== RUN COMPARISON ===== -->
   <section id="tab-comparison" class="tab-section">
     <div class="comparison-controls">
@@ -151,6 +192,7 @@
 <script src="js/game.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/comparison.js"></script>
+<script src="js/tournament.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

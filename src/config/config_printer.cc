@@ -47,11 +47,13 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "debug_mode"           << YAML::Value << tc.debug_mode;
     out << YAML::Key << "initial_heuristic_weight" << YAML::Value << tc.initial_heuristic_weight;
     out << YAML::Key << "heuristic_decay_steps" << YAML::Value << tc.heuristic_decay_steps;
+    out << YAML::Key << "heuristic_version"     << YAML::Value << tc.heuristic_version;
     out << YAML::Key << "use_duel_margin_maximization"   << YAML::Value << tc.use_duel_margin_maximization;
     out << YAML::Key << "duel_margin_maximization_scale" << YAML::Value << tc.duel_margin_maximization_scale;
     out << YAML::Key << "use_pbrs"          << YAML::Value << tc.use_pbrs;
     out << YAML::Key << "pbrs_upper_reward" << YAML::Value << tc.pbrs_upper_reward;
     out << YAML::Key << "pbrs_clean_reward" << YAML::Value << tc.pbrs_clean_reward;
+    out << YAML::Key << "past_opponent_probability" << YAML::Value << tc.past_opponent_probability;
 
     out << YAML::Key << "self_play";
     out << YAML::Value << YAML::BeginMap;

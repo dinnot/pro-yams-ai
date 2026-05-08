@@ -17,7 +17,8 @@
 // ---------------------------------------------------------------------------
 enum class PlayerType {
     kHuman,
-    kHeuristic,
+    kHeuristic,    // V1: greedy score × coefficient
+    kHeuristicV2,  // V2: DP-driven expected duel margin
     kNNSolver,
     kMCRollout
 };

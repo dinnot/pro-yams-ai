@@ -14,10 +14,12 @@
 SelfPlayOrchestrator::SelfPlayOrchestrator(const SelfPlayConfig& config,
                                              const PrecomputedTables& tables,
                                              InferenceEngine& inference,
-                                             const SolverConfig& solver_config)
+                                             const SolverConfig& solver_config,
+                                             InferenceEngine* opponent_inference)
     : config_(config),
       tables_(tables),
       inference_(inference),
+      opponent_inference_(opponent_inference),
       solver_config_(solver_config) {}
 
 SelfPlayOrchestrator::~SelfPlayOrchestrator() {
@@ -66,23 +68,42 @@ void SelfPlayOrchestrator::start() {
     batch_manager_ = std::make_unique<BatchManager>(
         num_batches, config_.max_inference_batch, use_pinned, config_.batch_timeout_ms);
 
+    if (opponent_inference_ != nullptr) {
+        bool opp_pinned = opponent_inference_->device().is_cuda();
+        opponent_batch_manager_ = std::make_unique<BatchManager>(
+            num_batches, config_.max_inference_batch, opp_pinned, config_.batch_timeout_ms);
+    }
+
     // Launch worker threads.
     workers_.reserve(config_.num_workers);
+    BatchManager* opp_bm_ptr = opponent_batch_manager_ ? opponent_batch_manager_.get() : nullptr;
     for (int i = 0; i < config_.num_workers; ++i) {
         workers_.emplace_back(worker_thread,
             std::ref(available_queue_), std::ref(*batch_manager_),
+            opp_bm_ptr,
             std::ref(completed_queue_),
             std::ref(tables_), std::ref(solver_config_),
             std::ref(shutdown_));
     }
 
-    // Launch coordinator threads.
+    // Launch coordinator threads (current model).
     coordinators_.reserve(config_.num_coordinators);
     for (int i = 0; i < config_.num_coordinators; ++i) {
         coordinators_.emplace_back(coordinator_thread,
             std::ref(*batch_manager_), std::ref(available_queue_),
             std::ref(inference_), std::ref(config_),
             std::ref(shutdown_), i);
+    }
+
+    // Launch coordinator threads for the past opponent (if enabled).
+    if (opponent_batch_manager_) {
+        opponent_coordinators_.reserve(config_.num_coordinators);
+        for (int i = 0; i < config_.num_coordinators; ++i) {
+            opponent_coordinators_.emplace_back(coordinator_thread,
+                std::ref(*opponent_batch_manager_), std::ref(available_queue_),
+                std::ref(*opponent_inference_), std::ref(config_),
+                std::ref(shutdown_), 100 + i);  // distinct id for logs
+        }
     }
 }
 
@@ -100,9 +121,14 @@ void SelfPlayOrchestrator::stop() {
     if (batch_manager_) {
         batch_manager_->shutdown();
     }
+    if (opponent_batch_manager_) {
+        opponent_batch_manager_->shutdown();
+    }
 
     // Join coordinators (they check shutdown_ and use pop_with_timeout).
     for (auto& c : coordinators_)
+        if (c.joinable()) c.join();
+    for (auto& c : opponent_coordinators_)
         if (c.joinable()) c.join();
 
     // Join workers.
@@ -128,10 +154,15 @@ int SelfPlayOrchestrator::collect_completed(GameInstance** out, int max_count) {
 // recycle_game — reset a game and return it to the pool.
 // ---------------------------------------------------------------------------
 
-void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed) {
+void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed,
+                                         bool use_past_opponent,
+                                         int past_opponent_player) {
     game->rng              = RNG(new_seed);
     game->trajectory_length = 0;
     game->result           = 0.0;
+    // Only honour past-opponent assignment when wired for it.
+    game->use_past_opponent    = use_past_opponent && (opponent_inference_ != nullptr);
+    game->past_opponent_player = game->use_past_opponent ? past_opponent_player : -1;
     init_game(game->state, game->ctx, game->rng);
     game->phase = GamePhase::kNeedRequests;
 
