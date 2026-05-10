@@ -42,6 +42,8 @@ const Tournament = (() => {
         if (!nameInput.value) {
             if (t === 'kHeuristicV1') nameInput.placeholder = 'Heuristic V1';
             else if (t === 'kHeuristicV2') nameInput.placeholder = 'Heuristic V2';
+            else if (t === 'kHeuristicV3') nameInput.placeholder = 'Heuristic V3';
+            else if (t && t.startsWith('kHeuristicV')) nameInput.placeholder = 'Heuristic ' + t.substr('kHeuristic'.length);
             else nameInput.placeholder = 'NN';
         }
     }
@@ -49,6 +51,8 @@ const Tournament = (() => {
     function defaultName(type, path) {
         if (type === 'kHeuristicV1') return 'Heuristic V1';
         if (type === 'kHeuristicV2') return 'Heuristic V2';
+        if (type === 'kHeuristicV3') return 'Heuristic V3';
+        if (type && type.startsWith('kHeuristicV')) return 'Heuristic ' + type.substr('kHeuristic'.length);
         if (path) {
             const fn = path.split('/').pop() || path;
             return fn;

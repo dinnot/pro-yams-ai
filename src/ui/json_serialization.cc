@@ -159,11 +159,24 @@ json game_state_to_json(const GameSession& session) {
     // Player types
     auto pt_str = [](PlayerType pt) -> const char* {
         switch (pt) {
-            case PlayerType::kHuman:        return "human";
-            case PlayerType::kHeuristic:    return "heuristic_v1";
-            case PlayerType::kHeuristicV2:  return "heuristic_v2";
-            case PlayerType::kNNSolver:     return "nn";
-            case PlayerType::kMCRollout:    return "mc";
+            case PlayerType::kHuman:         return "human";
+            case PlayerType::kHeuristic:     return "heuristic_v1";
+            case PlayerType::kHeuristicV2:   return "heuristic_v2";
+            case PlayerType::kHeuristicV3:   return "heuristic_v3";
+            case PlayerType::kHeuristicV4:   return "heuristic_v4";
+            case PlayerType::kHeuristicV5:   return "heuristic_v5";
+            case PlayerType::kHeuristicV6:   return "heuristic_v6";
+            case PlayerType::kHeuristicV7:   return "heuristic_v7";
+            case PlayerType::kHeuristicV8:   return "heuristic_v8";
+            case PlayerType::kHeuristicV9:   return "heuristic_v9";
+            case PlayerType::kHeuristicV10:  return "heuristic_v10";
+            case PlayerType::kHeuristicV11:  return "heuristic_v11";
+            case PlayerType::kHeuristicV12:  return "heuristic_v12";
+            case PlayerType::kHeuristicV13:  return "heuristic_v13";
+            case PlayerType::kHeuristicV14:  return "heuristic_v14";
+            case PlayerType::kHeuristicV15:  return "heuristic_v15";
+            case PlayerType::kNNSolver:      return "nn";
+            case PlayerType::kMCRollout:     return "mc";
         }
         return "unknown";
     };

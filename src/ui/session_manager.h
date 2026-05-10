@@ -10,6 +10,7 @@
 
 #include "engine/game_context.h"
 #include "engine/game_flow.h"
+#include "heuristic/heuristic_bot.h"
 #include "model/pro_yams_net.h"
 #include "solver/precomputed_tables.h"
 #include "ui/game_session.h"
@@ -93,7 +94,7 @@ private:
     std::shared_ptr<SessionEntry> get_entry(int session_id) const;
 
     // Internal helpers (must be called with the session's mutex held).
-    void play_heuristic_turn(GameSession& session, bool use_v2);
+    void play_heuristic_turn(GameSession& session, HeuristicVersion version);
     void play_nn_turn(GameSession& session);
     void play_mc_turn(GameSession& session);
 

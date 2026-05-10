@@ -122,7 +122,27 @@
       "Bash(xargs ls -la)",
       "Bash(cmake --build . --target engine -j4)",
       "Bash(cmake --build . --target tensor_tests -j4)",
-      "Bash(cmake --build . -j4)"
+      "Bash(cmake --build . -j4)",
+      "Bash(cmake --build . --target heuristic heuristic_tests -j 8)",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/heuristic/heuristic_tests)",
+      "Bash(cmake --build . -j 8)",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive MKL_THREADING_LAYER=SEQUENTIAL ./tests/eval/eval_tests)",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive MKL_THREADING_LAYER=SEQUENTIAL ./tests/ui/ui_tests)",
+      "Bash(g++ -std=c++20 -O2 -I../src -I_deps/cli11-src/include /tmp/v3_vs_v2.cc src/heuristic/libheuristic.a src/solver/libsolver.a src/engine/libengine.a -lpthread -o /tmp/v3_vs_v2)",
+      "Bash(OMP_NUM_THREADS=1 /tmp/v3_vs_v2)",
+      "Bash(g++ -std=c++20 -O2 -I../src /tmp/v3_vs_v2.cc src/heuristic/libheuristic.a src/solver/libsolver.a src/engine/libengine.a -lpthread -o /tmp/v3_vs_v2)",
+      "Bash(g++ -std=c++20 -O2 -fopenmp -I../src /tmp/v3_vs_v2.cc src/heuristic/libheuristic.a src/solver/libsolver.a src/engine/libengine.a -lpthread -o /tmp/v3_vs_v2)",
+      "Bash(cmake --build . --target heuristic -j 8)",
+      "Bash(OMP_NUM_THREADS=1 /tmp/v3_ablation4)",
+      "Bash(g++ -std=c++20 -O2 -fopenmp -I../src /tmp/v3_ablation4.cc src/heuristic/libheuristic.a src/solver/libsolver.a src/engine/libengine.a -lpthread -o /tmp/v3_ablation4)",
+      "Bash(cat)",
+      "Bash(g++ -std=c++20 -O2 -fopenmp -I../src /tmp/v3_final.cc src/heuristic/libheuristic.a src/solver/libsolver.a src/engine/libengine.a -lpthread -o /tmp/v3_final)",
+      "Bash(OMP_NUM_THREADS=1 /tmp/v3_final)",
+      "Bash(OMP_NUM_THREADS=1 ./tests/heuristic/heuristic_tests --gtest_filter='HeuristicBotTest.V3*')",
+      "Bash(cmake --build . --target heuristic eval -j 8)",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive MKL_THREADING_LAYER=SEQUENTIAL ./tests/heuristic/heuristic_tests --gtest_filter='HeuristicBotTest.V4*:HeuristicBotTest.V3*')",
+      "Bash(OMP_NUM_THREADS=1 ./tests/eval/eval_tests)",
+      "Bash(OMP_NUM_THREADS=1 ./tests/ui/ui_tests)"
     ]
   }
 }

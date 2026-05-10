@@ -19,6 +19,19 @@ enum class PlayerType {
     kHuman,
     kHeuristic,    // V1: greedy score × coefficient
     kHeuristicV2,  // V2: DP-driven expected duel margin
+    kHeuristicV3,  // V3: V2 baseline + strategic rules (column aim, blocking, clean focus)
+    kHeuristicV4,
+    kHeuristicV5,
+    kHeuristicV6,
+    kHeuristicV7,
+    kHeuristicV8,
+    kHeuristicV9,
+    kHeuristicV10,
+    kHeuristicV11,
+    kHeuristicV12,
+    kHeuristicV13,
+    kHeuristicV14,
+    kHeuristicV15,
     kNNSolver,
     kMCRollout
 };

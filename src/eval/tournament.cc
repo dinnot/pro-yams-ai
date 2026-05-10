@@ -19,9 +19,22 @@
 
 const char* agent_type_to_string(AgentType t) {
     switch (t) {
-        case AgentType::kHeuristicV1: return "kHeuristicV1";
-        case AgentType::kHeuristicV2: return "kHeuristicV2";
-        case AgentType::kNN:          return "kNN";
+        case AgentType::kHeuristicV1:  return "kHeuristicV1";
+        case AgentType::kHeuristicV2:  return "kHeuristicV2";
+        case AgentType::kHeuristicV3:  return "kHeuristicV3";
+        case AgentType::kHeuristicV4:  return "kHeuristicV4";
+        case AgentType::kHeuristicV5:  return "kHeuristicV5";
+        case AgentType::kHeuristicV6:  return "kHeuristicV6";
+        case AgentType::kHeuristicV7:  return "kHeuristicV7";
+        case AgentType::kHeuristicV8:  return "kHeuristicV8";
+        case AgentType::kHeuristicV9:  return "kHeuristicV9";
+        case AgentType::kHeuristicV10: return "kHeuristicV10";
+        case AgentType::kHeuristicV11: return "kHeuristicV11";
+        case AgentType::kHeuristicV12: return "kHeuristicV12";
+        case AgentType::kHeuristicV13: return "kHeuristicV13";
+        case AgentType::kHeuristicV14: return "kHeuristicV14";
+        case AgentType::kHeuristicV15: return "kHeuristicV15";
+        case AgentType::kNN:           return "kNN";
     }
     return "unknown";
 }
@@ -34,6 +47,30 @@ bool parse_agent_type(const std::string& s, AgentType& out) {
     if (s == "kHeuristicV2" || s == "heuristic_v2" || s == "v2") {
         out = AgentType::kHeuristicV2;
         return true;
+    }
+    if (s == "kHeuristicV3" || s == "heuristic_v3" || s == "v3") {
+        out = AgentType::kHeuristicV3;
+        return true;
+    }
+    static const struct { const char* tag; AgentType t; HeuristicVersion v; } kVN[] = {
+        {"4",  AgentType::kHeuristicV4,  HeuristicVersion::V4},
+        {"5",  AgentType::kHeuristicV5,  HeuristicVersion::V5},
+        {"6",  AgentType::kHeuristicV6,  HeuristicVersion::V6},
+        {"7",  AgentType::kHeuristicV7,  HeuristicVersion::V7},
+        {"8",  AgentType::kHeuristicV8,  HeuristicVersion::V8},
+        {"9",  AgentType::kHeuristicV9,  HeuristicVersion::V9},
+        {"10", AgentType::kHeuristicV10, HeuristicVersion::V10},
+        {"11", AgentType::kHeuristicV11, HeuristicVersion::V11},
+        {"12", AgentType::kHeuristicV12, HeuristicVersion::V12},
+        {"13", AgentType::kHeuristicV13, HeuristicVersion::V13},
+        {"14", AgentType::kHeuristicV14, HeuristicVersion::V14},
+        {"15", AgentType::kHeuristicV15, HeuristicVersion::V15},
+    };
+    for (const auto& e : kVN) {
+        std::string s1 = std::string("kHeuristicV") + e.tag;
+        std::string s2 = std::string("heuristic_v") + e.tag;
+        std::string s3 = std::string("v") + e.tag;
+        if (s == s1 || s == s2 || s == s3) { out = e.t; return true; }
     }
     if (s == "kNN" || s == "nn") {
         out = AgentType::kNN;
@@ -260,6 +297,29 @@ void TournamentManager::play_turn(const TournamentParticipant& p,
             heuristic_play_turn(state, ctx, tables_, buffers, rng,
                                 HeuristicVersion::V2);
             return;
+        case AgentType::kHeuristicV3:
+            heuristic_play_turn(state, ctx, tables_, buffers, rng,
+                                HeuristicVersion::V3);
+            return;
+        case AgentType::kHeuristicV4:
+        case AgentType::kHeuristicV5:
+        case AgentType::kHeuristicV6:
+        case AgentType::kHeuristicV7:
+        case AgentType::kHeuristicV8:
+        case AgentType::kHeuristicV9:
+        case AgentType::kHeuristicV10:
+        case AgentType::kHeuristicV11:
+        case AgentType::kHeuristicV12:
+        case AgentType::kHeuristicV13:
+        case AgentType::kHeuristicV14:
+        case AgentType::kHeuristicV15: {
+            const int delta = static_cast<int>(p.type) -
+                              static_cast<int>(AgentType::kHeuristicV4);
+            const HeuristicVersion v = static_cast<HeuristicVersion>(
+                static_cast<int>(HeuristicVersion::V4) + delta);
+            heuristic_play_turn(state, ctx, tables_, buffers, rng, v);
+            return;
+        }
         case AgentType::kNN:
             nn_play_turn(*p.model, device_, state, ctx, tables_,
                          buffers, tensor_buffer, greedy_cfg, rng);

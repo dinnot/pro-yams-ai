@@ -196,11 +196,24 @@ void UIServer::handle_new_game(const httplib::Request& req,
     catch (...) { error_response(res, "invalid JSON body"); return; }
 
     auto parse_player = [](const std::string& s) -> PlayerType {
-        if (s == "human")        return PlayerType::kHuman;
-        if (s == "nn")           return PlayerType::kNNSolver;
-        if (s == "mc")           return PlayerType::kMCRollout;
-        if (s == "heuristic_v2") return PlayerType::kHeuristicV2;
-        if (s == "heuristic_v1") return PlayerType::kHeuristic;
+        if (s == "human")         return PlayerType::kHuman;
+        if (s == "nn")            return PlayerType::kNNSolver;
+        if (s == "mc")            return PlayerType::kMCRollout;
+        if (s == "heuristic_v15") return PlayerType::kHeuristicV15;
+        if (s == "heuristic_v14") return PlayerType::kHeuristicV14;
+        if (s == "heuristic_v13") return PlayerType::kHeuristicV13;
+        if (s == "heuristic_v12") return PlayerType::kHeuristicV12;
+        if (s == "heuristic_v11") return PlayerType::kHeuristicV11;
+        if (s == "heuristic_v10") return PlayerType::kHeuristicV10;
+        if (s == "heuristic_v9")  return PlayerType::kHeuristicV9;
+        if (s == "heuristic_v8")  return PlayerType::kHeuristicV8;
+        if (s == "heuristic_v7")  return PlayerType::kHeuristicV7;
+        if (s == "heuristic_v6")  return PlayerType::kHeuristicV6;
+        if (s == "heuristic_v5")  return PlayerType::kHeuristicV5;
+        if (s == "heuristic_v4")  return PlayerType::kHeuristicV4;
+        if (s == "heuristic_v3")  return PlayerType::kHeuristicV3;
+        if (s == "heuristic_v2")  return PlayerType::kHeuristicV2;
+        if (s == "heuristic_v1")  return PlayerType::kHeuristic;
         // "heuristic" legacy alias defaults to V1.
         return PlayerType::kHeuristic;
     };
