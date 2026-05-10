@@ -115,14 +115,17 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
 
     init_game(state, ctx, rng);
 
+    // Pick a random heuristic variant for this game so the NN is evaluated
+    // against a diverse mix of opponents.
+    const HeuristicVersion hv = random_heuristic_version(rng);
+
     while (!is_terminal(state.board)) {
         int player = static_cast<int>(state.board.current_player);
         if (player == nn_player) {
             nn_play_turn(model, device, state, ctx, tables,
                          buffers, tensor_buffer, greedy_cfg, rng);
         } else {
-            heuristic_play_turn(state, ctx, tables, buffers, rng,
-                                HeuristicVersion::V2);
+            heuristic_play_turn(state, ctx, tables, buffers, rng, hv);
         }
     }
 

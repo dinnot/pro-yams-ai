@@ -41,6 +41,7 @@ void SelfPlayOrchestrator::start() {
         game->trajectory_length = 0;
         game->result           = 0.0;
         init_game(game->state, game->ctx, game->rng);
+        game->heuristic_version = random_heuristic_version(game->rng);
         game->phase = GamePhase::kNeedRequests;
 
         if (i == 0 && solver_config_.debug_mode) {
@@ -164,6 +165,7 @@ void SelfPlayOrchestrator::recycle_game(GameInstance* game, uint64_t new_seed,
     game->use_past_opponent    = use_past_opponent && (opponent_inference_ != nullptr);
     game->past_opponent_player = game->use_past_opponent ? past_opponent_player : -1;
     init_game(game->state, game->ctx, game->rng);
+    game->heuristic_version = random_heuristic_version(game->rng);
     game->phase = GamePhase::kNeedRequests;
 
     if (game->is_debug_game) {

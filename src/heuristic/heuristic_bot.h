@@ -204,7 +204,7 @@ void heuristic_play_turn_research(GameState& state, GameContext& ctx,
 
 // Returns the ResearchConfig for a numbered V4..V15 version.
 // Throws std::invalid_argument for V1/V2/V3 (which use their own evaluators).
-ResearchConfig get_research_config_for(HeuristicVersion v);
+const ResearchConfig& get_research_config_for(HeuristicVersion v);
 
 // ---------------------------------------------------------------------------
 // Play one complete turn using the heuristic bot.
@@ -228,3 +228,8 @@ void heuristic_play_turn(GameState& state, GameContext& ctx,
 // ---------------------------------------------------------------------------
 int play_heuristic_game(RNG& rng, const PrecomputedTables& tables,
                         HeuristicVersion version = HeuristicVersion::V2);
+
+// ---------------------------------------------------------------------------
+// Pick a random HeuristicVersion uniformly from all available versions.
+// ---------------------------------------------------------------------------
+HeuristicVersion random_heuristic_version(RNG& rng);

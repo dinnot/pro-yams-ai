@@ -1,4 +1,4 @@
-num_steps: 500
+num_steps: 1000
 
 training:
   replay_capacity: 50000
@@ -6,7 +6,7 @@ training:
   train_batch_size: 8192
   train_steps_per_collect: 0.041
   model_swap_interval: 100
-  checkpoint_interval: 500
+  checkpoint_interval: 1000
   max_checkpoints: 2
 
   td_mode: td0
@@ -19,8 +19,8 @@ training:
   temperature_decay_start_value: 0
   initial_epsilon: 0
 
-  eval_interval: 5000
-  eval_games: 50
+  eval_interval: 1000
+  eval_games: 500
 
   checkpoint_dir: checkpoints/test_timing
   log_dir: ./logs/test_timing
@@ -32,7 +32,7 @@ training:
   logs_on_start: false
 
   use_duel_margin_maximization: false
-  duel_margin_maximization_scale: 4000
+  duel_margin_maximization_scale: 10000
   use_pbrs: false
   pbrs_upper_reward: 0.1
   pbrs_clean_reward: 0.2

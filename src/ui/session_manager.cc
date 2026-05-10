@@ -148,7 +148,7 @@ void SessionManager::play_heuristic_turn(GameSession& session, HeuristicVersion 
 
     // Evaluate ONCE
     if (static_cast<int>(version) >= static_cast<int>(HeuristicVersion::V4)) {
-        ResearchConfig cfg = get_research_config_for(version);
+        const ResearchConfig& cfg = get_research_config_for(version);
         heuristic_evaluate_research(session.state.board, session.ctx,
                                     session.buffers.requests,
                                     session.buffers.request_count,

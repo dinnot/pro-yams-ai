@@ -6,6 +6,7 @@
 #include "engine/game_context.h"
 #include "engine/rng.h"
 #include "engine/tensor.h"
+#include "heuristic/heuristic_bot.h"
 #include "solver/solver.h"
 
 // ---------------------------------------------------------------------------
@@ -75,4 +76,8 @@ struct GameInstance {
     // an older checkpoint). The other seat plays the current model.
     bool use_past_opponent      = false;
     int  past_opponent_player   = -1;  // 0 or 1 when active; -1 otherwise
+
+    // === Per-game heuristic variant ===
+    // Randomly chosen at game start so training exposes the NN to all variants.
+    HeuristicVersion heuristic_version = HeuristicVersion::V2;
 };

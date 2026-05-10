@@ -584,60 +584,72 @@ void heuristic_play_turn_research(GameState& state, GameContext& ctx,
 // Each maps to a fixed ResearchConfig discovered by the heuristic_sweep
 // benchmark (head-to-head vs V2 over N≥1500 paired games).
 // ---------------------------------------------------------------------------
-ResearchConfig get_research_config_for(HeuristicVersion v) {
+const ResearchConfig& get_research_config_for(HeuristicVersion v) {
+    static ResearchConfig cache[16]; // V4..V15
+    static bool initialized[16] = {false};
+
+    int idx = static_cast<int>(v);
+    if (idx < 4 || idx > 15) {
+        throw std::invalid_argument("get_research_config_for: V1/V2/V3 use their own evaluators");
+    }
+
+    if (initialized[idx]) {
+        return cache[idx];
+    }
+
     ResearchConfig c;
     switch (v) {
         case HeuristicVersion::V4:
             // smooth + early-high-coeff(1.0)              — ~56% vs V2
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.early_high_coeff_bonus = 1.0;
-            return c;
+            break;
         case HeuristicVersion::V5:
             // smooth + early-high-coeff(1.5)              — ~55%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.early_high_coeff_bonus = 1.5;
-            return c;
+            break;
         case HeuristicVersion::V6:
             // smooth + coeff²(0.20) standalone            — ~57%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.coeff_sq_bonus = 0.20;
-            return c;
+            break;
         case HeuristicVersion::V7:
             // smooth + coeff²(0.10) + turbo-avoid         — ~57.4%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.coeff_sq_bonus = 0.10;
             c.turbo_avoidance = 1.0;
-            return c;
+            break;
         case HeuristicVersion::V8:
             // smooth + coeff²(0.20) + turbo-avoid         — ~57.1%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.coeff_sq_bonus = 0.20;
             c.turbo_avoidance = 1.0;
-            return c;
+            break;
         case HeuristicVersion::V9:
             // smooth + coeff²(0.50) + turbo-avoid         — ~57%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.coeff_sq_bonus = 0.50;
             c.turbo_avoidance = 1.0;
-            return c;
+            break;
         case HeuristicVersion::V10:
             // smooth + ehc(0.5) + csq(0.12)               — ~56.5%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.early_high_coeff_bonus = 0.5;
             c.coeff_sq_bonus = 0.12;
-            return c;
+            break;
         case HeuristicVersion::V11:
             // smooth + ehc(1.0) + csq(0.05)               — ~56.7%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.early_high_coeff_bonus = 1.0;
             c.coeff_sq_bonus = 0.05;
-            return c;
+            break;
         case HeuristicVersion::V12:
             // smooth + ehc(0.5) + csq(0.20)               — ~55.5%
             c.crush = CrushMode::FLOAT_SMOOTH;
             c.early_high_coeff_bonus = 0.5;
             c.coeff_sq_bonus = 0.20;
-            return c;
+            break;
         case HeuristicVersion::V13:
             // smooth + coeff²(0.15) + turbo + R3(0.10)    — ~57.6% (BEST)
             c.crush = CrushMode::FLOAT_SMOOTH;
@@ -645,7 +657,7 @@ ResearchConfig get_research_config_for(HeuristicVersion v) {
             c.turbo_avoidance = 1.0;
             c.use_v3_rules = true;
             c.v3.w_r3_high_coeff = 0.10;
-            return c;
+            break;
         case HeuristicVersion::V14:
             // V13 + upper-bonus protection on coeff>=12 non-down columns
             c.crush = CrushMode::FLOAT_SMOOTH;
@@ -654,7 +666,7 @@ ResearchConfig get_research_config_for(HeuristicVersion v) {
             c.use_v3_rules = true;
             c.v3.w_r3_high_coeff = 0.10;
             c.upper_bonus_penalty = 20.0;
-            return c;
+            break;
         case HeuristicVersion::V15:
             // V13 + aggressive upper-bonus protection (200.0)
             c.crush = CrushMode::FLOAT_SMOOTH;
@@ -663,10 +675,13 @@ ResearchConfig get_research_config_for(HeuristicVersion v) {
             c.use_v3_rules = true;
             c.v3.w_r3_high_coeff = 0.10;
             c.upper_bonus_penalty = 200.0;
-            return c;
+            break;
         default:
-            throw std::invalid_argument("get_research_config_for: V1/V2/V3 use their own evaluators");
+            throw std::invalid_argument("get_research_config_for: unknown version");
     }
+    cache[idx] = c;
+    initialized[idx] = true;
+    return cache[idx];
 }
 
 // ---------------------------------------------------------------------------
@@ -684,7 +699,7 @@ void heuristic_play_turn(GameState& state, GameContext& ctx,
 
     // Step 2: evaluate with heuristic (static for the turn).
     if (static_cast<int>(version) >= static_cast<int>(HeuristicVersion::V4)) {
-        ResearchConfig cfg = get_research_config_for(version);
+        const ResearchConfig& cfg = get_research_config_for(version);
         heuristic_evaluate_research(state.board, ctx,
                                     buffers.requests, buffers.request_count,
                                     buffers.evs, tables, cfg);
@@ -741,4 +756,19 @@ int play_heuristic_game(RNG& rng, const PrecomputedTables& tables,
     }
 
     return get_game_result(state, ctx);
+}
+
+// ---------------------------------------------------------------------------
+// Pick a random HeuristicVersion uniformly from all available versions.
+// ---------------------------------------------------------------------------
+HeuristicVersion random_heuristic_version(RNG& rng) {
+    static constexpr HeuristicVersion kAll[] = {
+        HeuristicVersion::V1,  HeuristicVersion::V2,  HeuristicVersion::V3,
+        HeuristicVersion::V4,  HeuristicVersion::V5,  HeuristicVersion::V6,
+        HeuristicVersion::V7,  HeuristicVersion::V8,  HeuristicVersion::V9,
+        HeuristicVersion::V10, HeuristicVersion::V11, HeuristicVersion::V12,
+        HeuristicVersion::V13, HeuristicVersion::V14, HeuristicVersion::V15,
+    };
+    constexpr int kCount = sizeof(kAll) / sizeof(kAll[0]);
+    return kAll[rng.next() % kCount];
 }

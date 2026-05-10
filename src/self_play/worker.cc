@@ -129,7 +129,21 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                             game->solver_buffers.request_count * sizeof(double));
 
                 double heuristic_evs[kMaxAfterstateRequests];
-                if (config.heuristic_version == 2) {
+                const HeuristicVersion hv = game->heuristic_version;
+
+                if (static_cast<int>(hv) >= static_cast<int>(HeuristicVersion::V4)) {
+                    // Research-derived versions (V4..V15) — all emit duel-margin-like values.
+                    const ResearchConfig& rcfg = get_research_config_for(hv);
+                    heuristic_evaluate_research(game->state.board, game->ctx,
+                                                game->solver_buffers.requests,
+                                                game->solver_buffers.request_count,
+                                                heuristic_evs, tables, rcfg);
+                } else if (hv == HeuristicVersion::V3) {
+                    heuristic_evaluate_v3(game->state.board, game->ctx,
+                                          game->solver_buffers.requests,
+                                          game->solver_buffers.request_count,
+                                          heuristic_evs, tables);
+                } else if (hv == HeuristicVersion::V2) {
                     heuristic_evaluate_v2(game->state.board, game->ctx,
                                           game->solver_buffers.requests,
                                           game->solver_buffers.request_count,
@@ -142,12 +156,13 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                 }
 
                 // Normalize heuristic EVs to match the NN's output range, then
-                // blend. V2 emits raw expected duel margin (can be negative,
+                // blend. V2+ emit raw expected duel margin (can be negative,
                 // ~±5000); V1 emits non-negative score×coeff (~0..1800).
+                const bool is_margin_style = (hv != HeuristicVersion::V1);
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {
-                    if (config.heuristic_version == 2) {
-                        // V2 → squash actual duel margin via tanh, matching
+                    if (is_margin_style) {
+                        // V2+ → squash actual duel margin via tanh, matching
                         // duel_margin_maximization NN targets in [-1, 1].
                         heuristic_evs[i] = std::tanh(
                             heuristic_evs[i] / config.duel_margin_maximization_scale);
