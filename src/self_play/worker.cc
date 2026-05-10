@@ -117,13 +117,13 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
             // FIX: Run solver with PURE NN EVs to get the correct start-of-turn
             // EV for TD learning. This prevents the heuristic from poisoning targets!
             // ------------------------------------------------------------------
-            if (is_first_resolve && config.heuristic_weight > 0.0) {
+            if (is_first_resolve && config.heuristic_weight > 0.0001f) {
                 SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers, true);
                 game->current_turn_start_ev = pure_res.pre_roll_ev;
                 game->solver_buffers.dp_computed = false; // Reset so the blended resolve can run
             }
 
-            if (config.heuristic_weight > 0.0 && !game->solver_buffers.evs_blended) {
+            if (config.heuristic_weight > 0.0001f && !game->solver_buffers.evs_blended) {
                 // Save raw NN EVs for debugging
                 std::memcpy(game->solver_buffers.raw_nn_evs, game->solver_buffers.evs,
                             game->solver_buffers.request_count * sizeof(double));
