@@ -34,6 +34,8 @@ enum class AgentType {
     kHeuristicV13,
     kHeuristicV14,
     kHeuristicV15,
+    kHeuristicV16,
+    kHeuristicV17,
     kNN,
 };
 

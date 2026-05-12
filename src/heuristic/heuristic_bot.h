@@ -36,6 +36,8 @@ enum class HeuristicVersion {
     V13 = 13,  // smooth + csq(0.15) + turbo + R3(.10)   — ~57.6% (BEST)
     V14 = 14,  // V13 + upper-bonus protection penalty   — TBD
     V15 = 15,  // V13 + aggressive upper-bonus penalty   — TBD
+    V16 = 16,  // V13 (smooth) + Win Odds Evaluation
+    V17 = 17,  // V14 + Win Odds Evaluation
 };
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,9 @@ struct ResearchConfig {
     TStrategy t_me  = TStrategy::V2_DEFAULT;
     TStrategy t_opp = TStrategy::V2_DEFAULT;
     CrushMode crush = CrushMode::ROUND_INT;
+
+    // Use fast Gaussian CDF to map margins to win probability [0, 1].
+    bool   output_win_odds = false;
 
     // Clean-bonus exponent: bonus_val * pow(P_clean, clean_power)
     double clean_power = 1.0;

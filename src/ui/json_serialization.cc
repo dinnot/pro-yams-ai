@@ -175,6 +175,8 @@ json game_state_to_json(const GameSession& session) {
             case PlayerType::kHeuristicV13:  return "heuristic_v13";
             case PlayerType::kHeuristicV14:  return "heuristic_v14";
             case PlayerType::kHeuristicV15:  return "heuristic_v15";
+            case PlayerType::kHeuristicV16:  return "heuristic_v16";
+            case PlayerType::kHeuristicV17:  return "heuristic_v17";
             case PlayerType::kNNSolver:      return "nn";
             case PlayerType::kMCRollout:     return "mc";
         }

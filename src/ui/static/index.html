@@ -24,6 +24,8 @@
     <div class="game-controls">
       <button id="btn-new-game">New Game</button>
       <select id="sel-p0">
+        <option value="heuristic_v17">P0: Heuristic V17 (V14+Win Odds)</option>
+        <option value="heuristic_v16">P0: Heuristic V16 (V13+Win Odds)</option>
         <option value="heuristic_v15">P0: Heuristic V15 (V13+aggr upper bonus)</option>
         <option value="heuristic_v14">P0: Heuristic V14 (V13+upper bonus prot)</option>
         <option value="heuristic_v13">P0: Heuristic V13 (best, ~57%)</option>
@@ -44,6 +46,8 @@
         <option value="mc">P0: MC Rollout</option>
       </select>
       <select id="sel-p1">
+        <option value="heuristic_v17">P1: Heuristic V17 (V14+Win Odds)</option>
+        <option value="heuristic_v16">P1: Heuristic V16 (V13+Win Odds)</option>
         <option value="heuristic_v15">P1: Heuristic V15 (V13+aggr upper bonus)</option>
         <option value="heuristic_v14">P1: Heuristic V14 (V13+upper bonus prot)</option>
         <option value="heuristic_v13">P1: Heuristic V13 (best, ~57%)</option>
@@ -164,6 +168,8 @@
       <h3>Add Participant</h3>
       <div class="tour-add-row">
         <select id="tour-part-type">
+          <option value="kHeuristicV17">Heuristic V17 (V14+Win Odds)</option>
+          <option value="kHeuristicV16">Heuristic V16 (V13+Win Odds)</option>
           <option value="kHeuristicV15">Heuristic V15 (V13+aggr upper bonus)</option>
           <option value="kHeuristicV14">Heuristic V14 (V13+upper bonus prot)</option>
           <option value="kHeuristicV13">Heuristic V13 (best ~57%)</option>
@@ -203,6 +209,9 @@
         <span id="tour-progress-text"></span>
       </div>
       <div id="tour-error" class="tour-error" style="display:none"></div>
+      <div class="tour-summary-wrap">
+        <table id="tour-summary" class="tour-table tour-summary"></table>
+      </div>
       <div class="tour-matrix-wrap">
         <table id="tour-matrix" class="tour-table"></table>
       </div>

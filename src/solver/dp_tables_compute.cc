@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -17,10 +18,15 @@ constexpr float kNegInf = -1.0e30f;
 // All buffers are 32-byte-aligned for AVX-256 SIMD.
 struct UpperBuffers {
     alignas(32) float V0    [kNumDiceStates * kDPUpperSumPad];
+    alignas(32) float V0_sq [kNumDiceStates * kDPUpperSumPad];
     alignas(32) float V_curr[kNumDiceStates * kDPUpperSumPad];
+    alignas(32) float V_curr_sq[kNumDiceStates * kDPUpperSumPad];
     alignas(32) float V_next[kNumDiceStates * kDPUpperSumPad];
+    alignas(32) float V_next_sq[kNumDiceStates * kDPUpperSumPad];
     alignas(32) float EV_held[462 * kDPUpperSumPad];   // 462 = num_held_configs
+    alignas(32) float EV_held_sq[462 * kDPUpperSumPad];
     alignas(32) float skip   [kDPUpperSumPad];
+    alignas(32) float skip_sq[kDPUpperSumPad];
 };
 
 // Cell-to-row maps.
@@ -58,15 +64,17 @@ void compute_upper_dp(DPTables& dp, const PrecomputedTables& tables) {
                 dp.dp_t1[dp_idx_t1(0, v, sc, R)] = val;
             }
             for (int S = 0; S < kDPUpperSumPad; ++S) {
-                float val;
+                float val, val_sq;
                 if (S > kDPUpperSumMax) {
-                    val = 0.0f;
+                    val = 0.0f; val_sq = 0.0f;
                 } else if (ec == 0) {
-                    val = static_cast<float>(S + upper_bonus(S));
+                    float pts = static_cast<float>(S + upper_bonus(S));
+                    val = pts; val_sq = pts * pts;
                 } else {
-                    val = kNegInf;
+                    val = kNegInf; val_sq = 0.0f;
                 }
                 dp.dp_t4[dp_idx_t4(0, v, sc, S)] = val;
+                dp.dp_t5[dp_idx_t4(0, v, sc, S)] = val_sq;
             }
         }
     }
@@ -92,9 +100,11 @@ void compute_upper_dp(DPTables& dp, const PrecomputedTables& tables) {
                     if (T < ec) {
                         for (int R = 0; R < kDPUpperRPad; ++R)
                             dp.dp_t1[dp_idx_t1(T, v, sc, R)] = (R == 0) ? 1.0f : 0.0f;
-                        for (int S = 0; S < kDPUpperSumPad; ++S)
+                        for (int S = 0; S < kDPUpperSumPad; ++S) {
                             dp.dp_t4[dp_idx_t4(T, v, sc, S)] =
                                 (S > kDPUpperSumMax) ? 0.0f : kNegInf;
+                            dp.dp_t5[dp_idx_t4(T, v, sc, S)] = 0.0f;
+                        }
                         continue;
                     }
 
@@ -218,15 +228,19 @@ void compute_upper_dp(DPTables& dp, const PrecomputedTables& tables) {
                         const bool can_skip = (T > ec);
                         for (int S = 0; S < SP; ++S) {
                             if (can_skip) {
-                                buf->skip[S] = dp.dp_t4[dp_idx_t4(T - 1, v, sc, S)];
+                                buf->skip[S]    = dp.dp_t4[dp_idx_t4(T - 1, v, sc, S)];
+                                buf->skip_sq[S] = dp.dp_t5[dp_idx_t4(T - 1, v, sc, S)];
                             } else {
-                                buf->skip[S] = (S > kDPUpperSumMax) ? 0.0f : kNegInf;
+                                buf->skip[S]    = (S > kDPUpperSumMax) ? 0.0f : kNegInf;
+                                buf->skip_sq[S] = 0.0f;
                             }
                         }
 
                         for (int d = 0; d < kNumDiceStates; ++d) {
-                            float* V0d = &buf->V0[d * SP];
-                            std::memcpy(V0d, buf->skip, SP * sizeof(float));
+                            float* V0d    = &buf->V0[d * SP];
+                            float* V0d_sq = &buf->V0_sq[d * SP];
+                            std::memcpy(V0d,    buf->skip,    SP * sizeof(float));
+                            std::memcpy(V0d_sq, buf->skip_sq, SP * sizeof(float));
 
                             for (int idx = 0; idx < n_valid; ++idx) {
                                 int c = valid[idx];
@@ -236,71 +250,96 @@ void compute_upper_dp(DPTables& dp, const PrecomputedTables& tables) {
                                 int next_sc_c = next_sc_per[c];
                                 const float* prev =
                                     &dp.dp_t4[dp_idx_t4(T - 1, v, next_sc_c, 0)];
+                                const float* prev_sq =
+                                    &dp.dp_t5[dp_idx_t4(T - 1, v, next_sc_c, 0)];
 
                                 #pragma omp simd
                                 for (int S = 0; S < SP; ++S) {
                                     int next_S = S + score;
                                     if (next_S > kDPUpperSumMax) next_S = kDPUpperSumMax;
                                     float val = prev[next_S];
-                                    if (val > V0d[S]) V0d[S] = val;
+                                    float val_sq = prev_sq[next_S];
+                                    
+                                    constexpr float kEps = 1e-4f;
+                                    if (val > V0d[S] + kEps) {
+                                        V0d[S] = val; V0d_sq[S] = val_sq;
+                                    } else if (std::abs(val - V0d[S]) <= kEps) {
+                                        if (val_sq < V0d_sq[S]) { V0d[S] = val; V0d_sq[S] = val_sq; }
+                                    }
                                 }
                             }
                         }
 
-                        std::memcpy(buf->V_curr, buf->V0,
-                            kNumDiceStates * SP * sizeof(float));
+                        std::memcpy(buf->V_curr,    buf->V0,    kNumDiceStates * SP * sizeof(float));
+                        std::memcpy(buf->V_curr_sq, buf->V0_sq, kNumDiceStates * SP * sizeof(float));
 
                         for (int r = 0; r < max_rolls; ++r) {
-                            std::memset(buf->EV_held, 0,
-                                tables.num_held_configs * SP * sizeof(float));
+                            std::memset(buf->EV_held,    0, tables.num_held_configs * SP * sizeof(float));
+                            std::memset(buf->EV_held_sq, 0, tables.num_held_configs * SP * sizeof(float));
 
                             for (int h = 0; h < tables.num_held_configs; ++h) {
                                 int n_tr = tables.transition_count[h];
                                 const Transition* tr = &tables.all_transitions[
                                     tables.transition_offset[h]];
-                                float* EVh = &buf->EV_held[h * SP];
+                                float* EVh    = &buf->EV_held[h * SP];
+                                float* EVh_sq = &buf->EV_held_sq[h * SP];
                                 for (int k = 0; k < n_tr; ++k) {
                                     float p = static_cast<float>(tr[k].probability);
                                     int sid = tr[k].target_state_id;
-                                    const float* Vc = &buf->V_curr[sid * SP];
+                                    const float* Vc    = &buf->V_curr[sid * SP];
+                                    const float* Vc_sq = &buf->V_curr_sq[sid * SP];
                                     #pragma omp simd
                                     for (int S = 0; S < SP; ++S) {
-                                        EVh[S] += p * Vc[S];
+                                        EVh[S]    += p * Vc[S];
+                                        EVh_sq[S] += p * Vc_sq[S];
                                     }
                                 }
                             }
 
                             for (int d = 0; d < kNumDiceStates; ++d) {
-                                float* Vn = &buf->V_next[d * SP];
-                                const float* V0d = &buf->V0[d * SP];
-                                std::memcpy(Vn, V0d, SP * sizeof(float));
+                                float* Vn     = &buf->V_next[d * SP];
+                                float* Vn_sq  = &buf->V_next_sq[d * SP];
+                                const float* V0d    = &buf->V0[d * SP];
+                                const float* V0d_sq = &buf->V0_sq[d * SP];
+                                std::memcpy(Vn,    V0d,    SP * sizeof(float));
+                                std::memcpy(Vn_sq, V0d_sq, SP * sizeof(float));
                                 for (int m = 0; m < kNumHoldMasks; ++m) {
                                     int h = tables.moves[d][m];
-                                    const float* EVh = &buf->EV_held[h * SP];
+                                    const float* EVh    = &buf->EV_held[h * SP];
+                                    const float* EVh_sq = &buf->EV_held_sq[h * SP];
                                     #pragma omp simd
                                     for (int S = 0; S < SP; ++S) {
-                                        if (EVh[S] > Vn[S]) Vn[S] = EVh[S];
+                                        constexpr float kEps = 1e-5f;
+                                        if (EVh[S] > Vn[S] + kEps) {
+                                            Vn[S] = EVh[S]; Vn_sq[S] = EVh_sq[S];
+                                        } else if (std::abs(EVh[S] - Vn[S]) <= kEps) {
+                                            if (EVh_sq[S] < Vn_sq[S]) { Vn[S] = EVh[S]; Vn_sq[S] = EVh_sq[S]; }
+                                        }
                                     }
                                 }
                             }
 
-                            std::memcpy(buf->V_curr, buf->V_next,
-                                kNumDiceStates * SP * sizeof(float));
+                            std::memcpy(buf->V_curr,    buf->V_next,    kNumDiceStates * SP * sizeof(float));
+                            std::memcpy(buf->V_curr_sq, buf->V_next_sq, kNumDiceStates * SP * sizeof(float));
                         }
 
                         const int h_empty = tables.moves[0][0];
                         const int n_tr = tables.transition_count[h_empty];
                         const Transition* tr = &tables.all_transitions[
                             tables.transition_offset[h_empty]];
-                        float* dst = &dp.dp_t4[dp_idx_t4(T, v, sc, 0)];
-                        std::memset(dst, 0, SP * sizeof(float));
+                        float* dst    = &dp.dp_t4[dp_idx_t4(T, v, sc, 0)];
+                        float* dst_sq = &dp.dp_t5[dp_idx_t4(T, v, sc, 0)];
+                        std::memset(dst,    0, SP * sizeof(float));
+                        std::memset(dst_sq, 0, SP * sizeof(float));
                         for (int k = 0; k < n_tr; ++k) {
                             float p = static_cast<float>(tr[k].probability);
                             int sid = tr[k].target_state_id;
-                            const float* Vc = &buf->V_curr[sid * SP];
+                            const float* Vc    = &buf->V_curr[sid * SP];
+                            const float* Vc_sq = &buf->V_curr_sq[sid * SP];
                             #pragma omp simd
                             for (int S = 0; S < SP; ++S) {
-                                dst[S] += p * Vc[S];
+                                dst[S]    += p * Vc[S];
+                                dst_sq[S] += p * Vc_sq[S];
                             }
                         }
                     }
@@ -323,53 +362,71 @@ struct ScalarBuffers {
     alignas(32) float V0_ev     [kNumDiceStates];
     alignas(32) float V_curr_ev [kNumDiceStates];
     alignas(32) float V_next_ev [kNumDiceStates];
+    alignas(32) float V0_ev_sq  [kNumDiceStates];
+    alignas(32) float V_curr_ev_sq[kNumDiceStates];
+    alignas(32) float V_next_ev_sq[kNumDiceStates];
     alignas(32) float EV_held_prob[462];
     alignas(32) float EV_held_ev  [462];
+    alignas(32) float EV_held_ev_sq[462];
 };
 
 inline void scalar_rollback(ScalarBuffers& buf,
                             const PrecomputedTables& tables,
                             int max_rolls,
-                            float& out_prob, float& out_ev) {
+                            float& out_prob, float& out_ev, float& out_ev_sq) {
     std::memcpy(buf.V_curr_prob, buf.V0_prob, kNumDiceStates * sizeof(float));
     std::memcpy(buf.V_curr_ev,   buf.V0_ev,   kNumDiceStates * sizeof(float));
+    std::memcpy(buf.V_curr_ev_sq, buf.V0_ev_sq, kNumDiceStates * sizeof(float));
 
     for (int r = 0; r < max_rolls; ++r) {
         // EV_held for each held config: weighted sum over transitions.
         std::memset(buf.EV_held_prob, 0, tables.num_held_configs * sizeof(float));
         std::memset(buf.EV_held_ev,   0, tables.num_held_configs * sizeof(float));
+        std::memset(buf.EV_held_ev_sq, 0, tables.num_held_configs * sizeof(float));
         for (int h = 0; h < tables.num_held_configs; ++h) {
             int n_tr = tables.transition_count[h];
             const Transition* tr = &tables.all_transitions[
                 tables.transition_offset[h]];
-            float sum_p = 0.0f, sum_e = 0.0f;
+            float sum_p = 0.0f, sum_e = 0.0f, sum_esq = 0.0f;
             for (int k = 0; k < n_tr; ++k) {
                 float p = static_cast<float>(tr[k].probability);
                 int sid = tr[k].target_state_id;
-                sum_p += p * buf.V_curr_prob[sid];
-                sum_e += p * buf.V_curr_ev  [sid];
+                sum_p   += p * buf.V_curr_prob[sid];
+                sum_e   += p * buf.V_curr_ev  [sid];
+                sum_esq += p * buf.V_curr_ev_sq[sid];
             }
-            buf.EV_held_prob[h] = sum_p;
-            buf.EV_held_ev  [h] = sum_e;
+            buf.EV_held_prob[h]  = sum_p;
+            buf.EV_held_ev  [h]  = sum_e;
+            buf.EV_held_ev_sq[h] = sum_esq;
         }
 
         // V_next[d] = max(V0[d], max over m of EV_held[moves[d][m]])
         for (int d = 0; d < kNumDiceStates; ++d) {
             float bp = buf.V0_prob[d];
             float be = buf.V0_ev  [d];
+            float besq = buf.V0_ev_sq[d];
             for (int m = 0; m < kNumHoldMasks; ++m) {
                 int h = tables.moves[d][m];
                 float p = buf.EV_held_prob[h];
                 float e = buf.EV_held_ev  [h];
+                float esq = buf.EV_held_ev_sq[h];
                 if (p > bp) bp = p;
-                if (e > be) be = e;
+
+                constexpr float kEps = 1e-5f;
+                if (e > be + kEps) {
+                    be = e; besq = esq;
+                } else if (std::abs(e - be) <= kEps) {
+                    if (esq < besq) { be = e; besq = esq; } // Tie-breaker!
+                }
             }
             buf.V_next_prob[d] = bp;
             buf.V_next_ev  [d] = be;
+            buf.V_next_ev_sq[d] = besq;
         }
 
         std::memcpy(buf.V_curr_prob, buf.V_next_prob, kNumDiceStates * sizeof(float));
         std::memcpy(buf.V_curr_ev,   buf.V_next_ev,   kNumDiceStates * sizeof(float));
+        std::memcpy(buf.V_curr_ev_sq, buf.V_next_ev_sq, kNumDiceStates * sizeof(float));
     }
 
     // Final pre-roll EV from h_empty (= moves[0][0]).
@@ -377,15 +434,17 @@ inline void scalar_rollback(ScalarBuffers& buf,
     const int n_tr = tables.transition_count[h_empty];
     const Transition* tr = &tables.all_transitions[
         tables.transition_offset[h_empty]];
-    float sum_p = 0.0f, sum_e = 0.0f;
+    float sum_p = 0.0f, sum_e = 0.0f, sum_esq = 0.0f;
     for (int k = 0; k < n_tr; ++k) {
         float p = static_cast<float>(tr[k].probability);
         int sid = tr[k].target_state_id;
-        sum_p += p * buf.V_curr_prob[sid];
-        sum_e += p * buf.V_curr_ev  [sid];
+        sum_p   += p * buf.V_curr_prob[sid];
+        sum_e   += p * buf.V_curr_ev  [sid];
+        sum_esq += p * buf.V_curr_ev_sq[sid];
     }
     out_prob = sum_p;
     out_ev   = sum_e;
+    out_ev_sq = sum_esq;
 }
 
 }  // namespace
@@ -408,8 +467,8 @@ void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
         int ec = ec_count[sc];
         for (int v = 0; v < kDPNumVariants; ++v) {
             DPVal& cell = dp.dp_mid[dp_idx_mid(0, v, sc)];
-            if (ec == 0) cell = DPVal{1.0f, 0.0f};
-            else         cell = DPVal{0.0f, kNegInf};
+            if (ec == 0) cell = DPVal{1.0f, 0.0f, 0.0f};
+            else         cell = DPVal{0.0f, kNegInf, 0.0f};
         }
     }
 
@@ -428,7 +487,7 @@ void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
                     const int ec = ec_count[sc];
 
                     if (T < ec) {
-                        dp.dp_mid[dp_idx_mid(T, v, sc)] = DPVal{0.0f, kNegInf};
+                        dp.dp_mid[dp_idx_mid(T, v, sc)] = DPVal{0.0f, kNegInf, 0.0f};
                         continue;
                     }
 
@@ -439,11 +498,12 @@ void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
                     const bool can_skip = (T > ec);
                     const DPVal skip_val = can_skip
                         ? dp.dp_mid[dp_idx_mid(T - 1, v, sc)]
-                        : DPVal{0.0f, kNegInf};
+                        : DPVal{0.0f, kNegInf, 0.0f};
 
                     for (int d = 0; d < kNumDiceStates; ++d) {
                         float bp = skip_val.prob_no_scratch;
                         float be = skip_val.expected_pts;
+                        float besq = skip_val.expected_pts_sq;
 
                         for (int idx = 0; idx < n_valid; ++idx) {
                             int c = valid[idx];
@@ -462,18 +522,28 @@ void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
                                                            : prev.prob_no_scratch;
                             float e_contrib = static_cast<float>(score)
                                               + prev.expected_pts;
+                            float esq_contrib = static_cast<float>(score * score)
+                                                + 2.0f * static_cast<float>(score) * prev.expected_pts
+                                                + prev.expected_pts_sq;
 
                             if (p_contrib > bp) bp = p_contrib;
-                            if (e_contrib > be) be = e_contrib;
+                            
+                            constexpr float kEps = 1e-5f;
+                            if (e_contrib > be + kEps) {
+                                be = e_contrib; besq = esq_contrib;
+                            } else if (std::abs(e_contrib - be) <= kEps) {
+                                if (esq_contrib < besq) { be = e_contrib; besq = esq_contrib; }
+                            }
                         }
 
-                        buf.V0_prob[d] = bp;
-                        buf.V0_ev  [d] = be;
+                        buf.V0_prob[d]   = bp;
+                        buf.V0_ev  [d]   = be;
+                        buf.V0_ev_sq [d] = besq;
                     }
 
-                    float final_p, final_e;
-                    scalar_rollback(buf, tables, max_rolls, final_p, final_e);
-                    dp.dp_mid[dp_idx_mid(T, v, sc)] = DPVal{final_p, final_e};
+                    float final_p, final_e, final_esq;
+                    scalar_rollback(buf, tables, max_rolls, final_p, final_e, final_esq);
+                    dp.dp_mid[dp_idx_mid(T, v, sc)] = DPVal{final_p, final_e, final_esq};
                 }
             }
         }
@@ -499,8 +569,8 @@ void compute_lower_dp(DPTables& dp, const PrecomputedTables& tables) {
         int ec = ec_count[sc];
         for (int v = 0; v < kDPNumVariants; ++v) {
             DPVal& cell = dp.dp_low[dp_idx_low(0, v, sc)];
-            if (ec == 0) cell = DPVal{1.0f, 0.0f};
-            else         cell = DPVal{0.0f, kNegInf};
+            if (ec == 0) cell = DPVal{1.0f, 0.0f, 0.0f};
+            else         cell = DPVal{0.0f, kNegInf, 0.0f};
         }
     }
 
@@ -519,7 +589,7 @@ void compute_lower_dp(DPTables& dp, const PrecomputedTables& tables) {
                     const int ec = ec_count[sc];
 
                     if (T < ec) {
-                        dp.dp_low[dp_idx_low(T, v, sc)] = DPVal{0.0f, kNegInf};
+                        dp.dp_low[dp_idx_low(T, v, sc)] = DPVal{0.0f, kNegInf, 0.0f};
                         continue;
                     }
 
@@ -538,11 +608,12 @@ void compute_lower_dp(DPTables& dp, const PrecomputedTables& tables) {
                     const bool can_skip = (T > ec);
                     const DPVal skip_val = can_skip
                         ? dp.dp_low[dp_idx_low(T - 1, v, sc)]
-                        : DPVal{0.0f, kNegInf};
+                        : DPVal{0.0f, kNegInf, 0.0f};
 
                     for (int d = 0; d < kNumDiceStates; ++d) {
                         float bp = skip_val.prob_no_scratch;
                         float be = skip_val.expected_pts;
+                        float besq = skip_val.expected_pts_sq;
 
                         for (int idx = 0; idx < n_valid; ++idx) {
                             int c = valid[idx];
@@ -557,18 +628,28 @@ void compute_lower_dp(DPTables& dp, const PrecomputedTables& tables) {
                                                            : prev.prob_no_scratch;
                             float e_contrib = static_cast<float>(score)
                                               + prev.expected_pts;
+                            float esq_contrib = static_cast<float>(score * score)
+                                                + 2.0f * static_cast<float>(score) * prev.expected_pts
+                                                + prev.expected_pts_sq;
 
                             if (p_contrib > bp) bp = p_contrib;
-                            if (e_contrib > be) be = e_contrib;
+                            
+                            constexpr float kEps = 1e-5f;
+                            if (e_contrib > be + kEps) {
+                                be = e_contrib; besq = esq_contrib;
+                            } else if (std::abs(e_contrib - be) <= kEps) {
+                                if (esq_contrib < besq) { be = e_contrib; besq = esq_contrib; }
+                            }
                         }
 
-                        buf.V0_prob[d] = bp;
-                        buf.V0_ev  [d] = be;
+                        buf.V0_prob[d]   = bp;
+                        buf.V0_ev  [d]   = be;
+                        buf.V0_ev_sq [d] = besq;
                     }
 
-                    float final_p, final_e;
-                    scalar_rollback(buf, tables, max_rolls, final_p, final_e);
-                    dp.dp_low[dp_idx_low(T, v, sc)] = DPVal{final_p, final_e};
+                    float final_p, final_e, final_esq;
+                    scalar_rollback(buf, tables, max_rolls, final_p, final_e, final_esq);
+                    dp.dp_low[dp_idx_low(T, v, sc)] = DPVal{final_p, final_e, final_esq};
                 }
             }
         }

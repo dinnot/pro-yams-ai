@@ -32,6 +32,8 @@ enum class PlayerType {
     kHeuristicV13,
     kHeuristicV14,
     kHeuristicV15,
+    kHeuristicV16,
+    kHeuristicV17,
     kNNSolver,
     kMCRollout
 };

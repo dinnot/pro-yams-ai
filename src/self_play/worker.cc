@@ -158,10 +158,18 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                 // Normalize heuristic EVs to match the NN's output range, then
                 // blend. V2+ emit raw expected duel margin (can be negative,
                 // ~±5000); V1 emits non-negative score×coeff (~0..1800).
-                const bool is_margin_style = (hv != HeuristicVersion::V1);
+                const bool is_odds_bot = (hv == HeuristicVersion::V16 || hv == HeuristicVersion::V17);
+                const bool is_margin_style = (hv != HeuristicVersion::V1 && !is_odds_bot);
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {
-                    if (is_margin_style) {
+                    if (is_odds_bot) {
+                        double p = std::max(0.0, std::min(1.0, heuristic_evs[i]));
+                        if (config.use_duel_margin_maximization) {
+                            heuristic_evs[i] = p * 2.0 - 1.0; // Map [0,1] probability cleanly to [-1,1] NN target space
+                        } else {
+                            heuristic_evs[i] = p;
+                        }
+                    } else if (is_margin_style) {
                         // V2+ → squash actual duel margin via tanh, matching
                         // duel_margin_maximization NN targets in [-1, 1].
                         heuristic_evs[i] = std::tanh(

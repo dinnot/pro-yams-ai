@@ -142,3 +142,30 @@ float get_P_clean(int p, int col, int T, const BoardState& board,
     if (pc > 1.0f) pc = 1.0f;
     return pc;
 }
+
+float get_E_raw_var(int p, int col, int T, const BoardState& board,
+                    const GameContext& ctx, const DPTables& dp) {
+    if (dp.dp_t1.empty()) return 0.0f;
+
+    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int EU, EM, EL;
+    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+
+    int TU, TM, TL;
+    apportion_turns(T, EU, EM, EL, TU, TM, TL);
+    Variant v = get_variant(col);
+    
+    float eu = get_upper_ev(dp, v, Sc_U, TU, ctx.upper_sum[p][col]);
+    float eu_sq = get_upper_ev_sq(dp, v, Sc_U, TU, ctx.upper_sum[p][col]);
+    float var_u = (eu > -1e10f) ? std::max(0.0f, eu_sq - eu * eu) : 0.0f; 
+
+    float em = get_middle_ev(dp, v, Sc_M, TM);
+    float em_sq = get_middle_ev_sq(dp, v, Sc_M, TM);
+    float var_m = (em > -1e10f) ? std::max(0.0f, em_sq - em * em) : 0.0f;
+
+    float el = get_lower_ev(dp, v, Sc_L, TL);
+    float el_sq = get_lower_ev_sq(dp, v, Sc_L, TL);
+    float var_l = (el > -1e10f) ? std::max(0.0f, el_sq - el * el) : 0.0f;
+
+    return var_u + var_m + var_l;
+}

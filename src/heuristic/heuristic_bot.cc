@@ -12,6 +12,17 @@
 #include "engine/tensor.h"
 #include "solver/dp_eval.h"
 
+inline double fast_erf(double x) {
+    if (x == 0.0) return 0.0;
+    double sign = (x < 0) ? -1.0 : 1.0;
+    x = std::abs(x);
+    constexpr double a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741;
+    constexpr double a4 = -1.453152027, a5 =  1.061405429, p  =  0.3275911;
+    double t = 1.0 / (1.0 + p * x);
+    double y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * std::exp(-x * x);
+    return sign * y;
+}
+
 // ---------------------------------------------------------------------------
 // V1 — score × column coefficient.
 // ---------------------------------------------------------------------------
@@ -321,6 +332,7 @@ void heuristic_evaluate_research(const BoardState& base_board, const GameContext
         const int total_empty_opp = 78 - filled_opp;
 
         double margin = 0.0;
+        double global_variance = 0.0;
 
         for (int col = 0; col < kNumColumns; ++col) {
             const int empty_me  = count_empty_cells(b, p_me,  col);
@@ -356,11 +368,22 @@ void heuristic_evaluate_research(const BoardState& base_board, const GameContext
                             * coeff;
 
             // Opponent-aware push: when behind on E in a column, amplify.
+            double coeff_mult = active_crush * coeff;
             if (cfg.opp_aware_factor != 0.0 && E_opp > E_me) {
                 col_term *= (1.0 + cfg.opp_aware_factor);
+                coeff_mult *= (1.0 + cfg.opp_aware_factor);
             }
 
             margin += col_term;
+
+            if (cfg.output_win_odds) {
+                float Var_me = get_E_raw_var(p_me, col, T_me, b, c, dp);
+                float Var_opp = get_E_raw_var(p_opp, col, T_opp, b, c, dp);
+                float Var_clean_me = P_clean_me * (1.0f - P_clean_me) * bonus_val * bonus_val;
+                float Var_clean_opp = P_clean_opp * (1.0f - P_clean_opp) * bonus_val * bonus_val;
+                
+                global_variance += (Var_me + Var_clean_me + Var_opp + Var_clean_opp) * (coeff_mult * coeff_mult);
+            }
         }
 
         // Voluntary-scratch penalty: when the candidate is a scratch (score=0)
@@ -547,6 +570,15 @@ void heuristic_evaluate_research(const BoardState& base_board, const GameContext
                         * coeff * cfg.v3.w_r3_high_coeff;
             }
         }
+
+        if (cfg.output_win_odds) {
+            if (global_variance <= 1e-6) {
+                evs[i] = evs[i] > 0.0 ? 1.0 : (evs[i] < 0.0 ? 0.0 : 0.5);
+            } else {
+                double std_dev = std::sqrt(std::max(0.0, global_variance));
+                evs[i] = 0.5 * (1.0 + fast_erf(evs[i] / (std_dev * 1.41421356237)));
+            }
+        }
     }
 }
 
@@ -585,11 +617,11 @@ void heuristic_play_turn_research(GameState& state, GameContext& ctx,
 // benchmark (head-to-head vs V2 over N≥1500 paired games).
 // ---------------------------------------------------------------------------
 const ResearchConfig& get_research_config_for(HeuristicVersion v) {
-    static ResearchConfig cache[16]; // V4..V15
-    static bool initialized[16] = {false};
+    static ResearchConfig cache[18]; // V4..V17
+    static bool initialized[18] = {false};
 
     int idx = static_cast<int>(v);
-    if (idx < 4 || idx > 15) {
+    if (idx < 4 || idx > 17) {
         throw std::invalid_argument("get_research_config_for: V1/V2/V3 use their own evaluators");
     }
 
@@ -675,6 +707,25 @@ const ResearchConfig& get_research_config_for(HeuristicVersion v) {
             c.use_v3_rules = true;
             c.v3.w_r3_high_coeff = 0.10;
             c.upper_bonus_penalty = 200.0;
+            break;
+        case HeuristicVersion::V16:
+            // V13 (smooth) + Win Odds Evaluation
+            c.crush = CrushMode::FLOAT_SMOOTH;
+            c.coeff_sq_bonus = 0.15;
+            c.turbo_avoidance = 1.0;
+            c.use_v3_rules = true;
+            c.v3.w_r3_high_coeff = 0.10;
+            c.output_win_odds = true;
+            break;
+        case HeuristicVersion::V17:
+            // V14 + Win Odds Evaluation
+            c.crush = CrushMode::FLOAT_SMOOTH;
+            c.coeff_sq_bonus = 0.15;
+            c.turbo_avoidance = 1.0;
+            c.use_v3_rules = true;
+            c.v3.w_r3_high_coeff = 0.10;
+            c.upper_bonus_penalty = 20.0;
+            c.output_win_odds = true;
             break;
         default:
             throw std::invalid_argument("get_research_config_for: unknown version");
@@ -768,6 +819,7 @@ HeuristicVersion random_heuristic_version(RNG& rng) {
         HeuristicVersion::V7,  HeuristicVersion::V8,  HeuristicVersion::V9,
         HeuristicVersion::V10, HeuristicVersion::V11, HeuristicVersion::V12,
         HeuristicVersion::V13, HeuristicVersion::V14, HeuristicVersion::V15,
+        HeuristicVersion::V16, HeuristicVersion::V17,
     };
     constexpr int kCount = sizeof(kAll) / sizeof(kAll[0]);
     return kAll[rng.next() % kCount];

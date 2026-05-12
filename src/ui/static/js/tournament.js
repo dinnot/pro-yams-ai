@@ -166,6 +166,177 @@ const Tournament = (() => {
         }
     }
 
+    // Fit ELO ratings via Bradley-Terry MM iterations on the pairwise grid.
+    // Returns a map id -> elo, anchored to mean 1500. Unplayed participants get 1500.
+    function computeElos(participants, grid) {
+        const ids = participants.map(p => p.id);
+        const n = ids.length;
+        const elos = {};
+        if (n === 0) return elos;
+        if (n === 1) { elos[ids[0]] = 1500; return elos; }
+
+        const wins = {};            // wins + 0.5 * draws across all opponents
+        const pairs = {};           // pairs[a][b] = games played a-vs-b
+        for (const id of ids) { wins[id] = 0; pairs[id] = {}; }
+        for (const a of participants) {
+            for (const b of participants) {
+                if (a.id === b.id) continue;
+                const m = (grid[a.id] || {})[b.id];
+                if (!m || m.games === 0) continue;
+                wins[a.id] += m.wins_a + 0.5 * m.draws;
+                pairs[a.id][b.id] = m.games;
+            }
+        }
+
+        // Pseudo-count regularizer: pretend each participant played 1 game (half win,
+        // half loss) vs a virtual opponent of strength 1. Keeps ratings finite when a
+        // bot has 0% or 100% so far.
+        const REG = 0.5;
+
+        let strength = {};
+        for (const id of ids) strength[id] = 1.0;
+
+        const STRENGTH_MIN = 1e-4, STRENGTH_MAX = 1e4;
+
+        for (let it = 0; it < 300; it++) {
+            const next = {};
+            for (const a of ids) {
+                let denom = REG / (strength[a] + 1.0);
+                for (const b of ids) {
+                    if (a === b) continue;
+                    const g = pairs[a][b] || 0;
+                    if (g === 0) continue;
+                    denom += g / (strength[a] + strength[b]);
+                }
+                const numer = wins[a] + REG;
+                let s = (denom > 0) ? numer / denom : strength[a];
+                if (s < STRENGTH_MIN) s = STRENGTH_MIN;
+                if (s > STRENGTH_MAX) s = STRENGTH_MAX;
+                next[a] = s;
+            }
+            // Normalize so geometric mean of strengths = 1.
+            let logSum = 0;
+            for (const id of ids) logSum += Math.log(next[id]);
+            const norm = Math.exp(logSum / n);
+            for (const id of ids) next[id] = next[id] / norm;
+            strength = next;
+        }
+
+        for (const id of ids) elos[id] = 400 * Math.log10(strength[id]);
+        let sum = 0; for (const id of ids) sum += elos[id];
+        const off = 1500 - sum / n;
+        for (const id of ids) elos[id] += off;
+        return elos;
+    }
+
+    // Per-bot totals across all opponents: games, W-L-D, overall win rate,
+    // total average margin, and fitted ELO.
+    function computeBotStats(participants, grid) {
+        const stats = {};
+        for (const p of participants) {
+            stats[p.id] = {
+                id: p.id, name: p.name, type: p.type, path: p.path,
+                games: 0, wins: 0, losses: 0, draws: 0, sum_margin: 0,
+            };
+        }
+        for (const a of participants) {
+            for (const b of participants) {
+                if (a.id === b.id) continue;
+                const m = (grid[a.id] || {})[b.id];
+                if (!m || m.games === 0) continue;
+                const s = stats[a.id];
+                s.games  += m.games;
+                s.wins   += m.wins_a;
+                s.losses += m.wins_b;
+                s.draws  += m.draws;
+                s.sum_margin += (m.avg_margin_a || 0) * m.games;
+            }
+        }
+        const elos = computeElos(participants, grid);
+        for (const p of participants) {
+            const s = stats[p.id];
+            s.elo = elos[p.id];
+            s.win_rate = s.games > 0 ? (s.wins + 0.5 * s.draws) / s.games : null;
+            s.avg_margin = s.games > 0 ? s.sum_margin / s.games : 0;
+        }
+        return stats;
+    }
+
+    function renderSummary(participants, grid) {
+        const table = el('tour-summary');
+        table.innerHTML = '';
+        if (!participants || participants.length === 0) return;
+
+        const stats = computeBotStats(participants, grid);
+        const rows = participants.map(p => stats[p.id]);
+        // Sort: bots with games first (by ELO desc); then unplayed by name.
+        rows.sort((x, y) => {
+            if ((x.games > 0) !== (y.games > 0)) return x.games > 0 ? -1 : 1;
+            if (x.games === 0 && y.games === 0) return x.name.localeCompare(y.name);
+            return y.elo - x.elo;
+        });
+
+        const thead = document.createElement('thead');
+        const hr = document.createElement('tr');
+        for (const label of ['#', 'Bot', 'Games', 'W-L-D', 'Win %', 'Avg Margin', 'ELO']) {
+            const th = document.createElement('th');
+            th.textContent = label;
+            hr.appendChild(th);
+        }
+        thead.appendChild(hr);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        rows.forEach((s, idx) => {
+            const tr = document.createElement('tr');
+
+            const rank = document.createElement('td');
+            rank.textContent = s.games > 0 ? String(idx + 1) : '—';
+            tr.appendChild(rank);
+
+            const name = document.createElement('td');
+            name.textContent = s.name;
+            name.title = s.type + (s.path ? ` (${s.path})` : '');
+            name.className = 'tour-sum-name';
+            tr.appendChild(name);
+
+            const games = document.createElement('td');
+            games.textContent = String(s.games);
+            tr.appendChild(games);
+
+            const wld = document.createElement('td');
+            wld.textContent = `${s.wins}-${s.losses}-${s.draws}`;
+            tr.appendChild(wld);
+
+            const wr = document.createElement('td');
+            if (s.win_rate === null) {
+                wr.textContent = '—';
+            } else {
+                wr.textContent = (s.win_rate * 100).toFixed(1) + '%';
+                wr.style.background = colorForWinRate(s.win_rate);
+            }
+            tr.appendChild(wr);
+
+            const am = document.createElement('td');
+            if (s.games === 0) {
+                am.textContent = '—';
+            } else {
+                const sign = s.avg_margin >= 0 ? '+' : '';
+                am.textContent = sign + s.avg_margin.toFixed(1);
+                am.className = s.avg_margin >= 0 ? 'tour-margin-pos' : 'tour-margin-neg';
+            }
+            tr.appendChild(am);
+
+            const elo = document.createElement('td');
+            elo.textContent = s.games > 0 ? Math.round(s.elo).toString() : '—';
+            elo.className = 'tour-elo';
+            tr.appendChild(elo);
+
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+    }
+
     function colorForWinRate(wr) {
         if (wr === null || wr === undefined || Number.isNaN(wr)) return '#1a1f2e';
         // Red (0) → grey (0.5) → green (1).
@@ -198,9 +369,11 @@ const Tournament = (() => {
 
         if (st.error) showError(st.error);
 
-        // Matrix
+        // Per-bot summary (ELO + total avg margin) and head-to-head matrix.
         const ps = st.participants || [];
         const grid = st.grid || {};
+        renderSummary(ps, grid);
+
         const table = el('tour-matrix');
         table.innerHTML = '';
 

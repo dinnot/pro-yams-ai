@@ -34,6 +34,8 @@ const char* agent_type_to_string(AgentType t) {
         case AgentType::kHeuristicV13: return "kHeuristicV13";
         case AgentType::kHeuristicV14: return "kHeuristicV14";
         case AgentType::kHeuristicV15: return "kHeuristicV15";
+        case AgentType::kHeuristicV16: return "kHeuristicV16";
+        case AgentType::kHeuristicV17: return "kHeuristicV17";
         case AgentType::kNN:           return "kNN";
     }
     return "unknown";
@@ -65,6 +67,8 @@ bool parse_agent_type(const std::string& s, AgentType& out) {
         {"13", AgentType::kHeuristicV13, HeuristicVersion::V13},
         {"14", AgentType::kHeuristicV14, HeuristicVersion::V14},
         {"15", AgentType::kHeuristicV15, HeuristicVersion::V15},
+        {"16", AgentType::kHeuristicV16, HeuristicVersion::V16},
+        {"17", AgentType::kHeuristicV17, HeuristicVersion::V17},
     };
     for (const auto& e : kVN) {
         std::string s1 = std::string("kHeuristicV") + e.tag;
@@ -312,7 +316,9 @@ void TournamentManager::play_turn(const TournamentParticipant& p,
         case AgentType::kHeuristicV12:
         case AgentType::kHeuristicV13:
         case AgentType::kHeuristicV14:
-        case AgentType::kHeuristicV15: {
+        case AgentType::kHeuristicV15:
+        case AgentType::kHeuristicV16:
+        case AgentType::kHeuristicV17: {
             const int delta = static_cast<int>(p.type) -
                               static_cast<int>(AgentType::kHeuristicV4);
             const HeuristicVersion v = static_cast<HeuristicVersion>(

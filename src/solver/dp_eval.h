@@ -43,3 +43,7 @@ float get_E_raw(int p, int col, int T, const BoardState& board,
 // P(low no-scratch). Returns 0 if a lower scratch already exists.
 float get_P_clean(int p, int col, int T, const BoardState& board,
                   const GameContext& ctx, const DPTables& dp);
+
+// Compute the expected raw column variance Var(X) = E[X^2] - E[X]^2.
+float get_E_raw_var(int p, int col, int T, const BoardState& board,
+                    const GameContext& ctx, const DPTables& dp);

@@ -54,6 +54,7 @@ enum class Variant : int {
 struct DPVal {
     float prob_no_scratch;
     float expected_pts;
+    float expected_pts_sq;
 };
 
 struct DPTables {
@@ -61,6 +62,8 @@ struct DPTables {
     std::vector<float> dp_t1;
     // dp_t4[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad
     std::vector<float> dp_t4;
+    // dp_t5[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad (E[X^2])
+    std::vector<float> dp_t5;
     // dp_mid[T][var][sc]
     std::vector<DPVal> dp_mid;
     // dp_low[T][var][sc]
@@ -103,10 +106,13 @@ void init_dp_tables(DPTables& dp,
 // =========================================================================
 float get_upper_prob (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int R);
 float get_upper_ev   (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
+float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
 float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
 float get_middle_ev  (const DPTables& dp, Variant v, const int8_t Sc[2], int T);
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
 float get_lower_prob (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 float get_lower_ev   (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
+float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 
 // =========================================================================
 // Helpers exposed for tests.

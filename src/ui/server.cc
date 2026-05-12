@@ -199,6 +199,8 @@ void UIServer::handle_new_game(const httplib::Request& req,
         if (s == "human")         return PlayerType::kHuman;
         if (s == "nn")            return PlayerType::kNNSolver;
         if (s == "mc")            return PlayerType::kMCRollout;
+        if (s == "heuristic_v17") return PlayerType::kHeuristicV17;
+        if (s == "heuristic_v16") return PlayerType::kHeuristicV16;
         if (s == "heuristic_v15") return PlayerType::kHeuristicV15;
         if (s == "heuristic_v14") return PlayerType::kHeuristicV14;
         if (s == "heuristic_v13") return PlayerType::kHeuristicV13;

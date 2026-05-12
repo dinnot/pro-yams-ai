@@ -394,7 +394,7 @@ bool SessionManager::play_one_bot_turn(GameSession& s) {
         play_heuristic_turn(s, HeuristicVersion::V2);
     else if (pt == PlayerType::kHeuristicV3)
         play_heuristic_turn(s, HeuristicVersion::V3);
-    else if (pt >= PlayerType::kHeuristicV4 && pt <= PlayerType::kHeuristicV15) {
+    else if (pt >= PlayerType::kHeuristicV4 && pt <= PlayerType::kHeuristicV17) {
         const int delta = static_cast<int>(pt) -
                           static_cast<int>(PlayerType::kHeuristicV4);
         play_heuristic_turn(s, static_cast<HeuristicVersion>(

@@ -295,19 +295,39 @@ float get_lower_ev(const DPTables& dp, Variant v, const int8_t Sc[5], int T) {
     return dp.dp_low[dp_idx_low(t, static_cast<int>(v), sc)].expected_pts;
 }
 
+float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum) {
+    int sc = encode_upper(Sc);
+    int t  = clamp_int(T, 0, kDPNumTurns - 1);
+    int s  = clamp_int(current_sum, 0, kDPUpperSumMax);
+    return dp.dp_t5[dp_idx_t4(t, static_cast<int>(v), sc, s)];
+}
+
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
+    int sc = encode_middle(Sc[0], Sc[1]);
+    int t  = clamp_int(T, 0, kDPNumTurns - 1);
+    return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].expected_pts_sq;
+}
+
+float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T) {
+    int sc = encode_lower(Sc);
+    int t  = clamp_int(T, 0, kDPNumTurns - 1);
+    return dp.dp_low[dp_idx_low(t, static_cast<int>(v), sc)].expected_pts_sq;
+}
+
 // ===========================================================================
 // Disk persistence
 // ===========================================================================
 namespace {
 
 constexpr uint32_t kCacheMagic   = 0x59414D44;  // "DMAY"
-constexpr uint32_t kCacheVersion = 2;           // v2: 13×13 middle states + R=0 base case
+constexpr uint32_t kCacheVersion = 3;           // v3: E[X^2] for variance
 
 struct CacheHeader {
     uint32_t magic;
     uint32_t version;
     uint64_t dp_t1_count;   // floats
     uint64_t dp_t4_count;
+    uint64_t dp_t5_count;
     uint64_t dp_mid_count;  // DPVal entries
     uint64_t dp_low_count;
 };
@@ -330,17 +350,20 @@ bool load_from_cache(DPTables& dp, const std::string& path) {
     const uint64_t exp_low = static_cast<uint64_t>(kDPNumTurns) * kDPNumVariants
                              * kDPLowerStates;
     if (h.dp_t1_count != exp_t1 || h.dp_t4_count != exp_t4
-        || h.dp_mid_count != exp_mid || h.dp_low_count != exp_low) {
+        || h.dp_t5_count != exp_t4 || h.dp_mid_count != exp_mid
+        || h.dp_low_count != exp_low) {
         return false;
     }
 
     dp.dp_t1.resize(exp_t1);
     dp.dp_t4.resize(exp_t4);
+    dp.dp_t5.resize(exp_t4);
     dp.dp_mid.resize(exp_mid);
     dp.dp_low.resize(exp_low);
 
     f.read(reinterpret_cast<char*>(dp.dp_t1.data()), exp_t1 * sizeof(float));
     f.read(reinterpret_cast<char*>(dp.dp_t4.data()), exp_t4 * sizeof(float));
+    f.read(reinterpret_cast<char*>(dp.dp_t5.data()), exp_t4 * sizeof(float));
     f.read(reinterpret_cast<char*>(dp.dp_mid.data()), exp_mid * sizeof(DPVal));
     f.read(reinterpret_cast<char*>(dp.dp_low.data()), exp_low * sizeof(DPVal));
     return static_cast<bool>(f);
@@ -358,7 +381,7 @@ bool save_to_cache(const DPTables& dp, const std::string& path) {
 
     CacheHeader h{
         kCacheMagic, kCacheVersion,
-        dp.dp_t1.size(), dp.dp_t4.size(),
+        dp.dp_t1.size(), dp.dp_t4.size(), dp.dp_t5.size(),
         dp.dp_mid.size(), dp.dp_low.size()
     };
     f.write(reinterpret_cast<const char*>(&h), sizeof(h));
@@ -366,6 +389,8 @@ bool save_to_cache(const DPTables& dp, const std::string& path) {
             dp.dp_t1.size() * sizeof(float));
     f.write(reinterpret_cast<const char*>(dp.dp_t4.data()),
             dp.dp_t4.size() * sizeof(float));
+    f.write(reinterpret_cast<const char*>(dp.dp_t5.data()),
+            dp.dp_t5.size() * sizeof(float));
     f.write(reinterpret_cast<const char*>(dp.dp_mid.data()),
             dp.dp_mid.size() * sizeof(DPVal));
     f.write(reinterpret_cast<const char*>(dp.dp_low.data()),
@@ -390,10 +415,12 @@ void init_dp_tables(DPTables& dp,
                         * kDPUpperStates * kDPUpperRPad, 0.0f);
     dp.dp_t4.assign(static_cast<std::size_t>(kDPNumTurns) * kDPNumVariants
                         * kDPUpperStates * kDPUpperSumPad, 0.0f);
+    dp.dp_t5.assign(static_cast<std::size_t>(kDPNumTurns) * kDPNumVariants
+                        * kDPUpperStates * kDPUpperSumPad, 0.0f);
     dp.dp_mid.assign(static_cast<std::size_t>(kDPNumTurns) * kDPNumVariants
-                        * kDPMiddleStates, DPVal{0.0f, 0.0f});
+                        * kDPMiddleStates, DPVal{0.0f, 0.0f, 0.0f});
     dp.dp_low.assign(static_cast<std::size_t>(kDPNumTurns) * kDPNumVariants
-                        * kDPLowerStates, DPVal{0.0f, 0.0f});
+                        * kDPLowerStates, DPVal{0.0f, 0.0f, 0.0f});
 
     compute_upper_dp(dp, tables);
     compute_middle_dp(dp, tables);

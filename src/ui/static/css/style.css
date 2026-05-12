@@ -654,3 +654,23 @@ select, input[type="text"] {
   font-size: 0.7rem;
   color: #b0b0b0;
 }
+.tour-summary-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+.tour-table.tour-summary td,
+.tour-table.tour-summary th {
+  min-width: 60px;
+  padding: 4px 10px;
+}
+.tour-table.tour-summary td.tour-sum-name {
+  text-align: left;
+  font-weight: 600;
+}
+.tour-table.tour-summary td.tour-elo {
+  font-weight: 700;
+  color: #f0f0f0;
+}
+.tour-table.tour-summary td.tour-margin-pos { color: #6fdc6f; }
+.tour-table.tour-summary td.tour-margin-neg { color: #e87878; }
