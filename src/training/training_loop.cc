@@ -166,6 +166,17 @@ void TrainingLoop::run(int num_steps) {
         }
     }
 
+    // Sync the inference engine with the trainer's current weights before any
+    // self-play work begins. The constructor cloned a fresh random model into
+    // inference_, so without this step a --checkpoint / --resume load only
+    // affects the trainer and workers generate with random weights until the
+    // first maybe_swap_model() fires inside the training loop.
+    {
+        auto initial_inf_model = trainer_->clone_for_inference(infer_device_);
+        initial_inf_model->eval();
+        inference_->swap_model(initial_inf_model);
+    }
+
     // If checkpoints already exist (e.g. on resume), prime the past-opponent
     // model immediately so the first batch of recycles can use it. No-op when
     // the feature is disabled or no checkpoints are on disk yet.

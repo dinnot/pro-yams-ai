@@ -142,7 +142,8 @@
       "Bash(cmake --build . --target heuristic eval -j 8)",
       "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive MKL_THREADING_LAYER=SEQUENTIAL ./tests/heuristic/heuristic_tests --gtest_filter='HeuristicBotTest.V4*:HeuristicBotTest.V3*')",
       "Bash(OMP_NUM_THREADS=1 ./tests/eval/eval_tests)",
-      "Bash(OMP_NUM_THREADS=1 ./tests/ui/ui_tests)"
+      "Bash(OMP_NUM_THREADS=1 ./tests/ui/ui_tests)",
+      "Bash(cmake --build . --target pro_yams_ai -j)"
     ]
   }
 }

@@ -170,10 +170,16 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                             heuristic_evs[i] = p;
                         }
                     } else if (is_margin_style) {
-                        // V2+ → squash actual duel margin via tanh, matching
-                        // duel_margin_maximization NN targets in [-1, 1].
+                        // V2+ → squash actual duel margin via tanh into [-1, 1].
                         heuristic_evs[i] = std::tanh(
                             heuristic_evs[i] / config.duel_margin_maximization_scale);
+                        // When the NN emits sigmoid win-probabilities in [0, 1],
+                        // map the margin into the same space so the blend
+                        // doesn't yield negatives that softmax_sample then
+                        // clamps to a uniform floor.
+                        if (!config.use_duel_margin_maximization) {
+                            heuristic_evs[i] = (heuristic_evs[i] + 1.0) / 2.0;
+                        }
                     } else if (config.use_duel_margin_maximization) {
                         heuristic_evs[i] = std::tanh(
                             heuristic_evs[i] / config.duel_margin_maximization_scale);
@@ -188,8 +194,10 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
             }
 
             SolverConfig active_cfg = config;
-            // Only compute V2 if we didn't already get it from the pure pass
-            if (is_first_resolve && config.heuristic_weight <= 0.0) {
+            // Only compute V2 if we didn't already get it from the pure pass.
+            // Mirror the > 0.0001f threshold above so a decaying heuristic_weight
+            // that falls into (0, 0.0001f] doesn't slip through both branches.
+            if (is_first_resolve && config.heuristic_weight <= 0.0001f) {
                 active_cfg.compute_pre_roll_ev = true;
             } else {
                 active_cfg.compute_pre_roll_ev = false;
@@ -203,8 +211,9 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                 game->current_turn_is_exploratory = true;
             }
 
-            // FIX: Only capture from the main result if the heuristic is turned OFF.
-            if (is_first_resolve && config.heuristic_weight <= 0.0) {
+            // Only capture from the main result if the heuristic is effectively
+            // off — same threshold as the pure-NN pass above.
+            if (is_first_resolve && config.heuristic_weight <= 0.0001f) {
                 game->current_turn_start_ev = result.pre_roll_ev;
             }
 
