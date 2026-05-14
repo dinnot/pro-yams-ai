@@ -300,9 +300,14 @@ int TrainingLoop::collect_completed_games() {
             }
         }
 
-        // Recycle: new seed derived from games_played to stay deterministic
-        uint64_t new_seed = static_cast<uint64_t>(games_played_)
-                            * 6364136223846793005ULL;
+        // Recycle: seed mixes games_played_ AND training_step_ so a resumed
+        // run does not replay the exact dice sequence from the start of the
+        // original run. games_played_ is not persisted across resume — it
+        // restarts at 0 — so without the training_step_ term the recycled
+        // seed stream is bit-identical to the start of the prior run and
+        // workers overfit to the same first few games for thousands of steps.
+        uint64_t new_seed = (static_cast<uint64_t>(games_played_) * 6364136223846793005ULL)
+                            ^ (static_cast<uint64_t>(training_step_) * 1442695040888963407ULL);
         orchestrator_->recycle_game(g, new_seed, use_past, past_player);
     }
     return n;

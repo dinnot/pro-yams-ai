@@ -1,4 +1,4 @@
-num_steps: 70000
+num_steps: 300000
 
 training:
   replay_capacity: 1000000
@@ -12,23 +12,23 @@ training:
   td_mode: tdlambda
   td_lambda: 0.95
 
-  initial_temperature: 0.44
-  min_temperature: 0.44
+  initial_temperature: 0.001
+  min_temperature: 0.001
   temperature_decay: 1.0
   temperature_decay_start_step: 0
-  temperature_decay_start_value: 0.44
+  temperature_decay_start_value: 0.001
   initial_epsilon: 0
 
   eval_interval: 10000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/mlp-256/consolidate2
-  log_dir: ./logs/mlp-256/consolidate2
-  log_path: ./logs/mlp-256/consolidate2/training_log.csv
+  checkpoint_dir: checkpoints/mlp-256/selfplay3
+  log_dir: ./logs/mlp-256/selfplay3
+  log_path: ./logs/mlp-256/selfplay3/training_log.csv
   debug_mode: false
 
-  initial_heuristic_weight: 0.43
-  heuristic_decay_steps: 3000000
+  initial_heuristic_weight: 0
+  heuristic_decay_steps: 0
   logs_on_start: true
 
   use_duel_margin_maximization: false
@@ -36,6 +36,8 @@ training:
   use_pbrs: false
   pbrs_upper_reward: 0.1
   pbrs_clean_reward: 0.2
+
+  past_opponent_probability: 0.2
 
   self_play:
     max_inference_batch: 4096

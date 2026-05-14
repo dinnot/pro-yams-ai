@@ -78,6 +78,11 @@ int SessionManager::create_session(PlayerType p0, PlayerType p1, uint64_t seed, 
         static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize, 0.0f);
 
     init_game(s.state, s.ctx, s.rng);
+    // In the UI, P0 is always the starting player so the player-type
+    // selectors match the turn order shown to the user. init_board picks
+    // a random starter for fair self-play / training, which we override
+    // here without otherwise affecting context state.
+    s.state.board.current_player = 0;
     s.game_over         = false;
     s.result            = 0.0;
     s.waiting_for_human = false;

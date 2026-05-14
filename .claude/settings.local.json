@@ -143,7 +143,19 @@
       "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive MKL_THREADING_LAYER=SEQUENTIAL ./tests/heuristic/heuristic_tests --gtest_filter='HeuristicBotTest.V4*:HeuristicBotTest.V3*')",
       "Bash(OMP_NUM_THREADS=1 ./tests/eval/eval_tests)",
       "Bash(OMP_NUM_THREADS=1 ./tests/ui/ui_tests)",
-      "Bash(cmake --build . --target pro_yams_ai -j)"
+      "Bash(cmake --build . --target pro_yams_ai -j)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/solver_bench --benchmark_filter=\"Heuristic|Tensor|Game\")",
+      "Bash(cmake --build . --target training_loop_test config_loader_test)",
+      "Bash(cmake --build .)",
+      "Bash(./tests/config/config_tests)",
+      "Bash(./tests/config/config_tests --gtest_list_tests)",
+      "Bash(cmake --build . --target training_tests)",
+      "Bash(./tests/training/training_tests)",
+      "Bash(cmake --build . --target pro_yams_ai self_play_tests training_tests)",
+      "Bash(cmake --build . --target ui_main)",
+      "Bash(cmake --build . --target session_manager)",
+      "Bash(./tests/ui/ui_tests)"
     ]
   }
 }

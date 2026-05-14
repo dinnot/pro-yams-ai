@@ -47,6 +47,31 @@ bool resume_from_checkpoint(TrainingLoop& loop, const std::string& dir) {
     std::string stem = find_latest_checkpoint_stem(dir);
     if (stem.empty()) return false;
 
+    // Full resume requires the optimizer state and the replay buffer to
+    // exist alongside the model. Without the optimizer, Adam's moving
+    // averages reset to zero and the first update is an unscaled gradient
+    // step that can rip a converged network out of its local minimum.
+    // Without the replay buffer, the run refills ~1M samples against the
+    // just-loaded network before training resumes, distorting the on-policy
+    // distribution. Both have been observed to cause severe regression.
+    // Refuse to proceed and tell the user how to opt out explicitly.
+    namespace fs = std::filesystem;
+    if (!fs::exists(stem + ".optimizer")) {
+        throw std::runtime_error(
+            "Resume artifact missing: " + stem + ".optimizer\n"
+            "Refusing to resume — an Adam reset on a converged network can cause "
+            "severe regression. Use --checkpoint <dir> instead if you intend to "
+            "start a fresh optimizer from these weights.");
+    }
+    if (!fs::exists(stem + ".buffer")) {
+        throw std::runtime_error(
+            "Resume artifact missing: " + stem + ".buffer\n"
+            "Refusing to resume — without the replay buffer the run will refill "
+            "samples against the just-loaded network before training resumes, "
+            "distorting the on-policy distribution. Use --checkpoint <dir> "
+            "instead if you intend to start a fresh buffer from these weights.");
+    }
+
     // Restore model + optimizer + scalar state.
     int    step        = 0;
     double temperature = 1.0;
@@ -56,12 +81,7 @@ bool resume_from_checkpoint(TrainingLoop& loop, const std::string& dir) {
     loop.set_temperature(temperature);
     loop.set_epsilon(epsilon);
 
-    // Restore replay buffer if the companion file exists.
-    namespace fs = std::filesystem;
-    std::string buf_path = stem + ".buffer";
-    if (fs::exists(buf_path)) {
-        loop.replay_buffer().load(buf_path);
-    }
+    loop.replay_buffer().load(stem + ".buffer");
 
     return true;
 }

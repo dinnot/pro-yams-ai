@@ -124,26 +124,36 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
 AppConfig load_config(int argc, char* argv[]) {
     AppConfig config = default_config();
 
-    // First pass: check for --resume or --config to load YAML base.
-    // --resume loads the saved config from the checkpoint directory;
-    // --config loads from the user-specified YAML file.
+    // Collect both flags before loading anything, so they can be layered
+    // instead of being mutually exclusive. The layering order is:
+    //   1. defaults  → 2. --resume saved config  → 3. --config overlay
+    //   → 4. CLI overrides (apply_cli_overrides below)
     std::string resume_dir;
+    std::string config_file;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--resume" && i + 1 < argc) {
             resume_dir = argv[i + 1];
-            std::string saved_cfg = resume_dir + "/config.yaml";
-            config = load_config(saved_cfg);
-            config.resume_path = resume_dir;
-            break;
-        }
-        if (arg == "--config" && i + 1 < argc) {
-            config = load_config(std::string(argv[i + 1]));
-            break;
+        } else if (arg == "--config" && i + 1 < argc) {
+            config_file = argv[i + 1];
         }
     }
 
-    // Second pass: CLI overrides take precedence over YAML / saved config.
+    if (!resume_dir.empty()) {
+        config = load_config(resume_dir + "/config.yaml");
+        config.resume_path = resume_dir;
+    }
+
+    if (!config_file.empty()) {
+        // Overlay user-specified YAML on top of the resumed config. We must
+        // preserve resume_path through the swap so apply_cli_overrides still
+        // sees it (the overlay YAML almost never carries resume_path itself).
+        std::string preserved_resume_path = config.resume_path;
+        config = load_config(config_file);
+        config.resume_path = preserved_resume_path;
+    }
+
+    // Final layer: CLI overrides take precedence over YAML / saved config.
     apply_cli_overrides(config, argc, argv);
     return config;
 }

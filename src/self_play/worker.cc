@@ -113,14 +113,19 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
                 game->current_turn_is_exploratory = false;
             }
 
-            // ------------------------------------------------------------------
-            // FIX: Run solver with PURE NN EVs to get the correct start-of-turn
-            // EV for TD learning. This prevents the heuristic from poisoning targets!
-            // ------------------------------------------------------------------
+            // Unbiased start-of-turn EV: solve once with the raw NN EVs (still
+            // in evs[] before blending) so the TD target's bootstrap value
+            // doesn't itself carry the heuristic's bias. The blend below
+            // overwrites evs[]; we reset dp_computed so the blended resolve
+            // rebuilds its DP layers afterwards. Only the EV is taken from
+            // this pass — the action selected for actually playing comes
+            // from the blended solver, by design (we want the blended
+            // trajectory distribution, that's the whole point of blending).
             if (is_first_resolve && config.heuristic_weight > 0.0001f) {
-                SolverResult pure_res = solver_resolve_greedy(game->state, game->ctx, tables, game->solver_buffers, true);
+                SolverResult pure_res = solver_resolve_greedy(
+                    game->state, game->ctx, tables, game->solver_buffers, true);
                 game->current_turn_start_ev = pure_res.pre_roll_ev;
-                game->solver_buffers.dp_computed = false; // Reset so the blended resolve can run
+                game->solver_buffers.dp_computed = false;
             }
 
             if (config.heuristic_weight > 0.0001f && !game->solver_buffers.evs_blended) {
@@ -194,25 +199,28 @@ void worker_thread(GameQueue& available, BatchManager& batch_manager,
             }
 
             SolverConfig active_cfg = config;
-            // Only compute V2 if we didn't already get it from the pure pass.
-            // Mirror the > 0.0001f threshold above so a decaying heuristic_weight
-            // that falls into (0, 0.0001f] doesn't slip through both branches.
-            if (is_first_resolve && config.heuristic_weight <= 0.0001f) {
-                active_cfg.compute_pre_roll_ev = true;
-            } else {
-                active_cfg.compute_pre_roll_ev = false;
-            }
+            // The pure-NN pass above already populated pre_roll_ev when the
+            // heuristic is active; only ask the blended resolve to compute
+            // it otherwise.
+            active_cfg.compute_pre_roll_ev =
+                (is_first_resolve && config.heuristic_weight <= 0.0001f);
 
             SolverResult result = solver_resolve(game->state, game->ctx, tables,
                                                   game->solver_buffers, active_cfg,
                                                   game->rng);
 
+            // The blend (NN + heuristic) is the policy we treat as on-policy
+            // during training — that's the head-start the heuristic is there
+            // to provide. So the eligibility trace is only cut for *genuinely*
+            // off-policy moves: temperature-driven softmax explores that miss
+            // the blended greedy max. Heuristic-driven divergences from pure
+            // NN are part of the policy, not off-policy noise.
             if (result.is_exploratory) {
                 game->current_turn_is_exploratory = true;
             }
 
-            // Only capture from the main result if the heuristic is effectively
-            // off — same threshold as the pure-NN pass above.
+            // Capture pre_roll_ev from the blended (== pure NN) result when
+            // the heuristic is effectively off and the pure pass was skipped.
             if (is_first_resolve && config.heuristic_weight <= 0.0001f) {
                 game->current_turn_start_ev = result.pre_roll_ev;
             }
