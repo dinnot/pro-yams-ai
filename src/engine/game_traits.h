@@ -10,10 +10,15 @@
 // ---------------------------------------------------------------------------
 
 struct Yams1v1 {
-    static constexpr int kNumPlayers    = 2;
-    static constexpr int kNumTeams      = 2;
-    static constexpr int kCellsPerSheet = 78;                          // 6 cols * 13 rows
-    static constexpr int kTotalCells    = kNumPlayers * kCellsPerSheet; // 156
+    static constexpr int kNumPlayers      = 2;
+    static constexpr int kNumTeams        = 2;
+    static constexpr int kPlayersPerTeam  = 1;
+    static constexpr int kCellsPerSheet   = 78;                            // 6 cols * 13 rows
+    static constexpr int kTotalCells      = kNumPlayers * kCellsPerSheet;  // 156
+
+    // Team rosters. Duels run as the cross product kTeam0 × kTeam1.
+    static constexpr int kTeam0[kPlayersPerTeam] = {0};
+    static constexpr int kTeam1[kPlayersPerTeam] = {1};
 
     static constexpr bool are_teammates(int p1, int p2) {
         // Every player is on their own (singleton) team.
@@ -22,13 +27,20 @@ struct Yams1v1 {
 };
 
 struct Yams2v2 {
-    static constexpr int kNumPlayers    = 4;
-    static constexpr int kNumTeams      = 2;
-    static constexpr int kCellsPerSheet = 78;
-    static constexpr int kTotalCells    = kNumPlayers * kCellsPerSheet; // 312
+    static constexpr int kNumPlayers      = 4;
+    static constexpr int kNumTeams        = 2;
+    static constexpr int kPlayersPerTeam  = 2;
+    static constexpr int kCellsPerSheet   = 78;
+    static constexpr int kTotalCells      = kNumPlayers * kCellsPerSheet;  // 312
+
+    // Seating clockwise: A=P0, B=P1, C=P2, D=P3. Teams: {P0, P2} and {P1, P3}.
+    // The four cross-team pairings (0,1), (0,3), (2,1), (2,3) cover exactly
+    // each player's two neighbor duels — see pro_yams_2v2.md §5.
+    static constexpr int kTeam0[kPlayersPerTeam] = {0, 2};
+    static constexpr int kTeam1[kPlayersPerTeam] = {1, 3};
 
     static constexpr bool are_teammates(int p1, int p2) {
-        // Seating A→B→C→D = 0→1→2→3. Teams: {P0, P2} (even) and {P1, P3} (odd).
+        // Players with the same parity are teammates.
         return (p1 & 1) == (p2 & 1);
     }
 };

@@ -186,7 +186,9 @@
       "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench --benchmark_min_time=2s --benchmark_filter=BoardStateCopy --benchmark_repetitions=5)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target engine)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench --benchmark_min_time=1s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true)",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='GoldenRuleTeammate2v2.*')"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='GoldenRuleTeammate2v2.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='Duel.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='Duel*')"
     ]
   }
 }

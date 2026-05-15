@@ -110,5 +110,4 @@ template int perform_placement<Yams1v1>(GameStateT<Yams1v1>&, GameContextT<Yams1
 template int perform_placement<Yams2v2>(GameStateT<Yams2v2>&, GameContextT<Yams2v2>&, int, int, RNG&);
 
 template int get_game_result<Yams1v1>(const GameStateT<Yams1v1>&, const GameContextT<Yams1v1>&);
-// get_game_result<Yams2v2> is intentionally NOT instantiated here — Task 3 adds it
-// after compute_duel is templatized.
+template int get_game_result<Yams2v2>(const GameStateT<Yams2v2>&, const GameContextT<Yams2v2>&);
