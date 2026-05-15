@@ -24,6 +24,22 @@ struct Yams1v1 {
         // Every player is on their own (singleton) team.
         return p1 == p2;
     }
+
+    // Tensor (NN observation) shape.
+    //   Group A: kNumPlayers * 6 * 13 * 2     = 312
+    //   Group B.1 (per-player × col):  N*6*2  =  24
+    //   Group B.2 (per-pairing × col): P*6*14 =  84
+    //   Group C: kNumPlayers * 6 * 13         = 156
+    //   Group D (global aggregates):          =  14
+    //   Group E: kNumPlayers * 6 * 18         = 216
+    //   Group F: kNumPlayers * 6 * 15         = 180
+    static constexpr int kTensorSize = 986;
+    static constexpr int kNumPairings = 1;
+
+    // Canonical pairings — index into canonical[ci] = (active + ci) % kNumPlayers.
+    // For 1v1: a single pairing (Active vs Opp).
+    static constexpr int kCanonicalPairingT0[kNumPairings] = {0};
+    static constexpr int kCanonicalPairingT1[kNumPairings] = {1};
 };
 
 struct Yams2v2 {
@@ -43,6 +59,19 @@ struct Yams2v2 {
         // Players with the same parity are teammates.
         return (p1 & 1) == (p2 & 1);
     }
+
+    // Tensor (NN observation) shape — 2× per-player groups, 4× per-pairing.
+    //   Group A:   624,  B.1:  48,  B.2: 336,  C: 312,  D: 14,  E: 432,  F: 360
+    static constexpr int kTensorSize = 2126;
+    static constexpr int kNumPairings = 4;
+
+    // Canonical view (relative to active player): canonical[0]=Active,
+    // [1]=NextOpp, [2]=Teammate, [3]=PrevOpp. The four pairings are the
+    // cross product {Active, Teammate} × {NextOpp, PrevOpp}, in this order:
+    //   (Active, NextOpp), (Active, PrevOpp),
+    //   (Teammate, NextOpp), (Teammate, PrevOpp).
+    static constexpr int kCanonicalPairingT0[kNumPairings] = {0, 0, 2, 2};
+    static constexpr int kCanonicalPairingT1[kNumPairings] = {1, 3, 1, 3};
 };
 
 // Contract validation

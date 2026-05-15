@@ -30,6 +30,8 @@ add_executable(tensor_tests
     tensor_test.cc
     tensor_batch_test.cc
     context_rebuild_test.cc
+    # 2v2 migration Task 5:
+    tensor_rotation_test.cc
 )
 target_link_libraries(tensor_tests PRIVATE solver heuristic engine gtest_main)
 add_test(NAME tensor_tests COMMAND tensor_tests)

@@ -192,7 +192,11 @@
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target solver)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target heuristic)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target heuristic_tests)",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/heuristic/heuristic_tests --gtest_filter='Heuristic2v2*')"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/heuristic/heuristic_tests --gtest_filter='Heuristic2v2*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='TensorBatchTest.*')",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target tensor_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='*Rotation*:*Traits*')"
     ]
   }
 }

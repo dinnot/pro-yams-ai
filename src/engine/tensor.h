@@ -21,8 +21,9 @@
 //   Group F (180): per-player × per-column × {T_min,T_mid,T_max} mid/low P/EV + P_clean
 // ---------------------------------------------------------------------------
 
-/// Total number of float features in the state observation tensor.
-constexpr int kTensorSize = 986;
+/// 1v1 backward-compat alias — equals Yams1v1::kTensorSize. Remove at end of
+/// migration once no caller depends on the bare name.
+constexpr int kTensorSize = Yams1v1::kTensorSize;
 
 /// Maximum possible score per row (used for normalisation denominators).
 /// Indexed by row (0–12): 1s, 2s, 3s, 4s, 5s, 6s, SS, LS, FH, K, STR, U8, Y
@@ -35,13 +36,23 @@ constexpr int kMaxScorePerRow[kNumRows] = {
 // ---------------------------------------------------------------------------
 // Main tensor generation function.
 //
+// The output is in CANONICAL VIEW relative to the perspective player:
+//   1v1: [Active, Opp]
+//   2v2: [Active, NextOpp, Teammate, PrevOpp]
+// Per-player feature groups iterate this canonical order; per-pairing
+// feature groups iterate Traits::kCanonicalPairing{T0,T1} in order. The
+// network never sees raw seat indices — this is the rotational-invariance
+// guarantee from Task 5.2.
+//
 // @param board   Board state to encode
 // @param ctx     Game context (cached derived data)
-// @param player  Perspective player (0 or 1); their data appears first
+// @param player  Perspective player (active seat)
 // @param tables  Precomputed tables (score tables, probability tables)
-// @param out     Output buffer of exactly kTensorSize floats
+// @param out     Output buffer of exactly Traits::kTensorSize floats
 // ---------------------------------------------------------------------------
-void generate_tensor(const BoardState& board, const GameContext& ctx,
+template <typename Traits>
+void generate_tensor(const BoardStateT<Traits>& board,
+                     const GameContextT<Traits>& ctx,
                      int player, const PrecomputedTables& tables,
                      float* out);
 
@@ -51,20 +62,14 @@ void generate_tensor(const BoardState& board, const GameContext& ctx,
 // For each request, applies the placement as a simple cell-write to a cloned
 // board (without full GameContext cache maintenance) and generates a tensor.
 // Writes tensors contiguously: out[i * kTensorSize .. (i+1) * kTensorSize).
-//
-// @param board          Base board state (before any placement)
-// @param ctx            Game context for the base state
-// @param player         Perspective player (0 or 1)
-// @param requests       Array of (placement, score) afterstate descriptors
-// @param request_count  Number of afterstates
-// @param tables         Precomputed tables
-// @param out            Output buffer: request_count × kTensorSize floats
 // ---------------------------------------------------------------------------
-void generate_tensor_batch(const BoardState& board, const GameContext& ctx,
-                            int player,
-                            const AfterstateRequest* requests, int request_count,
-                            const PrecomputedTables& tables,
-                            float* out);
+template <typename Traits>
+void generate_tensor_batch(const BoardStateT<Traits>& board,
+                           const GameContextT<Traits>& ctx,
+                           int player,
+                           const AfterstateRequest* requests, int request_count,
+                           const PrecomputedTables& tables,
+                           float* out);
 
 // ---------------------------------------------------------------------------
 // Helper functions (also used by tensor generation internally).
