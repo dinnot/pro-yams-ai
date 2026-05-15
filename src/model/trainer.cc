@@ -34,9 +34,9 @@ double ModelTrainer::train_step(const float* states, const double* targets,
 
     // Build input tensor — copy into an owned tensor before moving to device.
     // Using from_blob directly can cause autograd issues in some libtorch builds.
-    auto state_tensor = torch::empty({batch_size, kTensorSize}, torch::kFloat32);
+    auto state_tensor = torch::empty({batch_size, config_.input_size}, torch::kFloat32);
     std::memcpy(state_tensor.data_ptr<float>(), states,
-                static_cast<size_t>(batch_size) * kTensorSize * sizeof(float));
+                static_cast<size_t>(batch_size) * config_.input_size * sizeof(float));
     state_tensor = state_tensor.to(device_);
 
     // Build target tensor: convert doubles to float32, clamped to the valid range

@@ -199,7 +199,14 @@
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target self_play)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target self_play_tests)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target model)",
-      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target trainer_tests)"
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target trainer_tests)",
+      "Bash(cmake --build . --target self_play -j 8)",
+      "Bash(cmake --build . --target training -j 8)",
+      "Bash(cmake --build . --target training_tests -j 8)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 120 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 30 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 60 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)"
     ]
   }
 }

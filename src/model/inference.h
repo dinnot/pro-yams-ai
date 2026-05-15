@@ -46,6 +46,7 @@ public:
 private:
     std::shared_ptr<ProYamsNet> model_;
     torch::Device device_;
+    int input_size_ = 0;
     std::mutex inference_mutex_;
     std::atomic<bool> dummy_mode_{false};
 };

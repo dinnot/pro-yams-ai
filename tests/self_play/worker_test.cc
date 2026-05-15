@@ -49,7 +49,7 @@ TEST(WorkerTest, NeedRequests_PushesToPending) {
     available.push(game.get());
     available.push(nullptr);  // sentinel
 
-    std::thread wt(worker_thread,
+    std::thread wt(worker_thread<Yams1v1>,
                    std::ref(available), std::ref(bm),
                    static_cast<BatchManager*>(nullptr),
                    std::ref(completed),
@@ -87,7 +87,7 @@ TEST(WorkerTest, NeedResolve_RecordsTrajectory) {
     available.push(game.get());
     available.push(nullptr);  // sentinel
 
-    std::thread wt(worker_thread,
+    std::thread wt(worker_thread<Yams1v1>,
                    std::ref(available), std::ref(bm),
                    static_cast<BatchManager*>(nullptr),
                    std::ref(completed),
@@ -188,7 +188,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     game->phase = GamePhase::kNeedRequests;
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, bm, nullptr, completed, *g_tables, config, shutdown);
+    worker_thread<Yams1v1>(available, bm, nullptr, completed, *g_tables, config, shutdown);
     
     EXPECT_FALSE(game->solver_buffers.dp_computed);
     EXPECT_FALSE(game->solver_buffers.evs_blended);
@@ -198,7 +198,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     for (int i = 0; i < game->solver_buffers.request_count; ++i) game->solver_buffers.evs[i] = 0.6;
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, bm, nullptr, completed, *g_tables, config, shutdown);
+    worker_thread<Yams1v1>(available, bm, nullptr, completed, *g_tables, config, shutdown);
 
     EXPECT_TRUE(game->solver_buffers.evs_blended);
     double blended_ev = game->solver_buffers.evs[0];
@@ -209,7 +209,7 @@ TEST(WorkerTest, Caching_PreventsDoubleBlending) {
     // If it blends again, the EV will change. If it doesn't, it stays same.
     available.push(game.get());
     available.push(nullptr);
-    worker_thread(available, bm, nullptr, completed, *g_tables, config, shutdown);
+    worker_thread<Yams1v1>(available, bm, nullptr, completed, *g_tables, config, shutdown);
 
     EXPECT_EQ(game->solver_buffers.evs[0], blended_ev) << "EV should not change on second resolve (reroll)";
 }

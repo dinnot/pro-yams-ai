@@ -1,7 +1,9 @@
+#include <atomic>
 #include <csignal>
+#include <filesystem>
+#include <functional>
 #include <iostream>
 #include <string>
-#include <filesystem>
 
 #include <torch/torch.h>
 
@@ -9,28 +11,28 @@
 #include "config/config_loader.h"
 #include "config/config_printer.h"
 #include "config/config_validator.h"
+#include "engine/game_traits.h"
 #include "eval/evaluator.h"
+#include "model/model_config.h"
 #include "model/trainer.h"
 #include "solver/precomputed_tables.h"
 #include "training/resume.h"
 #include "training/training_loop.h"
 
 // ---------------------------------------------------------------------------
-// Signal handling — graceful shutdown for training.
+// Signal handling — graceful shutdown for training. The active loop is
+// variant-dependent, so we hold a type-erased "stop" callback.
 // ---------------------------------------------------------------------------
-static std::atomic<bool> g_shutdown{false};
-static TrainingLoop*     g_training_loop = nullptr;
+static std::atomic<bool>     g_shutdown{false};
+static std::function<void()> g_training_stop;
 
 extern "C" void signal_handler(int /*signal*/) {
     g_shutdown.store(true, std::memory_order_relaxed);
-    if (g_training_loop) {
-        g_training_loop->stop();
-    }
+    if (g_training_stop) g_training_stop();
 }
 
 // ---------------------------------------------------------------------------
-// load_and_validate — validate a loaded config.
-// Returns false on error (message already printed).
+// load_and_validate
 // ---------------------------------------------------------------------------
 static bool load_and_validate(AppConfig& cfg) {
     ValidationResult vr = validate_config(cfg);
@@ -44,7 +46,7 @@ static bool load_and_validate(AppConfig& cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// mode_info — print build info and CUDA status.
+// mode_info
 // ---------------------------------------------------------------------------
 static int mode_info() {
     std::cout << "Pro Yams AI\n";
@@ -59,7 +61,50 @@ static int mode_info() {
 }
 
 // ---------------------------------------------------------------------------
-// mode_train — run the training loop.
+// run_training_variant<Traits>
+// ---------------------------------------------------------------------------
+template <typename Traits>
+static int run_training_variant(const AppConfig& cfg,
+                                torch::Device train_device,
+                                torch::Device infer_device,
+                                const PrecomputedTables& tables) {
+    TrainingLoopT<Traits> loop(cfg.training, tables, train_device, infer_device);
+
+    if (!cfg.resume_path.empty() && !cfg.checkpoint_path.empty()) {
+        std::cerr << "Error: --resume and --checkpoint cannot be used together.\n";
+        return 1;
+    }
+
+    if (!cfg.resume_path.empty()) {
+        std::cout << "Resuming training from: " << cfg.resume_path << "\n";
+        if (!resume_from_checkpoint<Traits>(loop, cfg.resume_path)) {
+            std::cerr << "Error: no checkpoints found in " << cfg.resume_path << "\n";
+            return 1;
+        }
+    } else if (!cfg.checkpoint_path.empty()) {
+        std::cout << "Initializing model weights from: " << cfg.checkpoint_path << "\n";
+        if (!init_from_checkpoint<Traits>(loop, cfg.checkpoint_path)) {
+            std::cerr << "Error: could not load checkpoint from " << cfg.checkpoint_path << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "Starting training for " << cfg.num_steps << " steps\n";
+    g_training_stop = [&loop] { loop.stop(); };
+    std::signal(SIGINT,  signal_handler);
+    std::signal(SIGTERM, signal_handler);
+    loop.run(cfg.num_steps);
+    g_training_stop = nullptr;
+
+    TrainingMetrics m = loop.metrics();
+    std::cout << "Training complete.  Steps: " << m.training_step
+              << "  Loss: "      << m.loss
+              << "  Win rate: "  << m.latest_eval_win_rate << "\n";
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// mode_train
 // ---------------------------------------------------------------------------
 static int mode_train(const AppConfig& cfg) {
     torch::Device train_device  = torch::cuda::is_available()
@@ -71,51 +116,27 @@ static int mode_train(const AppConfig& cfg) {
     PrecomputedTables tables;
     init_precomputed_tables(tables);
 
-    TrainingLoop loop(cfg.training, tables, train_device, infer_device);
-
     if (!cfg.training.log_dir.empty()) {
         std::filesystem::create_directories(cfg.training.log_dir);
         save_config(cfg, cfg.training.log_dir + "/config.yaml");
     }
-    // Also save config into checkpoint dir so --resume can find it later.
     std::filesystem::create_directories(cfg.training.checkpoint_dir);
     save_config(cfg, cfg.training.checkpoint_dir + "/config.yaml");
 
-    if (!cfg.resume_path.empty() && !cfg.checkpoint_path.empty()) {
-        std::cerr << "Error: --resume and --checkpoint cannot be used together.\n";
-        return 1;
+    // Dispatch on game variant: a 1v1 ModelConfig drives Yams1v1, a 2v2
+    // ModelConfig drives Yams2v2. The TrainingLoopT constructor asserts
+    // input_size / variant agreement.
+    if (cfg.training.model.game_variant == kGameVariant2v2) {
+        std::cout << "Game variant: 2v2 (Yams2v2)\n";
+        return run_training_variant<Yams2v2>(cfg, train_device, infer_device, tables);
+    } else {
+        std::cout << "Game variant: 1v1 (Yams1v1)\n";
+        return run_training_variant<Yams1v1>(cfg, train_device, infer_device, tables);
     }
-
-    if (!cfg.resume_path.empty()) {
-        std::cout << "Resuming training from: " << cfg.resume_path << "\n";
-        if (!resume_from_checkpoint(loop, cfg.resume_path)) {
-            std::cerr << "Error: no checkpoints found in " << cfg.resume_path << "\n";
-            return 1;
-        }
-    } else if (!cfg.checkpoint_path.empty()) {
-        std::cout << "Initializing model weights from: " << cfg.checkpoint_path << "\n";
-        if (!init_from_checkpoint(loop, cfg.checkpoint_path)) {
-            std::cerr << "Error: could not load checkpoint from " << cfg.checkpoint_path << "\n";
-            return 1;
-        }
-    }
-
-    std::cout << "Starting training for " << cfg.num_steps << " steps\n";
-    g_training_loop = &loop;
-    std::signal(SIGINT,  signal_handler);
-    std::signal(SIGTERM, signal_handler);
-    loop.run(cfg.num_steps);
-    g_training_loop = nullptr;
-
-    TrainingMetrics m = loop.metrics();
-    std::cout << "Training complete.  Steps: " << m.training_step
-              << "  Loss: "      << m.loss
-              << "  Win rate: "  << m.latest_eval_win_rate << "\n";
-    return 0;
 }
 
 // ---------------------------------------------------------------------------
-// mode_eval — evaluate a checkpoint against the heuristic bot.
+// mode_eval
 // ---------------------------------------------------------------------------
 static int mode_eval(const AppConfig& cfg) {
     if (cfg.checkpoint_path.empty()) {

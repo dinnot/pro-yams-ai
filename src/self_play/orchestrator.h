@@ -5,6 +5,7 @@
 #include <thread>
 #include <vector>
 
+#include "engine/game_traits.h"
 #include "self_play/coordinator.h"
 #include "self_play/game_instance.h"
 #include "self_play/game_queues.h"
@@ -14,25 +15,28 @@
 #include "model/inference.h"
 
 // ---------------------------------------------------------------------------
-// SelfPlayOrchestrator — top-level self-play manager.
+// SelfPlayOrchestratorT<Traits> — top-level self-play manager.
 //
 // Owns the game pool, queues, worker threads, and coordinator thread.
 // Games flow:  available → (worker: kNeedRequests) → BatchManager
 //              → (coordinator: GPU inference) → available
 //              → (worker: kNeedResolve) → available or completed
 // ---------------------------------------------------------------------------
-class SelfPlayOrchestrator {
+template <typename Traits>
+class SelfPlayOrchestratorT {
 public:
+    using Instance = GameInstanceT<Traits>;
+
     /// `opponent_inference` is optional. When non-null, a second BatchManager and
     /// a parallel set of coordinator threads route past-opponent requests to it;
     /// games marked with use_past_opponent=true will have one seat played by
     /// this older model.
-    SelfPlayOrchestrator(const SelfPlayConfig& config,
+    SelfPlayOrchestratorT(const SelfPlayConfig& config,
                           const PrecomputedTables& tables,
                           InferenceEngine& inference,
                           const SolverConfig& solver_config,
                           InferenceEngine* opponent_inference = nullptr);
-    ~SelfPlayOrchestrator();
+    ~SelfPlayOrchestratorT();
 
     /// Create games, launch worker and coordinator threads.
     void start();
@@ -41,11 +45,12 @@ public:
     void stop();
 
     /// Collect completed games (non-blocking). Returns number collected.
-    int collect_completed(GameInstance** out, int max_count);
+    int collect_completed(Instance** out, int max_count);
 
     /// Reset a completed game and return it to the available queue.
-    /// When use_past_opponent is true, past_opponent_player must be 0 or 1.
-    void recycle_game(GameInstance* game, uint64_t new_seed,
+    /// When use_past_opponent is true, past_opponent_player must be a valid seat
+    /// (in 1v1: 0 or 1; in 2v2: 0..3).
+    void recycle_game(Instance* game, uint64_t new_seed,
                       bool use_past_opponent = false,
                       int past_opponent_player = -1);
 
@@ -63,18 +68,22 @@ private:
     SelfPlayConfig           config_;
     const PrecomputedTables& tables_;
     InferenceEngine&         inference_;
-    InferenceEngine*         opponent_inference_;  // optional
+    InferenceEngine*         opponent_inference_;
     SolverConfig             solver_config_;
 
-    std::vector<std::unique_ptr<GameInstance>> games_;
+    std::vector<std::unique_ptr<Instance>> games_;
 
-    GameQueue available_queue_;
-    std::unique_ptr<BatchManager> batch_manager_;
-    std::unique_ptr<BatchManager> opponent_batch_manager_;  // optional
-    GameQueue completed_queue_;
+    GameQueueT<Traits>                          available_queue_;
+    std::unique_ptr<BatchManagerT<Traits>>      batch_manager_;
+    std::unique_ptr<BatchManagerT<Traits>>      opponent_batch_manager_;
+    GameQueueT<Traits>                          completed_queue_;
 
     std::vector<std::thread> workers_;
     std::vector<std::thread> coordinators_;
     std::vector<std::thread> opponent_coordinators_;
     std::atomic<bool>        shutdown_{false};
 };
+
+// Backward-compat aliases.
+using SelfPlayOrchestrator    = SelfPlayOrchestratorT<Yams1v1>;
+using SelfPlayOrchestrator2v2 = SelfPlayOrchestratorT<Yams2v2>;

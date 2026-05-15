@@ -1,10 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include "engine/game_traits.h"
+#include "self_play/batch_manager.h"
 #include "self_play/game_queues.h"
 #include "model/inference.h"
-
-#include "self_play/batch_manager.h"
 
 // ---------------------------------------------------------------------------
 // SelfPlayConfig — tuning parameters for the async self-play pipeline.
@@ -21,7 +21,7 @@ struct SelfPlayConfig {
 };
 
 // ---------------------------------------------------------------------------
-// coordinator_thread — manages GPU inference batching.
+// coordinator_thread<Traits> — manages GPU inference batching.
 //
 // Collects pending games from `batch_manager`, assembles a contiguous tensor batch,
 // runs GPU inference via `inference`, distributes EVs back to each game's
@@ -29,7 +29,9 @@ struct SelfPlayConfig {
 //
 // Runs until shutdown.load() returns true.
 // ---------------------------------------------------------------------------
-void coordinator_thread(BatchManager& batch_manager, GameQueue& available,
+template <typename Traits>
+void coordinator_thread(BatchManagerT<Traits>& batch_manager,
+                        GameQueueT<Traits>& available,
                         InferenceEngine& inference,
                         const SelfPlayConfig& config,
                         std::atomic<bool>& shutdown,

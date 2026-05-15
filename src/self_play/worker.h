@@ -1,14 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include "engine/game_traits.h"
+#include "self_play/batch_manager.h"
 #include "self_play/game_queues.h"
 #include "solver/precomputed_tables.h"
 #include "solver/solver.h"
 
-#include "self_play/batch_manager.h"
-
 // ---------------------------------------------------------------------------
-// worker_thread — CPU-side game processing loop.
+// worker_thread<Traits> — CPU-side game processing loop.
 //
 // Pulls games from `available`, processes them based on their phase:
 //   kNeedRequests → solver_get_requests + generate_tensor_batch → batch_manager
@@ -22,8 +22,10 @@
 //
 // Runs until a nullptr sentinel is received from `available`.
 // ---------------------------------------------------------------------------
-void worker_thread(GameQueue& available, BatchManager& batch_manager,
-                   BatchManager* opponent_batch_manager,
-                   GameQueue& completed,
+template <typename Traits>
+void worker_thread(GameQueueT<Traits>& available,
+                   BatchManagerT<Traits>& batch_manager,
+                   BatchManagerT<Traits>* opponent_batch_manager,
+                   GameQueueT<Traits>& completed,
                    const PrecomputedTables& tables, const SolverConfig& config,
                    std::atomic<bool>& shutdown);

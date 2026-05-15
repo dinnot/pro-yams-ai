@@ -7,17 +7,17 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
-#include "engine/tensor.h"               // kTensorSize
+#include "engine/tensor.h"
 #include "eval/evaluator.h"
 #include "eval/eval_logging.h"
-#include "self_play/training_data.h"     // extract_training_samples
+#include "self_play/training_data.h"
 #include "training/logging.h"
 
 namespace {
 
-// List checkpoint stems (without .model suffix) sorted by step ascending.
 std::vector<std::string> list_checkpoint_stems(const std::string& dir) {
     namespace fs = std::filesystem;
     std::vector<std::pair<int, std::string>> found;
@@ -50,10 +50,11 @@ std::vector<std::string> list_checkpoint_stems(const std::string& dir) {
 // Construction
 // ---------------------------------------------------------------------------
 
-TrainingLoop::TrainingLoop(const TrainingConfig& config,
-                            const PrecomputedTables& tables,
-                            torch::Device training_device,
-                            torch::Device inference_device)
+template <typename Traits>
+TrainingLoopT<Traits>::TrainingLoopT(const TrainingConfig& config,
+                                     const PrecomputedTables& tables,
+                                     torch::Device training_device,
+                                     torch::Device inference_device)
     : config_(config),
       tables_(tables),
       train_device_(training_device),
@@ -63,10 +64,18 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
       heuristic_weight_(config.initial_heuristic_weight),
       sample_rng_(0xDEADBEEF12345678ULL),
       start_time_(std::chrono::steady_clock::now()) {
-    // Replay buffer
-    buffer_ = std::make_unique<ReplayBuffer>(config_.replay_capacity);
+    // Defensive checks: the ModelConfig must agree with the trait it's being
+    // instantiated for. A mismatch here would surface much later as a tensor
+    // shape error at the first inference call.
+    assert(config_.model.input_size == Traits::kTensorSize &&
+           "ModelConfig::input_size must match Traits::kTensorSize");
+    constexpr int expected_variant =
+        std::is_same_v<Traits, Yams1v1> ? kGameVariant1v1 : kGameVariant2v2;
+    assert(config_.model.game_variant == expected_variant &&
+           "ModelConfig::game_variant must match the trait");
 
-    // Trainer (creates fresh model on training device)
+    buffer_ = std::make_unique<Buffer>(config_.replay_capacity);
+
     ModelConfig mc = config_.model;
     mc.debug_mode = config_.debug_mode;
     if (mc.debug_mode) {
@@ -74,14 +83,10 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     }
     trainer_ = std::make_unique<ModelTrainer>(mc, train_device_);
 
-    // Clone model for inference engine
     auto inf_model = trainer_->clone_for_inference(infer_device_);
     inf_model->eval();
     inference_ = std::make_shared<InferenceEngine>(inf_model, infer_device_);
 
-    // Past-opponent inference engine — only built when the feature is enabled.
-    // Initially shares the current weights; refresh_opponent_model() swaps in a
-    // random older checkpoint once one is available.
     if (config_.past_opponent_probability > 0.0) {
         opponent_loader_ = std::make_unique<ModelTrainer>(mc, infer_device_);
         auto opp_model = opponent_loader_->clone_for_inference(infer_device_);
@@ -89,7 +94,6 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
         opponent_inference_ = std::make_shared<InferenceEngine>(opp_model, infer_device_);
     }
 
-    // Solver config: enable exploration if temperature > 0
     solver_config_.placement_temperature = temperature_;
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
@@ -103,39 +107,39 @@ TrainingLoop::TrainingLoop(const TrainingConfig& config,
     solver_config_.pbrs_clean_reward = config_.pbrs_clean_reward;
     solver_config_.debug_log_path        = config_.log_dir + "/debug_game_0.log";
 
-    // Orchestrator (does NOT start threads yet — call run() for that)
     config_.self_play.debug_mode = config_.debug_mode;
     if (config_.debug_mode) {
         config_.self_play.debug_log_path = config_.log_dir + "/debug_coordinator.log";
     }
 
-    orchestrator_ = std::make_unique<SelfPlayOrchestrator>(
+    orchestrator_ = std::make_unique<Orchestr>(
         config_.self_play, tables_, *inference_, solver_config_,
         opponent_inference_ ? opponent_inference_.get() : nullptr);
 }
 
 // ---------------------------------------------------------------------------
-// stop (signal)
+// stop
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::stop() {
+template <typename Traits>
+void TrainingLoopT<Traits>::stop() {
     stop_flag_.store(true);
 }
 
 // ---------------------------------------------------------------------------
-// metrics snapshot
+// metrics
 // ---------------------------------------------------------------------------
 
-TrainingMetrics TrainingLoop::metrics() const {
+template <typename Traits>
+TrainingMetrics TrainingLoopT<Traits>::metrics() const {
     TrainingMetrics m;
     m.training_step     = training_step_;
     m.games_played      = games_played_;
     m.samples_in_buffer = buffer_->size();
     m.loss              = last_loss_;
-    m.temperature            = temperature_;
-    m.epsilon                = epsilon_;
-    
-    // Compute games per second (cumulative since start)
+    m.temperature       = temperature_;
+    m.epsilon           = epsilon_;
+
     auto now = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(now - start_time_).count();
     if (seconds > 0.001) {
@@ -150,11 +154,11 @@ TrainingMetrics TrainingLoop::metrics() const {
 }
 
 // ---------------------------------------------------------------------------
-// run — main training loop
+// run
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::run(int num_steps) {
-    // Ensure checkpoint and log dirs exist
+template <typename Traits>
+void TrainingLoopT<Traits>::run(int num_steps) {
     std::filesystem::create_directories(config_.checkpoint_dir);
     if (!config_.log_dir.empty()) {
         std::filesystem::create_directories(config_.log_dir);
@@ -166,20 +170,12 @@ void TrainingLoop::run(int num_steps) {
         }
     }
 
-    // Sync the inference engine with the trainer's current weights before any
-    // self-play work begins. The constructor cloned a fresh random model into
-    // inference_, so without this step a --checkpoint / --resume load only
-    // affects the trainer and workers generate with random weights until the
-    // first maybe_swap_model() fires inside the training loop.
     {
         auto initial_inf_model = trainer_->clone_for_inference(infer_device_);
         initial_inf_model->eval();
         inference_->swap_model(initial_inf_model);
     }
 
-    // If checkpoints already exist (e.g. on resume), prime the past-opponent
-    // model immediately so the first batch of recycles can use it. No-op when
-    // the feature is disabled or no checkpoints are on disk yet.
     refresh_opponent_model();
 
     orchestrator_->start();
@@ -188,37 +184,20 @@ void TrainingLoop::run(int num_steps) {
         log_metrics(config_.log_path, metrics());
 
         if (config_.eval_interval > 0) {
-            EvalResult eval = run_evaluation(
-                trainer_->model_mut(), trainer_->device(),
-                tables_, config_.eval_games,
-                static_cast<uint64_t>(training_step_));
-            log_evaluation(config_.log_dir, training_step_, eval);
-            last_eval_win_rate_ = eval.nn_win_rate();
+            maybe_evaluate();
         }
     }
 
     while (!stop_flag_.load(std::memory_order_relaxed) &&
            training_step_ < num_steps) {
-        // ---------------------------------------------------------------
-        // Phase 1: ALWAYS drain and recycle completed games.
-        // This is decoupled from training so games return to the pool ASAP
-        // and don't pile up in the completed queue.
-        // ---------------------------------------------------------------
         auto t_collect_start = std::chrono::steady_clock::now();
         int collected = collect_completed_games();
         auto t_collect_end = std::chrono::steady_clock::now();
         double collect_ms = std::chrono::duration<double, std::milli>(t_collect_end - t_collect_start).count();
 
-        // ---------------------------------------------------------------
-        // Phase 2: Train if the buffer has enough data.
-        // ---------------------------------------------------------------
         if (buffer_->size() >= config_.min_buffer_size) {
-            
-            // Direct steps-per-game multiplier.
-            // If train_steps_per_collect = 1.0, 1 game triggers exactly 1 training step.
-            // With batch_size=2048 and ~156 samples/game, this yields a healthy Replay Ratio of ~13.
             double steps_per_game = config_.train_steps_per_collect > 0.0 ? config_.train_steps_per_collect : 1.0;
-            
+
             pending_train_steps_ += static_cast<double>(collected) * steps_per_game;
             int steps_to_do = static_cast<int>(pending_train_steps_);
             pending_train_steps_ -= steps_to_do;
@@ -229,7 +208,7 @@ void TrainingLoop::run(int num_steps) {
                 do_training_step();
                 auto t_train_end = std::chrono::steady_clock::now();
                 total_train_ms += std::chrono::duration<double, std::milli>(t_train_end - t_train_start).count();
-                
+
                 maybe_swap_model();
                 maybe_checkpoint();
                 maybe_evaluate();
@@ -246,8 +225,7 @@ void TrainingLoop::run(int num_steps) {
                 }
             }
         }
-        
-        // If no games were ready this tick, avoid busy-spinning
+
         if (collected == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -260,52 +238,43 @@ void TrainingLoop::run(int num_steps) {
 // collect_completed_games
 // ---------------------------------------------------------------------------
 
-int TrainingLoop::collect_completed_games() {
+template <typename Traits>
+int TrainingLoopT<Traits>::collect_completed_games() {
     int n = orchestrator_->collect_completed(collect_buf_, kMaxCollectBatch);
     const bool past_opp_enabled = orchestrator_->has_opponent_inference()
                                   && opponent_ready_
                                   && config_.past_opponent_probability > 0.0;
 
     for (int i = 0; i < n; ++i) {
-        GameInstance* g = collect_buf_[i];
+        Instance* g = collect_buf_[i];
 
         int traj_len = g->trajectory_length;
         if (traj_len > 0) {
-            // For past-opponent games we drop the older model's trajectory
-            // steps so the current model isn't trained on them.
             int exclude = g->use_past_opponent ? g->past_opponent_player : -1;
-            std::vector<TrainingSample> samples(static_cast<size_t>(traj_len));
-            int ns = extract_training_samples(*g, config_.td_mode,
-                                              config_.td_lambda,
-                                              config_.use_duel_margin_maximization,
-                                              config_.duel_margin_maximization_scale,
-                                              config_.use_pbrs,
-                                              samples.data(), traj_len,
-                                              exclude);
+            std::vector<Sample> samples(static_cast<size_t>(traj_len));
+            int ns = extract_training_samples<Traits>(*g, config_.td_mode,
+                                                     config_.td_lambda,
+                                                     config_.use_duel_margin_maximization,
+                                                     config_.duel_margin_maximization_scale,
+                                                     config_.use_pbrs,
+                                                     samples.data(), traj_len,
+                                                     exclude);
             buffer_->add_batch(samples.data(), ns);
         }
 
         ++games_played_;
 
-        // Decide past-opponent assignment for the next game.
         bool use_past = false;
         int  past_player = -1;
         if (past_opp_enabled) {
-            // Two independent uniform draws: roll the dice for activation,
-            // then 50/50 for which seat plays the older model.
             double activate = opponent_rng_.uniform_double();
             if (activate < config_.past_opponent_probability) {
                 use_past = true;
-                past_player = (opponent_rng_.uniform_double() < 0.5) ? 0 : 1;
+                // In 1v1 there are two seats; in 2v2, four. Pick a random seat.
+                past_player = opponent_rng_.uniform_int(0, Traits::kNumPlayers - 1);
             }
         }
 
-        // Recycle: seed mixes games_played_ AND training_step_ so a resumed
-        // run does not replay the exact dice sequence from the start of the
-        // original run. games_played_ is not persisted across resume — it
-        // restarts at 0 — so without the training_step_ term the recycled
-        // seed stream is bit-identical to the start of the prior run and
-        // workers overfit to the same first few games for thousands of steps.
         uint64_t new_seed = (static_cast<uint64_t>(games_played_) * 6364136223846793005ULL)
                             ^ (static_cast<uint64_t>(training_step_) * 1442695040888963407ULL);
         orchestrator_->recycle_game(g, new_seed, use_past, past_player);
@@ -317,23 +286,24 @@ int TrainingLoop::collect_completed_games() {
 // do_training_step
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::do_training_step() {
-    std::vector<TrainingSample> batch(static_cast<size_t>(config_.train_batch_size));
+template <typename Traits>
+void TrainingLoopT<Traits>::do_training_step() {
+    std::vector<Sample> batch(static_cast<size_t>(config_.train_batch_size));
     auto t1 = std::chrono::steady_clock::now();
     int n = buffer_->sample_batch(batch.data(), config_.train_batch_size, sample_rng_);
     auto t2 = std::chrono::steady_clock::now();
-    
+
     if (n <= 0) return;
 
-    // Interleaved layout → split into flat arrays for ModelTrainer
-    std::vector<float>  states(static_cast<size_t>(n) * kTensorSize);
+    constexpr int kTSize = Traits::kTensorSize;
+    std::vector<float>  states(static_cast<size_t>(n) * kTSize);
     std::vector<double> targets(static_cast<size_t>(n));
 
     auto t3 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; ++i) {
-        std::memcpy(states.data() + i * kTensorSize,
+        std::memcpy(states.data() + i * kTSize,
                     batch[static_cast<size_t>(i)].state,
-                    kTensorSize * sizeof(float));
+                    kTSize * sizeof(float));
         targets[static_cast<size_t>(i)] = batch[static_cast<size_t>(i)].target;
     }
     auto t4 = std::chrono::steady_clock::now();
@@ -341,11 +311,11 @@ void TrainingLoop::do_training_step() {
     auto t_start = std::chrono::steady_clock::now();
     last_loss_ = trainer_->train_step(states.data(), targets.data(), n);
     auto t_end = std::chrono::steady_clock::now();
-    
+
     double sample_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
     double memcpy_ms = std::chrono::duration<double, std::milli>(t4 - t3).count();
     double train_ms  = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    
+
     if (config_.debug_mode && training_step_ % 200 == 0) {
         std::string queue_log_path = config_.log_dir + "/debug_queues.log";
         std::ofstream f(queue_log_path, std::ios::app);
@@ -358,19 +328,17 @@ void TrainingLoop::do_training_step() {
               << "memcpy loop time: " << memcpy_ms << " ms\n\n";
         }
     }
-    
+
     ++training_step_;
     total_samples_trained_ += n;
 
-    // 1. Decay heuristic weight linearly FIRST (Stage 1)
     if (training_step_ < config_.heuristic_decay_steps) {
-        heuristic_weight_ = config_.initial_heuristic_weight * 
+        heuristic_weight_ = config_.initial_heuristic_weight *
             (1.0 - static_cast<double>(training_step_) / config_.heuristic_decay_steps);
     } else {
         heuristic_weight_ = 0.0;
     }
 
-    // 2. Decay temperature ONLY after the configured start step (Stage 2)
     if (training_step_ >= config_.temperature_decay_start_step) {
         if (training_step_ == config_.temperature_decay_start_step &&
             config_.temperature_decay_start_value > 0.0) {
@@ -381,7 +349,6 @@ void TrainingLoop::do_training_step() {
         }
     }
 
-    // Push updated config to self-play workers
     solver_config_.placement_temperature = temperature_;
     solver_config_.hold_temperature      = temperature_;
     solver_config_.exploration_enabled   = (temperature_ > 0.0);
@@ -399,7 +366,8 @@ void TrainingLoop::do_training_step() {
 // maybe_swap_model
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::maybe_swap_model() {
+template <typename Traits>
+void TrainingLoopT<Traits>::maybe_swap_model() {
     if (training_step_ % config_.model_swap_interval != 0) return;
 
     auto new_model = trainer_->clone_for_inference(infer_device_);
@@ -411,42 +379,33 @@ void TrainingLoop::maybe_swap_model() {
 // maybe_checkpoint
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::maybe_checkpoint() {
+template <typename Traits>
+void TrainingLoopT<Traits>::maybe_checkpoint() {
     if (training_step_ % config_.checkpoint_interval != 0) return;
 
     std::string stem = config_.checkpoint_dir + "/checkpoint_step_"
                        + std::to_string(training_step_);
 
-    // Save model + optimizer
     trainer_->save_checkpoint(stem, training_step_, temperature_, epsilon_);
-
-    // Save replay buffer alongside the checkpoint
     buffer_->save(stem + ".buffer");
-
-    // Prune old checkpoints (handles .model, .optimizer, .buffer)
     prune_old_checkpoints(config_.checkpoint_dir, config_.max_checkpoints);
 
-    // Refresh the past-opponent model now that the on-disk pool changed.
     refresh_opponent_model();
 
-    // Append metrics to log
     log_metrics(config_.log_path, metrics());
 }
 
 // ---------------------------------------------------------------------------
-// refresh_opponent_model — pick a random checkpoint and load it as the past
-// opponent. Called after each checkpoint save. No-op when the feature is off
-// or no checkpoint exists yet.
+// refresh_opponent_model
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::refresh_opponent_model() {
+template <typename Traits>
+void TrainingLoopT<Traits>::refresh_opponent_model() {
     if (!opponent_inference_ || !opponent_loader_) return;
 
     auto stems = list_checkpoint_stems(config_.checkpoint_dir);
     if (stems.empty()) return;
 
-    // The pool is already capped on disk by max_checkpoints (default 5), so we
-    // sample uniformly over whatever's available — newest 5 by construction.
     int idx = opponent_rng_.uniform_int(0, static_cast<int>(stems.size()) - 1);
     try {
         opponent_loader_->load_weights(stems[static_cast<size_t>(idx)]);
@@ -455,26 +414,37 @@ void TrainingLoop::refresh_opponent_model() {
         opponent_inference_->swap_model(opp_clone);
         opponent_ready_ = true;
     } catch (const std::exception& e) {
-        // Don't crash training on a bad checkpoint; just leave the previous
-        // opponent weights in place and try again on the next refresh.
         (void)e;
     }
 }
 
 // ---------------------------------------------------------------------------
-// maybe_evaluate
+// maybe_evaluate — 1v1 only for now; the evaluator hasn't been templated yet.
+// In 2v2 builds this is a no-op (the smoke run still produces loss metrics).
 // ---------------------------------------------------------------------------
 
-void TrainingLoop::maybe_evaluate() {
+template <typename Traits>
+void TrainingLoopT<Traits>::maybe_evaluate() {
     if (config_.eval_interval <= 0) return;
     if (training_step_ % config_.eval_interval != 0) return;
 
-    EvalResult eval = run_evaluation(
-        trainer_->model_mut(), trainer_->device(),
-        tables_, config_.eval_games,
-        static_cast<uint64_t>(training_step_));
+    if constexpr (std::is_same_v<Traits, Yams1v1>) {
+        EvalResult eval = run_evaluation(
+            trainer_->model_mut(), trainer_->device(),
+            tables_, config_.eval_games,
+            static_cast<uint64_t>(training_step_));
 
-    log_evaluation(config_.log_dir, training_step_, eval);
+        log_evaluation(config_.log_dir, training_step_, eval);
 
-    last_eval_win_rate_ = eval.nn_win_rate();
+        last_eval_win_rate_ = eval.nn_win_rate();
+    } else {
+        // 2v2 evaluator is not yet implemented (Task 8+ / Optional 7.X2).
+        (void)tables_;
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// ---------------------------------------------------------------------------
+template class TrainingLoopT<Yams1v1>;
+template class TrainingLoopT<Yams2v2>;
