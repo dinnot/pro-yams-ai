@@ -155,7 +155,22 @@
       "Bash(cmake --build . --target pro_yams_ai self_play_tests training_tests)",
       "Bash(cmake --build . --target ui_main)",
       "Bash(cmake --build . --target session_manager)",
-      "Bash(./tests/ui/ui_tests)"
+      "Bash(./tests/ui/ui_tests)",
+      "Bash(cmake --build . --target pro_yams_play -j)",
+      "Bash(/home/sorin/pro_yams_ai/build/src/ui/pro_yams_play *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8090/)",
+      "Bash(curl -s http://localhost:8090/)",
+      "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"player0\":\"human\",\"player1\":\"nn\",\"seed\":42}' http://localhost:8090/api/game/new)",
+      "Bash(curl -s http://localhost:8090/api/game/2/options)",
+      "Bash(pkill -f pro_yams_play)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(node -e \"$\\(cat /home/sorin/pro_yams_ai/src/ui/play_static/js/play.js\\); console.log\\('parsed OK, init type:', typeof Play.init\\);\")",
+      "Bash(node -e \"$\\(cat /home/sorin/pro_yams_ai/src/ui/play_static/js/play.js\\); console.log\\('parsed OK'\\)\")",
+      "Bash(curl -s -o /dev/null -w \"play.js: %{http_code}\\\\n\" http://localhost:8090/js/play.js)",
+      "Bash(curl -s -o /dev/null -w \"style.css: %{http_code}\\\\n\" http://localhost:8090/css/style.css)",
+      "Bash(xargs -I{} echo \"footer in index: {}\")",
+      "Bash(node -e \"global.document = { addEventListener: \\(\\) => {} }; $\\(cat /home/sorin/pro_yams_ai/src/ui/play_static/js/play.js\\); console.log\\('parsed; helpers:', typeof computeDuel, typeof renderBreakdownTable, typeof fmtSigned\\)\")",
+      "Bash(pip3 install *)"
     ]
   }
 }

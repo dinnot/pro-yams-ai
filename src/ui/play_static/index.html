@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#16213e">
+<title>Play Pro Yams</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header id="header" title="Tap to start a new game">
+  <h1>Pro Yams</h1>
+  <span id="turn-info" class="turn-info"></span>
+</header>
+
+<main>
+  <!-- Splash / start screen -->
+  <section id="splash" class="splash">
+    <p class="splash-tagline">You vs. the neural net.</p>
+    <button id="btn-play" class="btn-play">▶ Play</button>
+  </section>
+
+  <!-- Game UI -->
+  <section id="game" class="game" hidden>
+    <div id="sheet" class="sheet"></div>
+
+    <!-- End-of-game banner -->
+    <div id="endgame" class="endgame" hidden>
+      <div id="endgame-text" class="endgame-text"></div>
+      <div id="endgame-margin" class="endgame-margin"></div>
+      <div id="endgame-breakdown" class="endgame-breakdown"></div>
+      <button id="btn-again" class="btn-play">Play again</button>
+    </div>
+  </section>
+</main>
+
+<footer id="footer" class="footer" hidden>
+  <div id="dice-row" class="dice-row"></div>
+  <button id="btn-reroll" class="btn-reroll" disabled>Reroll</button>
+</footer>
+
+<script src="js/api.js"></script>
+<script src="js/play.js"></script>
+</body>
+</html>

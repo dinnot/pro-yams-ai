@@ -44,3 +44,12 @@ target_link_libraries(pro_yams_ui PRIVATE
     ui_lib config
     ${TORCH_LIBRARIES}
 )
+
+# ---------------------------------------------------------------------------
+# pro_yams_play — public play-against-the-NN web app (separate port)
+# ---------------------------------------------------------------------------
+add_executable(pro_yams_play play_main.cpp)
+target_link_libraries(pro_yams_play PRIVATE
+    ui_lib config
+    ${TORCH_LIBRARIES}
+)
