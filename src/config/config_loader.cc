@@ -5,6 +5,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "engine/game_traits.h"
+#include "model/model_config.h"
 #include "self_play/training_data.h"  // TDMode
 
 static TDMode parse_td_mode(const std::string& s) {
@@ -13,6 +15,22 @@ static TDMode parse_td_mode(const std::string& s) {
     if (s == "tdlambda")  return TDMode::kTDLambda;
     throw std::runtime_error("Unknown td_mode value: '" + s +
                              "' (expected: mc, td0, tdlambda)");
+}
+
+// Map "1v1" / "2v2" → kGameVariant1v1 / kGameVariant2v2.
+static int parse_game_variant(const std::string& s) {
+    if (s == "1v1") return kGameVariant1v1;
+    if (s == "2v2") return kGameVariant2v2;
+    throw std::runtime_error("Unknown game_variant value: '" + s +
+                             "' (expected: 1v1, 2v2)");
+}
+
+// Pick the default tensor size for a given variant. Used as a fallback when
+// the YAML / CLI doesn't override `input_size` explicitly.
+static int default_input_size_for(int game_variant) {
+    return (game_variant == kGameVariant2v2)
+        ? Yams2v2::kTensorSize
+        : Yams1v1::kTensorSize;
 }
 
 namespace {
@@ -41,6 +59,12 @@ void load_model_config(const YAML::Node& n, ModelConfig& m) {
     maybe_assign(n, "output_activation",  m.output_activation);
     maybe_assign(n, "loss_function",      m.loss_function);
     maybe_assign(n, "architecture",       m.architecture);
+    // game_variant can be set via a nested model.game_variant key too. Most
+    // users will set it at the top level (training.game_variant); the nested
+    // form is kept for symmetry with input_size.
+    if (n["game_variant"]) {
+        m.game_variant = parse_game_variant(n["game_variant"].as<std::string>());
+    }
 }
 
 void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
@@ -75,8 +99,21 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "past_opponent_probability", tc.past_opponent_probability);
     maybe_assign(n, "logs_on_start",     tc.logs_on_start);
     if (n["td_mode"])   tc.td_mode = parse_td_mode(n["td_mode"].as<std::string>());
+    // game_variant at the training level takes precedence; load it BEFORE the
+    // model block so the model block can still override it if explicitly set.
+    if (n["game_variant"]) {
+        tc.model.game_variant = parse_game_variant(n["game_variant"].as<std::string>());
+    }
     if (n["self_play"]) load_self_play_config(n["self_play"], tc.self_play);
     if (n["model"])     load_model_config(n["model"], tc.model);
+    // If the user didn't set input_size explicitly, derive it from the variant.
+    // We detect "not explicitly set" by checking whether the loaded value still
+    // matches the default-for-1v1 — a heuristic, but harmless: when a user
+    // explicitly writes input_size: 986 for a 1v1 run, the result is identical.
+    if (tc.model.game_variant == kGameVariant2v2 &&
+        tc.model.input_size == Yams1v1::kTensorSize) {
+        tc.model.input_size = Yams2v2::kTensorSize;
+    }
 }
 
 }  // namespace
@@ -118,6 +155,20 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--use_duel_margin_maximization" && i + 1 < argc) config.training.use_duel_margin_maximization = (std::stoi(argv[++i]) != 0);
         else if (arg == "--duel_margin_maximization_scale" && i + 1 < argc) config.training.duel_margin_maximization_scale = std::stod(argv[++i]);
         else if (arg == "--past_opponent_probability" && i + 1 < argc) config.training.past_opponent_probability = std::stod(argv[++i]);
+        else if (arg == "--game_variant" && i + 1 < argc) {
+            config.training.model.game_variant = parse_game_variant(argv[++i]);
+            // CLI override: if the user didn't also override input_size, snap
+            // it to the variant default. A subsequent --hidden_width / etc.
+            // call doesn't disturb this; explicit --input_size if added later
+            // would.
+            if (config.training.model.game_variant == kGameVariant2v2 &&
+                config.training.model.input_size == Yams1v1::kTensorSize) {
+                config.training.model.input_size = Yams2v2::kTensorSize;
+            } else if (config.training.model.game_variant == kGameVariant1v1 &&
+                       config.training.model.input_size == Yams2v2::kTensorSize) {
+                config.training.model.input_size = Yams1v1::kTensorSize;
+            }
+        }
     }
 }
 

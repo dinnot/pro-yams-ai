@@ -206,7 +206,10 @@
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 120 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 30 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
-      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 60 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)"
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 60 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
+      "Bash(./pro_yams_ai --mode config --config /tmp/test_2v2.yaml)",
+      "Bash(./pro_yams_ai --mode config --config /tmp/test_2v2_bad.yaml)",
+      "Bash(./pro_yams_ai --mode config --game_variant 2v2)"
     ]
   }
 }

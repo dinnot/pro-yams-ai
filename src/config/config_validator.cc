@@ -1,5 +1,7 @@
 #include "config/config_validator.h"
 
+#include "engine/game_traits.h"
+#include "model/model_config.h"
 #include "self_play/game_instance.h"  // GameInstance::kMaxAfterstates
 
 ValidationResult validate_config(const AppConfig& cfg) {
@@ -86,6 +88,18 @@ ValidationResult validate_config(const AppConfig& cfg) {
         r.fail("training.model.loss_function must be \"mse\" or \"bce\"");
     if (m.architecture != "mlp" && m.architecture != "resnet")
         r.fail("training.model.architecture must be \"mlp\" or \"resnet\"");
+
+    // Game variant must agree with input_size — the templated TrainingLoopT
+    // constructor asserts this; flagging it here gives a much clearer error.
+    if (m.game_variant == kGameVariant1v1 && m.input_size != Yams1v1::kTensorSize) {
+        r.fail("training.model.input_size must equal " +
+               std::to_string(Yams1v1::kTensorSize) + " for game_variant=1v1");
+    } else if (m.game_variant == kGameVariant2v2 && m.input_size != Yams2v2::kTensorSize) {
+        r.fail("training.model.input_size must equal " +
+               std::to_string(Yams2v2::kTensorSize) + " for game_variant=2v2");
+    } else if (m.game_variant != kGameVariant1v1 && m.game_variant != kGameVariant2v2) {
+        r.fail("training.model.game_variant must be 1v1 or 2v2");
+    }
 
     return r;
 }

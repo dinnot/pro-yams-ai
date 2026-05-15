@@ -1,6 +1,7 @@
 #include "config/config_printer.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
+#include "model/model_config.h"
 #include "self_play/training_data.h"  // TDMode
 
 namespace {
@@ -14,6 +15,10 @@ const char* td_mode_str(TDMode m) {
     return "unknown";
 }
 
+const char* game_variant_str(int v) {
+    return (v == kGameVariant2v2) ? "2v2" : "1v1";
+}
+
 void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     const TrainingConfig& tc = cfg.training;
     const SelfPlayConfig& sp = tc.self_play;
@@ -24,6 +29,7 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     
     out << YAML::Key << "training";
     out << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "game_variant"         << YAML::Value << game_variant_str(m.game_variant);
     out << YAML::Key << "replay_capacity"      << YAML::Value << tc.replay_capacity;
     out << YAML::Key << "min_buffer_size"      << YAML::Value << tc.min_buffer_size;
     out << YAML::Key << "train_batch_size"     << YAML::Value << tc.train_batch_size;

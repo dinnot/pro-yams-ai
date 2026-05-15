@@ -5,6 +5,7 @@
 
 #include <torch/torch.h>
 
+#include "engine/game_traits.h"
 #include "eval/tournament.h"
 #include "model/model_config.h"
 #include "model/pro_yams_net.h"
@@ -16,21 +17,43 @@
 // ---------------------------------------------------------------------------
 // pro_yams_play — public-facing "play against the NN" web app.
 //
-// Reuses UIServer + SessionManager from the main UI, but ships a separate
-// mobile-first static directory and runs on its own port so it can sit next
-// to the dev UI without conflict.
+// Reuses UIServerT + SessionManagerT from the main UI, but ships a separate
+// mobile-first static directory and runs on its own port. The --variant flag
+// selects between 1v1 and 2v2 (default: 1v1).
 // ---------------------------------------------------------------------------
+
+namespace {
+
+template <typename Traits>
+int run_play_variant(int port, const std::string& static_dir,
+                     const PrecomputedTables& tables,
+                     ProYamsNet* model, torch::Device device) {
+    SessionManagerT<Traits> sessions(tables, model, device);
+    UIServerT<Traits> server(port, static_dir, sessions, /*log_dir=*/".",
+                              /*checkpoints_dir=*/".", /*tournament=*/nullptr);
+    std::cout << "Pro Yams Play running at http://localhost:" << port << "\n";
+    std::cout << "Frontend:   " << static_dir << "\n";
+    std::cout << "Variant:    " << ((Traits::kNumPlayers == 4) ? "2v2" : "1v1") << "\n";
+    std::cout << "Press Ctrl+C to stop.\n";
+    server.start();
+    return 0;
+}
+
+}  // namespace
 
 int main(int argc, char* argv[]) {
     std::string checkpoint_path;
     std::string static_dir = "./play_static";
     int         port       = 8090;
+    std::string variant    = "1v1";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if      (arg == "--checkpoint" && i + 1 < argc) checkpoint_path = argv[++i];
         else if (arg == "--static_dir" && i + 1 < argc) static_dir      = argv[++i];
         else if (arg == "--port"       && i + 1 < argc) port            = std::stoi(argv[++i]);
+        else if (arg == "--variant"    && i + 1 < argc) variant         = argv[++i];
+        else if (arg == "--game_variant" && i + 1 < argc) variant       = argv[++i];
     }
 
     torch::set_num_threads(1);
@@ -60,16 +83,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    SessionManager sessions(tables, model.get(), device);
-
-    // No tournament/log dirs needed for the play app — pass empty strings and
-    // a null tournament manager. UIServer tolerates a nullptr tournament_.
-    UIServer server(port, static_dir, sessions, /*log_dir=*/".",
-                    /*checkpoints_dir=*/".", /*tournament=*/nullptr);
-    std::cout << "Pro Yams Play running at http://localhost:" << port << "\n";
-    std::cout << "Frontend:   " << static_dir << "\n";
-    std::cout << "Press Ctrl+C to stop.\n";
-    server.start();
-
-    return 0;
+    if (variant == "2v2") {
+        return run_play_variant<Yams2v2>(port, static_dir, tables, model.get(), device);
+    }
+    return run_play_variant<Yams1v1>(port, static_dir, tables, model.get(), device);
 }

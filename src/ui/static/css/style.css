@@ -100,9 +100,18 @@ select, input[type="text"] {
 
 /* Boards */
 .boards-area { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
+.boards-area[data-variant="2v2"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-rows: auto auto;
+  gap: 12px;
+}
 .board-container { min-width: 260px; }
 .board-container h3 { font-size: 0.95rem; margin-bottom: 6px; color: #e0e0e0; }
 .player-label { font-size: 0.75rem; color: #aaa; }
+/* 2v2 team shading: P0/P2 on left = Team 0, P1/P3 on right = Team 1. */
+.boards-area[data-variant="2v2"] .board-container.team-0 h3 { color: #6cd6ff; }
+.boards-area[data-variant="2v2"] .board-container.team-1 h3 { color: #ffb86c; }
 
 .board-grid {
   display: grid;

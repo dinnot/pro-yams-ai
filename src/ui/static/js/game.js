@@ -19,6 +19,46 @@ const Game = {
         });
     },
 
+    // Ensure board-pN / board-grid-N divs exist for each player. The HTML
+    // ships with P0/P1; P2/P3 are created on demand when the JSON reports
+    // a 2v2 game. Also toggles the boards-area layout via data-variant.
+    ensureBoardContainers(numPlayers, variant) {
+        const area = document.querySelector('.boards-area');
+        if (!area) return;
+        area.dataset.variant = variant;
+
+        // Team assignment in 2v2: P0/P2 are Team 0, P1/P3 are Team 1.
+        const teamOf = (p) => (p & 1) === 0 ? 0 : 1;
+
+        for (let p = 0; p < numPlayers; ++p) {
+            let container = document.getElementById(`board-p${p}`);
+            if (!container) {
+                container = document.createElement('div');
+                container.id = `board-p${p}`;
+                container.className = 'board-container';
+                container.innerHTML =
+                    `<h3>Player ${p} <span class="player-label" id="p${p}-type"></span></h3>` +
+                    `<div id="board-grid-${p}" class="board-grid"></div>`;
+                area.appendChild(container);
+            }
+            // Update team class for 2x2 shading.
+            container.classList.remove('team-0', 'team-1');
+            if (variant === '2v2') {
+                container.classList.add(`team-${teamOf(p)}`);
+            }
+        }
+
+        // Hide any leftover containers from a previous larger game.
+        for (let p = numPlayers; p < 8; ++p) {
+            const c = document.getElementById(`board-p${p}`);
+            if (c) c.style.display = 'none';
+        }
+        for (let p = 0; p < numPlayers; ++p) {
+            const c = document.getElementById(`board-p${p}`);
+            if (c) c.style.display = '';
+        }
+    },
+
     async newGame() {
         Game.stopAutoPlay();
         const p0 = document.getElementById('sel-p0').value;
@@ -255,10 +295,18 @@ const Game = {
             Game.setStatus(`Player ${pIdx}'s turn (${pType}) — click Step to advance`);
         }
 
+        // Variant-aware UI: switch the boards area into 2x2 layout for 2v2
+        // and ensure a board container exists for each player.
+        const numPlayers = gs.num_players || (gs.player_types ? gs.player_types.length : 2);
+        const variant = gs.game_variant || ((numPlayers === 4) ? '2v2' : '1v1');
+        Game.ensureBoardContainers(numPlayers, variant);
+
         // Player type labels.
         if (gs.player_types) {
-            document.getElementById('p0-type').textContent = `(${gs.player_types[0]})`;
-            document.getElementById('p1-type').textContent = `(${gs.player_types[1]})`;
+            for (let p = 0; p < numPlayers; ++p) {
+                const el = document.getElementById(`p${p}-type`);
+                if (el) el.textContent = `(${gs.player_types[p]})`;
+            }
         }
 
         // Dice.
@@ -295,12 +343,19 @@ const Game = {
             document.getElementById('options-panel').style.display = 'none';
         }
 
-        // Boards.
+        // Boards. Render one per player; legalPN is non-null only for the
+        // current human player's sheet.
         if (gs.boards) {
-            Board.render('board-grid-0', gs.boards.player0, gs.coefficients,
-                         legalP0, (c, r) => Game.placeScore(c, r));
-            Board.render('board-grid-1', gs.boards.player1, gs.coefficients,
-                         legalP1, (c, r) => Game.placeScore(c, r));
+            for (let p = 0; p < numPlayers; ++p) {
+                const board = gs.boards[`player${p}`];
+                if (!board) continue;
+                let legalForP = null;
+                if (gs.waiting_for_human && !gs.game_over && p === gs.current_player) {
+                    legalForP = (p === 0) ? legalP0 : (p === 1 ? legalP1 : (Game.options?.placements || []));
+                }
+                Board.render(`board-grid-${p}`, board, gs.coefficients,
+                             legalForP, (c, r) => Game.placeScore(c, r));
+            }
         }
 
         // History.
