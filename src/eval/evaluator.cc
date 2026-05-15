@@ -5,142 +5,149 @@
 
 #include "engine/duel.h"
 #include "engine/game_flow.h"
+#include "engine/game_traits.h"
 #include "engine/scoring.h"
 #include "engine/tensor.h"
 #include "heuristic/heuristic_bot.h"
 #include "solver/solver.h"
 
 // ---------------------------------------------------------------------------
-// get_game_result_for_player
+// get_game_result_for_player<Traits>
 // ---------------------------------------------------------------------------
 
-double get_game_result_for_player(const GameState& state,
-                                   const GameContext& ctx,
+template <typename Traits>
+double get_game_result_for_player(const GameStateT<Traits>& state,
+                                   const GameContextT<Traits>& ctx,
                                    int player) {
-    int duel = compute_duel(state.board, ctx);
-    if (player == 1) duel = -duel;
+    int duel = compute_duel<Traits>(state.board, ctx);
+    // compute_duel returns the Team-0 margin. Flip for any player NOT on Team 0.
+    if (!Traits::are_teammates(player, 0)) duel = -duel;
     if (duel > 0) return 1.0;
     if (duel < 0) return 0.0;
     return 0.5;
 }
 
 // ---------------------------------------------------------------------------
-// nn_play_turn — synchronous NN inference for one complete turn.
+// nn_play_turn<Traits>
 // ---------------------------------------------------------------------------
 
+template <typename Traits>
 void nn_play_turn(ProYamsNet& model, torch::Device device,
-                   GameState& state, GameContext& ctx,
+                   GameStateT<Traits>& state, GameContextT<Traits>& ctx,
                    const PrecomputedTables& tables,
                    SolverBuffers& buffers,
                    std::vector<float>& tensor_buffer,
                    const SolverConfig& config, RNG& rng) {
-                   
+
     buffers.dp_computed = false;
     buffers.evs_blended = false;
-    
-    // Step 1: get afterstate requests ONCE per turn
-    solver_get_requests(state, ctx, tables, buffers);
+
+    solver_get_requests<Traits>(state, ctx, tables, buffers);
 
     if (buffers.request_count == 0) {
-        while (can_reroll(state, ctx)) {
-            perform_reroll(state, 0, rng);
+        while (can_reroll<Traits>(state, ctx)) {
+            perform_reroll<Traits>(state, 0, rng);
         }
         auto& all = ctx.legal_all[state.board.current_player];
         if (all.count > 0) {
-            perform_placement(state, ctx, all.placements[0].column, all.placements[0].row, rng);
+            perform_placement<Traits>(state, ctx,
+                                      all.placements[0].column,
+                                      all.placements[0].row, rng);
         }
-        return; 
+        return;
     }
 
-    // Step 2: generate tensors and infer ONCE per turn
-    generate_tensor_batch(state.board, ctx,
-                          static_cast<int>(state.board.current_player),
-                          buffers.requests, buffers.request_count,
-                          tables, tensor_buffer.data());
+    generate_tensor_batch<Traits>(state.board, ctx,
+                                   static_cast<int>(state.board.current_player),
+                                   buffers.requests, buffers.request_count,
+                                   tables, tensor_buffer.data());
 
     {
         torch::NoGradGuard no_grad;
         auto input = torch::from_blob(
             tensor_buffer.data(),
-            {buffers.request_count, kTensorSize},
+            {buffers.request_count, Traits::kTensorSize},
             torch::kFloat32
         ).to(device);
         auto output = model.forward(input).to(torch::kCPU).contiguous();
-        const float* ptr = output.data_ptr<float>();
+        const float* ptr = output.template data_ptr<float>();
         for (int i = 0; i < buffers.request_count; ++i) {
             buffers.evs[i] = static_cast<double>(ptr[i]);
         }
     }
 
-    // Step 3: resolve in a loop
     while (true) {
-        SolverResult result = solver_resolve(state, ctx, tables, buffers,
-                                              config, rng);
+        SolverResult result = solver_resolve<Traits>(state, ctx, tables, buffers,
+                                                    config, rng);
 
         if (result.should_place) {
-            perform_placement(state, ctx,
-                              result.placement.column, result.placement.row, rng);
+            perform_placement<Traits>(state, ctx,
+                                      result.placement.column, result.placement.row, rng);
             return;
         } else {
-            if (!can_reroll(state, ctx)) {
-                // Safety break to prevent infinite loop.
+            if (!can_reroll<Traits>(state, ctx)) {
                 int current_id = get_dice_state_id(state.dice, tables);
                 int16_t req_idx = buffers.stop_request_idx[current_id];
                 if (req_idx < 0) req_idx = 0;
-                perform_placement(state, ctx, buffers.requests[req_idx].placement.column,
-                                  buffers.requests[req_idx].placement.row, rng);
+                perform_placement<Traits>(state, ctx,
+                                          buffers.requests[req_idx].placement.column,
+                                          buffers.requests[req_idx].placement.row, rng);
                 return;
             }
-            perform_reroll(state, result.hold_mask, rng);
+            perform_reroll<Traits>(state, result.hold_mask, rng);
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// play_eval_game
+// play_eval_game<Traits>
 // ---------------------------------------------------------------------------
 
+template <typename Traits>
 double play_eval_game(ProYamsNet& model, torch::Device device,
                        const PrecomputedTables& tables,
                        int nn_player, RNG& rng,
                        int& out_duel_margin) {
-    GameState    state;
-    GameContext  ctx;
+    GameStateT<Traits>   state;
+    GameContextT<Traits> ctx;
     SolverBuffers buffers{};
     SolverConfig greedy_cfg;
 
-    // Tensor buffer is heap-allocated to avoid stack overflow.
     std::vector<float> tensor_buffer(
-        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+        static_cast<size_t>(kMaxAfterstateRequests) * Traits::kTensorSize);
 
-    init_game(state, ctx, rng);
+    init_game<Traits>(state, ctx, rng);
 
-    // Pick a random heuristic variant for this game so the NN is evaluated
-    // against a diverse mix of opponents.
+    // Pick a random heuristic variant for this game.
     const HeuristicVersion hv = random_heuristic_version(rng);
 
-    while (!is_terminal(state.board)) {
+    while (!is_terminal<Traits>(state.board)) {
         int player = static_cast<int>(state.board.current_player);
-        if (player == nn_player) {
-            nn_play_turn(model, device, state, ctx, tables,
-                         buffers, tensor_buffer, greedy_cfg, rng);
+        // In 1v1 are_teammates(p, q) collapses to p == q, so `is_nn_seat` is
+        // equivalent to `player == nn_player`. In 2v2 it returns true for both
+        // seats on the NN's team.
+        const bool is_nn_seat = Traits::are_teammates(player, nn_player);
+        if (is_nn_seat) {
+            nn_play_turn<Traits>(model, device, state, ctx, tables,
+                                  buffers, tensor_buffer, greedy_cfg, rng);
         } else {
-            heuristic_play_turn(state, ctx, tables, buffers, rng, hv);
+            heuristic_play_turn<Traits>(state, ctx, tables, buffers, rng, hv);
         }
     }
 
-    int duel = compute_duel(state.board, ctx);
-    // Convert to NN's perspective
-    if (nn_player == 1) duel = -duel;
+    int duel = compute_duel<Traits>(state.board, ctx);
+    // Convert to NN's perspective (Team-0 margin → flip iff NN is on Team 1).
+    if (!Traits::are_teammates(nn_player, 0)) duel = -duel;
     out_duel_margin = duel;
 
-    return get_game_result_for_player(state, ctx, nn_player);
+    return get_game_result_for_player<Traits>(state, ctx, nn_player);
 }
 
 // ---------------------------------------------------------------------------
-// run_evaluation
+// run_evaluation<Traits>
 // ---------------------------------------------------------------------------
 
+template <typename Traits>
 EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
                            const PrecomputedTables& tables,
                            int num_games, uint64_t base_seed) {
@@ -153,14 +160,16 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
 
     for (int i = 0; i < num_games; ++i) {
         RNG rng(base_seed + static_cast<uint64_t>(i));
+        // nn_player alternates: i even → NN anchors seat 0 (Team 0 in 2v2);
+        // i odd → NN anchors seat 1 (Team 1 in 2v2).
         int nn_player = i % 2;
 
         if (nn_player == 0) result.games_as_p0++;
         else                result.games_as_p1++;
 
         int duel_margin = 0;
-        double outcome = play_eval_game(model, device, tables,
-                                         nn_player, rng, duel_margin);
+        double outcome = play_eval_game<Traits>(model, device, tables,
+                                                nn_player, rng, duel_margin);
 
         margin_sum += duel_margin;
 
@@ -180,3 +189,30 @@ EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
 
     return result;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// ---------------------------------------------------------------------------
+
+template double get_game_result_for_player<Yams1v1>(const GameStateT<Yams1v1>&,
+                                                    const GameContextT<Yams1v1>&,
+                                                    int);
+template double get_game_result_for_player<Yams2v2>(const GameStateT<Yams2v2>&,
+                                                    const GameContextT<Yams2v2>&,
+                                                    int);
+template void nn_play_turn<Yams1v1>(ProYamsNet&, torch::Device,
+                                    GameStateT<Yams1v1>&, GameContextT<Yams1v1>&,
+                                    const PrecomputedTables&, SolverBuffers&,
+                                    std::vector<float>&, const SolverConfig&, RNG&);
+template void nn_play_turn<Yams2v2>(ProYamsNet&, torch::Device,
+                                    GameStateT<Yams2v2>&, GameContextT<Yams2v2>&,
+                                    const PrecomputedTables&, SolverBuffers&,
+                                    std::vector<float>&, const SolverConfig&, RNG&);
+template double play_eval_game<Yams1v1>(ProYamsNet&, torch::Device,
+                                        const PrecomputedTables&, int, RNG&, int&);
+template double play_eval_game<Yams2v2>(ProYamsNet&, torch::Device,
+                                        const PrecomputedTables&, int, RNG&, int&);
+template EvalResult run_evaluation<Yams1v1>(ProYamsNet&, torch::Device,
+                                            const PrecomputedTables&, int, uint64_t);
+template EvalResult run_evaluation<Yams2v2>(ProYamsNet&, torch::Device,
+                                            const PrecomputedTables&, int, uint64_t);

@@ -67,8 +67,10 @@ static TrainingConfig make_small_2v2_config(const std::string& ckpt_dir,
     cfg.min_temperature     = 0.0;
     cfg.temperature_decay   = 1.0;
 
-    // Disable eval — the evaluator is 1v1-only for now.
+    // Eval is templated now (Task 8 follow-up); keep games small so the smoke
+    // test still finishes in seconds. eval_interval = 0 disables it for now.
     cfg.eval_interval = 0;
+    cfg.eval_games    = 2;
 
     cfg.checkpoint_dir = ckpt_dir;
     cfg.log_path       = log_path;

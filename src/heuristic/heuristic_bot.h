@@ -149,26 +149,28 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
 const ResearchConfig& get_research_config_for(HeuristicVersion v);
 
 // ---------------------------------------------------------------------------
-// Play-turn functions — currently 1v1-only.
-//
-// These call into the solver (solver_get_requests, solver_resolve_greedy)
-// which still takes the non-templated GameState/GameContext. Will be
-// templated in a later task alongside the solver.
+// Play-turn functions — templated on the game variant.
 // ---------------------------------------------------------------------------
 
 /// Play one turn using the research evaluator with the given config.
-void heuristic_play_turn_research(GameState& state, GameContext& ctx,
+template <typename Traits>
+void heuristic_play_turn_research(GameStateT<Traits>& state,
+                                  GameContextT<Traits>& ctx,
                                   const PrecomputedTables& tables,
                                   SolverBuffers& buffers, RNG& rng,
                                   const ResearchConfig& cfg);
 
-/// Play one complete turn using the heuristic bot (1v1 dispatch).
-void heuristic_play_turn(GameState& state, GameContext& ctx,
+/// Play one complete turn using the heuristic bot.
+template <typename Traits>
+void heuristic_play_turn(GameStateT<Traits>& state,
+                         GameContextT<Traits>& ctx,
                          const PrecomputedTables& tables,
                          SolverBuffers& buffers, RNG& rng,
                          HeuristicVersion version = HeuristicVersion::V2);
 
-/// Play a complete 1v1 game using the heuristic bot for both players.
+/// Play a complete game using the heuristic bot for all players. Returns the
+/// duel margin from the Team-0 / P0 perspective (compute_duel<Traits>(...)).
+template <typename Traits>
 int play_heuristic_game(RNG& rng, const PrecomputedTables& tables,
                         HeuristicVersion version = HeuristicVersion::V2);
 

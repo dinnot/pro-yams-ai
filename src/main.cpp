@@ -136,9 +136,37 @@ static int mode_train(const AppConfig& cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// mode_eval
+// run_eval_variant<Traits>
 // ---------------------------------------------------------------------------
-static int mode_eval(const AppConfig& cfg) {
+template <typename Traits>
+static int run_eval_variant(const AppConfig& cfg, torch::Device device,
+                            const PrecomputedTables& tables) {
+    ModelTrainer trainer(cfg.training.model, device);
+    int step = 0;
+    double temp = 1.0, eps = 0.0;
+    trainer.load_checkpoint(cfg.checkpoint_path, step, temp, eps);
+
+    EvalResult result = run_evaluation<Traits>(trainer.model_mut(), device, tables,
+                                                cfg.training.eval_games, cfg.seed);
+
+    constexpr bool is_2v2 = std::is_same_v<Traits, Yams2v2>;
+    const char* p0_label = is_2v2 ? "NN as Team 0" : "NN as P0";
+    const char* p1_label = is_2v2 ? "NN as Team 1" : "NN as P1";
+
+    std::cout << "Evaluation results (" << result.total_games << " games"
+              << (is_2v2 ? ", 2v2" : ", 1v1") << "):\n"
+              << "  NN win rate:        " << result.nn_win_rate() << "\n"
+              << "  " << p0_label << " win rate: " << result.nn_win_rate_as_p0() << "\n"
+              << "  " << p1_label << " win rate: " << result.nn_win_rate_as_p1() << "\n"
+              << "  Avg duel margin (all): " << result.avg_duel_margin << "\n";
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// mode_eval — dispatch on the checkpoint's own variant tag so the user
+// doesn't need to keep --game_variant in sync with --checkpoint.
+// ---------------------------------------------------------------------------
+static int mode_eval(AppConfig cfg) {
     if (cfg.checkpoint_path.empty()) {
         std::cerr << "Eval mode requires --checkpoint\n";
         return 1;
@@ -151,20 +179,28 @@ static int mode_eval(const AppConfig& cfg) {
     PrecomputedTables tables;
     init_precomputed_tables(tables);
 
-    ModelTrainer trainer(cfg.training.model, device);
-    int step = 0;
-    double temp = 1.0, eps = 0.0;
-    trainer.load_checkpoint(cfg.checkpoint_path, step, temp, eps);
+    // Pull the variant + input_size out of the checkpoint and overwrite the
+    // cfg's model section so ModelTrainer is constructed with matching shape.
+    try {
+        ModelConfig ckpt_cfg =
+            ModelTrainer::config_from_checkpoint(cfg.checkpoint_path);
+        cfg.training.model.game_variant = ckpt_cfg.game_variant;
+        cfg.training.model.input_size   = ckpt_cfg.input_size;
+        cfg.training.model.hidden_layers   = ckpt_cfg.hidden_layers;
+        cfg.training.model.hidden_width    = ckpt_cfg.hidden_width;
+        cfg.training.model.output_activation = ckpt_cfg.output_activation;
+        cfg.training.model.architecture    = ckpt_cfg.architecture;
+    } catch (const std::exception& e) {
+        std::cerr << "Eval: failed to read checkpoint metadata: " << e.what() << "\n";
+        return 1;
+    }
 
-    EvalResult result = run_evaluation(trainer.model_mut(), device, tables,
-                                        cfg.training.eval_games, cfg.seed);
-
-    std::cout << "Evaluation results (" << result.total_games << " games):\n"
-              << "  NN win rate:      " << result.nn_win_rate() << "\n"
-              << "  NN win rate as P0: " << result.nn_win_rate_as_p0() << "\n"
-              << "  NN win rate as P1: " << result.nn_win_rate_as_p1() << "\n"
-              << "  Avg duel margin (all): " << result.avg_duel_margin << "\n";
-    return 0;
+    if (cfg.training.model.game_variant == kGameVariant2v2) {
+        std::cout << "Eval variant: 2v2 (Yams2v2)\n";
+        return run_eval_variant<Yams2v2>(cfg, device, tables);
+    }
+    std::cout << "Eval variant: 1v1 (Yams1v1)\n";
+    return run_eval_variant<Yams1v1>(cfg, device, tables);
 }
 
 // ---------------------------------------------------------------------------

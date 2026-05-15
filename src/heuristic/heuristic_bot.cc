@@ -708,103 +708,129 @@ const ResearchConfig& get_research_config_for(HeuristicVersion v) {
 }
 
 // ---------------------------------------------------------------------------
-// Play-turn functions — currently 1v1-only.
-// These depend on solver_get_requests / solver_resolve_greedy, which take the
-// non-templated GameState/GameContext. Will be templated alongside the
-// solver in a later migration task.
+// Play-turn functions — templated on the game variant.
 // ---------------------------------------------------------------------------
 
-void heuristic_play_turn_research(GameState& state, GameContext& ctx,
+template <typename Traits>
+void heuristic_play_turn_research(GameStateT<Traits>& state,
+                                  GameContextT<Traits>& ctx,
                                   const PrecomputedTables& tables,
                                   SolverBuffers& buffers, RNG& rng,
                                   const ResearchConfig& cfg) {
     buffers.dp_computed = false;
-    solver_get_requests(state, ctx, tables, buffers);
+    solver_get_requests<Traits>(state, ctx, tables, buffers);
     assert(buffers.request_count > 0);
-    heuristic_evaluate_research<Yams1v1>(state.board, ctx,
-                                         buffers.requests, buffers.request_count,
-                                         buffers.evs, tables, cfg);
+    heuristic_evaluate_research<Traits>(state.board, ctx,
+                                        buffers.requests, buffers.request_count,
+                                        buffers.evs, tables, cfg);
     while (true) {
-        SolverResult result = solver_resolve_greedy(state, ctx, tables, buffers);
+        SolverResult result = solver_resolve_greedy<Traits>(state, ctx, tables, buffers);
         if (result.should_place) {
-            perform_placement<Yams1v1>(state, ctx, result.placement.column,
-                                       result.placement.row, rng);
+            perform_placement<Traits>(state, ctx, result.placement.column,
+                                      result.placement.row, rng);
             return;
         }
-        if (!can_reroll<Yams1v1>(state, ctx)) {
+        if (!can_reroll<Traits>(state, ctx)) {
             int current_id = get_dice_state_id(state.dice, tables);
             int16_t req_idx = buffers.stop_request_idx[current_id];
             if (req_idx < 0) req_idx = 0;
-            perform_placement<Yams1v1>(state, ctx, buffers.requests[req_idx].placement.column,
-                                       buffers.requests[req_idx].placement.row, rng);
+            perform_placement<Traits>(state, ctx, buffers.requests[req_idx].placement.column,
+                                      buffers.requests[req_idx].placement.row, rng);
             return;
         }
-        perform_reroll<Yams1v1>(state, result.hold_mask, rng);
+        perform_reroll<Traits>(state, result.hold_mask, rng);
     }
 }
 
-void heuristic_play_turn(GameState& state, GameContext& ctx,
+template <typename Traits>
+void heuristic_play_turn(GameStateT<Traits>& state,
+                         GameContextT<Traits>& ctx,
                          const PrecomputedTables& tables,
                          SolverBuffers& buffers, RNG& rng,
                          HeuristicVersion version) {
     buffers.dp_computed = false;
 
-    solver_get_requests(state, ctx, tables, buffers);
+    solver_get_requests<Traits>(state, ctx, tables, buffers);
     assert(buffers.request_count > 0);
 
     if (static_cast<int>(version) >= static_cast<int>(HeuristicVersion::V4)) {
         const ResearchConfig& cfg = get_research_config_for(version);
-        heuristic_evaluate_research<Yams1v1>(state.board, ctx,
-                                             buffers.requests, buffers.request_count,
-                                             buffers.evs, tables, cfg);
+        heuristic_evaluate_research<Traits>(state.board, ctx,
+                                            buffers.requests, buffers.request_count,
+                                            buffers.evs, tables, cfg);
     } else if (version == HeuristicVersion::V3) {
-        heuristic_evaluate_v3<Yams1v1>(state.board, ctx,
-                                       buffers.requests, buffers.request_count,
-                                       buffers.evs, tables);
+        heuristic_evaluate_v3<Traits>(state.board, ctx,
+                                      buffers.requests, buffers.request_count,
+                                      buffers.evs, tables);
     } else if (version == HeuristicVersion::V2) {
-        heuristic_evaluate_v2<Yams1v1>(state.board, ctx,
-                                       buffers.requests, buffers.request_count,
-                                       buffers.evs, tables);
+        heuristic_evaluate_v2<Traits>(state.board, ctx,
+                                      buffers.requests, buffers.request_count,
+                                      buffers.evs, tables);
     } else {
-        heuristic_evaluate<Yams1v1>(state.board, ctx,
-                                    buffers.requests, buffers.request_count, buffers.evs);
+        heuristic_evaluate<Traits>(state.board, ctx,
+                                   buffers.requests, buffers.request_count, buffers.evs);
     }
 
     while (true) {
-        SolverResult result = solver_resolve_greedy(state, ctx, tables, buffers);
+        SolverResult result = solver_resolve_greedy<Traits>(state, ctx, tables, buffers);
 
         if (result.should_place) {
-            perform_placement<Yams1v1>(state, ctx, result.placement.column,
-                                       result.placement.row, rng);
+            perform_placement<Traits>(state, ctx, result.placement.column,
+                                      result.placement.row, rng);
             return;
         }
 
-        if (!can_reroll<Yams1v1>(state, ctx)) {
+        if (!can_reroll<Traits>(state, ctx)) {
             int current_id = get_dice_state_id(state.dice, tables);
             int16_t req_idx = buffers.stop_request_idx[current_id];
             if (req_idx < 0) req_idx = 0;
-            perform_placement<Yams1v1>(state, ctx, buffers.requests[req_idx].placement.column,
-                                       buffers.requests[req_idx].placement.row, rng);
+            perform_placement<Traits>(state, ctx, buffers.requests[req_idx].placement.column,
+                                      buffers.requests[req_idx].placement.row, rng);
             return;
         }
-        perform_reroll<Yams1v1>(state, result.hold_mask, rng);
+        perform_reroll<Traits>(state, result.hold_mask, rng);
     }
 }
 
+template <typename Traits>
 int play_heuristic_game(RNG& rng, const PrecomputedTables& tables,
                         HeuristicVersion version) {
-    GameState state;
-    GameContext ctx;
+    GameStateT<Traits> state;
+    GameContextT<Traits> ctx;
     SolverBuffers buffers;
 
-    init_game<Yams1v1>(state, ctx, rng);
+    init_game<Traits>(state, ctx, rng);
 
-    while (!is_terminal<Yams1v1>(state.board)) {
-        heuristic_play_turn(state, ctx, tables, buffers, rng, version);
+    while (!is_terminal<Traits>(state.board)) {
+        heuristic_play_turn<Traits>(state, ctx, tables, buffers, rng, version);
     }
 
-    return get_game_result<Yams1v1>(state, ctx);
+    return get_game_result<Traits>(state, ctx);
 }
+
+// Explicit instantiations of the templated play-turn family.
+template void heuristic_play_turn_research<Yams1v1>(GameStateT<Yams1v1>&,
+                                                    GameContextT<Yams1v1>&,
+                                                    const PrecomputedTables&,
+                                                    SolverBuffers&, RNG&,
+                                                    const ResearchConfig&);
+template void heuristic_play_turn_research<Yams2v2>(GameStateT<Yams2v2>&,
+                                                    GameContextT<Yams2v2>&,
+                                                    const PrecomputedTables&,
+                                                    SolverBuffers&, RNG&,
+                                                    const ResearchConfig&);
+template void heuristic_play_turn<Yams1v1>(GameStateT<Yams1v1>&,
+                                           GameContextT<Yams1v1>&,
+                                           const PrecomputedTables&,
+                                           SolverBuffers&, RNG&,
+                                           HeuristicVersion);
+template void heuristic_play_turn<Yams2v2>(GameStateT<Yams2v2>&,
+                                           GameContextT<Yams2v2>&,
+                                           const PrecomputedTables&,
+                                           SolverBuffers&, RNG&,
+                                           HeuristicVersion);
+template int play_heuristic_game<Yams1v1>(RNG&, const PrecomputedTables&, HeuristicVersion);
+template int play_heuristic_game<Yams2v2>(RNG&, const PrecomputedTables&, HeuristicVersion);
 
 HeuristicVersion random_heuristic_version(RNG& rng) {
     static constexpr HeuristicVersion kAll[] = {

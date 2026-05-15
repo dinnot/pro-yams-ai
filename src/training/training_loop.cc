@@ -419,8 +419,8 @@ void TrainingLoopT<Traits>::refresh_opponent_model() {
 }
 
 // ---------------------------------------------------------------------------
-// maybe_evaluate — 1v1 only for now; the evaluator hasn't been templated yet.
-// In 2v2 builds this is a no-op (the smoke run still produces loss metrics).
+// maybe_evaluate — uses the templated evaluator so both 1v1 and 2v2 produce
+// in-training eval metrics against the heuristic bot.
 // ---------------------------------------------------------------------------
 
 template <typename Traits>
@@ -428,19 +428,14 @@ void TrainingLoopT<Traits>::maybe_evaluate() {
     if (config_.eval_interval <= 0) return;
     if (training_step_ % config_.eval_interval != 0) return;
 
-    if constexpr (std::is_same_v<Traits, Yams1v1>) {
-        EvalResult eval = run_evaluation(
-            trainer_->model_mut(), trainer_->device(),
-            tables_, config_.eval_games,
-            static_cast<uint64_t>(training_step_));
+    EvalResult eval = run_evaluation<Traits>(
+        trainer_->model_mut(), trainer_->device(),
+        tables_, config_.eval_games,
+        static_cast<uint64_t>(training_step_));
 
-        log_evaluation(config_.log_dir, training_step_, eval);
+    log_evaluation(config_.log_dir, training_step_, eval);
 
-        last_eval_win_rate_ = eval.nn_win_rate();
-    } else {
-        // 2v2 evaluator is not yet implemented (Task 8+ / Optional 7.X2).
-        (void)tables_;
-    }
+    last_eval_win_rate_ = eval.nn_win_rate();
 }
 
 // ---------------------------------------------------------------------------

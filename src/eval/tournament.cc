@@ -7,6 +7,7 @@
 
 #include "engine/duel.h"
 #include "engine/game_flow.h"
+#include "engine/game_traits.h"
 #include "engine/scoring.h"
 #include "engine/tensor.h"
 #include "eval/evaluator.h"
@@ -84,33 +85,37 @@ bool parse_agent_type(const std::string& s, AgentType& out) {
 }
 
 // ---------------------------------------------------------------------------
-// TournamentManager
+// TournamentManagerT<Traits>
 // ---------------------------------------------------------------------------
 
-TournamentManager::TournamentManager(const PrecomputedTables& tables,
-                                     torch::Device device)
+template <typename Traits>
+TournamentManagerT<Traits>::TournamentManagerT(const PrecomputedTables& tables,
+                                                torch::Device device)
     : tables_(tables), device_(device) {}
 
-TournamentManager::~TournamentManager() {
+template <typename Traits>
+TournamentManagerT<Traits>::~TournamentManagerT() {
     stop();
     if (thread_.joinable()) thread_.join();
 }
 
-bool TournamentManager::is_running() const {
+template <typename Traits>
+bool TournamentManagerT<Traits>::is_running() const {
     std::lock_guard<std::mutex> g(mutex_);
     return state_.is_running;
 }
 
-void TournamentManager::stop() {
+template <typename Traits>
+void TournamentManagerT<Traits>::stop() {
     stop_flag_.store(true);
     if (thread_.joinable()) thread_.join();
     stop_flag_.store(false);
 }
 
-TournamentState TournamentManager::get_status() const {
+template <typename Traits>
+TournamentState TournamentManagerT<Traits>::get_status() const {
     std::lock_guard<std::mutex> g(mutex_);
     TournamentState copy = state_;
-    // Materialize avg_margin_a from the running sums for the snapshot.
     for (auto& [a_id, row] : copy.grid) {
         for (auto& [b_id, m] : row) {
             m.avg_margin_a = (m.games > 0)
@@ -120,9 +125,11 @@ TournamentState TournamentManager::get_status() const {
     return copy;
 }
 
-bool TournamentManager::start_tournament(std::vector<TournamentParticipant> participants,
-                                         int games_per_matchup,
-                                         std::string& out_error) {
+template <typename Traits>
+bool TournamentManagerT<Traits>::start_tournament(
+        std::vector<TournamentParticipant> participants,
+        int games_per_matchup,
+        std::string& out_error) {
     {
         std::lock_guard<std::mutex> g(mutex_);
         if (state_.is_running) {
@@ -143,7 +150,6 @@ bool TournamentManager::start_tournament(std::vector<TournamentParticipant> part
         return false;
     }
 
-    // Reject duplicate IDs.
     {
         std::unordered_map<std::string, int> seen;
         for (const auto& p : participants) {
@@ -158,7 +164,9 @@ bool TournamentManager::start_tournament(std::vector<TournamentParticipant> part
         }
     }
 
-    // Load NN models (deduplicated by checkpoint path).
+    // Load NN models (deduplicated by checkpoint path). NN checkpoints must
+    // match this tournament's tensor format: 1v1 checkpoints (input_size=986)
+    // for Yams1v1 tournaments, 2v2 checkpoints (input_size=2126) for Yams2v2.
     std::unordered_map<std::string, std::shared_ptr<ProYamsNet>> model_cache;
     for (auto& p : participants) {
         if (p.type != AgentType::kNN) continue;
@@ -173,11 +181,12 @@ bool TournamentManager::start_tournament(std::vector<TournamentParticipant> part
         }
         try {
             ModelConfig cfg = ModelTrainer::config_from_checkpoint(p.path);
-            if (cfg.input_size != kTensorSize) {
+            if (cfg.input_size != Traits::kTensorSize) {
                 out_error = "checkpoint '" + p.path + "' has input_size=" +
                             std::to_string(cfg.input_size) +
-                            " but the current tensor format is " +
-                            std::to_string(kTensorSize) + " — incompatible.";
+                            " but this tournament expects input_size=" +
+                            std::to_string(Traits::kTensorSize) +
+                            " — incompatible variant.";
                 return false;
             }
             ModelTrainer trainer(cfg, device_);
@@ -205,7 +214,6 @@ bool TournamentManager::start_tournament(std::vector<TournamentParticipant> part
         state_.games_per_matchup = games_per_matchup;
         state_.participants = participants;
         state_.started_at = std::chrono::steady_clock::now();
-        // Pre-create the grid cells so the UI can render immediately.
         for (const auto& a : participants) {
             for (const auto& b : participants) {
                 if (a.id == b.id) continue;
@@ -214,13 +222,15 @@ bool TournamentManager::start_tournament(std::vector<TournamentParticipant> part
         }
     }
 
-    thread_ = std::thread(&TournamentManager::run_tournament, this,
+    thread_ = std::thread(&TournamentManagerT::run_tournament, this,
                           std::move(participants), games_per_matchup);
     return true;
 }
 
-void TournamentManager::run_tournament(std::vector<TournamentParticipant> participants,
-                                       int games_per_matchup) {
+template <typename Traits>
+void TournamentManagerT<Traits>::run_tournament(
+        std::vector<TournamentParticipant> participants,
+        int games_per_matchup) {
     const int n = static_cast<int>(participants.size());
 
     auto record_error = [&](const std::string& msg) {
@@ -233,8 +243,9 @@ void TournamentManager::run_tournament(std::vector<TournamentParticipant> partic
             for (int g = 0; g < games_per_matchup; ++g) {
                 if (stop_flag_.load()) goto done;
 
-                // Alternate who plays as P0.
-                const int a_player = g % 2;  // 0 → A is P0, 1 → A is P1
+                // a_player alternates: in 1v1, who's P0; in 2v2, which team
+                // A anchors (0 = Team 0 = seats {0,2}; 1 = Team 1 = seats {1,3}).
+                const int a_player = g % 2;
                 const uint64_t seed = static_cast<uint64_t>(i) * 1'000'003ull +
                                       static_cast<uint64_t>(j) * 31ull +
                                       static_cast<uint64_t>(g);
@@ -255,7 +266,6 @@ void TournamentManager::run_tournament(std::vector<TournamentParticipant> partic
                     goto done;
                 }
 
-                // Update the grid, mirrored from each side's perspective.
                 {
                     std::lock_guard<std::mutex> guard(mutex_);
                     auto& AB = state_.grid[participants[i].id][participants[j].id];
@@ -286,24 +296,26 @@ done:
     state_.is_running = false;
 }
 
-void TournamentManager::play_turn(const TournamentParticipant& p,
-                                  GameState& state, GameContext& ctx,
-                                  SolverBuffers& buffers,
-                                  std::vector<float>& tensor_buffer,
-                                  RNG& rng) const {
+template <typename Traits>
+void TournamentManagerT<Traits>::play_turn(
+        const TournamentParticipant& p,
+        GameStateT<Traits>& state, GameContextT<Traits>& ctx,
+        SolverBuffers& buffers,
+        std::vector<float>& tensor_buffer,
+        RNG& rng) const {
     SolverConfig greedy_cfg;
     switch (p.type) {
         case AgentType::kHeuristicV1:
-            heuristic_play_turn(state, ctx, tables_, buffers, rng,
-                                HeuristicVersion::V1);
+            heuristic_play_turn<Traits>(state, ctx, tables_, buffers, rng,
+                                        HeuristicVersion::V1);
             return;
         case AgentType::kHeuristicV2:
-            heuristic_play_turn(state, ctx, tables_, buffers, rng,
-                                HeuristicVersion::V2);
+            heuristic_play_turn<Traits>(state, ctx, tables_, buffers, rng,
+                                        HeuristicVersion::V2);
             return;
         case AgentType::kHeuristicV3:
-            heuristic_play_turn(state, ctx, tables_, buffers, rng,
-                                HeuristicVersion::V3);
+            heuristic_play_turn<Traits>(state, ctx, tables_, buffers, rng,
+                                        HeuristicVersion::V3);
             return;
         case AgentType::kHeuristicV4:
         case AgentType::kHeuristicV5:
@@ -323,39 +335,53 @@ void TournamentManager::play_turn(const TournamentParticipant& p,
                               static_cast<int>(AgentType::kHeuristicV4);
             const HeuristicVersion v = static_cast<HeuristicVersion>(
                 static_cast<int>(HeuristicVersion::V4) + delta);
-            heuristic_play_turn(state, ctx, tables_, buffers, rng, v);
+            heuristic_play_turn<Traits>(state, ctx, tables_, buffers, rng, v);
             return;
         }
         case AgentType::kNN:
-            nn_play_turn(*p.model, device_, state, ctx, tables_,
-                         buffers, tensor_buffer, greedy_cfg, rng);
+            nn_play_turn<Traits>(*p.model, device_, state, ctx, tables_,
+                                 buffers, tensor_buffer, greedy_cfg, rng);
             return;
     }
 }
 
-int TournamentManager::play_one_game(const TournamentParticipant& a,
-                                     const TournamentParticipant& b,
-                                     int a_player,
-                                     uint64_t seed,
-                                     int& out_duel_margin) const {
-    GameState state;
-    GameContext ctx;
+template <typename Traits>
+int TournamentManagerT<Traits>::play_one_game(
+        const TournamentParticipant& a,
+        const TournamentParticipant& b,
+        int a_player,
+        uint64_t seed,
+        int& out_duel_margin) const {
+    GameStateT<Traits> state;
+    GameContextT<Traits> ctx;
     SolverBuffers buffers{};
     std::vector<float> tensor_buffer(
-        static_cast<size_t>(kMaxAfterstateRequests) * kTensorSize);
+        static_cast<size_t>(kMaxAfterstateRequests) * Traits::kTensorSize);
 
     RNG rng(seed);
-    init_game(state, ctx, rng);
+    init_game<Traits>(state, ctx, rng);
 
-    while (!is_terminal(state.board)) {
+    while (!is_terminal<Traits>(state.board)) {
         const int player = state.board.current_player;
-        const TournamentParticipant& mover = (player == a_player) ? a : b;
+        // 1v1: A plays the seat == a_player; B plays the other seat.
+        // 2v2: A anchors team `a_player`; A drives both seats on that team via
+        // Traits::are_teammates; B drives the other team.
+        const bool is_a_seat = Traits::are_teammates(player, a_player);
+        const TournamentParticipant& mover = is_a_seat ? a : b;
         play_turn(mover, state, ctx, buffers, tensor_buffer, rng);
     }
 
-    int duel = compute_duel(state.board, ctx);
-    // Convert to A's perspective.
-    if (a_player == 1) duel = -duel;
+    int duel = compute_duel<Traits>(state.board, ctx);
+    // compute_duel returns Team-0 margin. Convert to A's perspective: if A
+    // anchors Team 0 (a_player == 0 in both variants thanks to are_teammates),
+    // no flip; otherwise flip.
+    if (!Traits::are_teammates(a_player, 0)) duel = -duel;
     out_duel_margin = duel;
     return duel;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// ---------------------------------------------------------------------------
+template class TournamentManagerT<Yams1v1>;
+template class TournamentManagerT<Yams2v2>;

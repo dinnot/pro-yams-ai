@@ -209,7 +209,13 @@
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive timeout 60 ./tests/training/training_tests --gtest_filter=TrainingLoop2v2Test.*)",
       "Bash(./pro_yams_ai --mode config --config /tmp/test_2v2.yaml)",
       "Bash(./pro_yams_ai --mode config --config /tmp/test_2v2_bad.yaml)",
-      "Bash(./pro_yams_ai --mode config --game_variant 2v2)"
+      "Bash(./pro_yams_ai --mode config --game_variant 2v2)",
+      "Bash(sed -i 's/play_heuristic_game\\(rng, tables\\)/play_heuristic_game<Yams1v1>\\(rng, tables\\)/g; s/play_heuristic_game\\(rng, tables, HeuristicVersion::V3\\)/play_heuristic_game<Yams1v1>\\(rng, tables, HeuristicVersion::V3\\)/g' /home/sorin/pro_yams_ai/tests/heuristic/heuristic_bot_test.cc)",
+      "Bash(sed -i 's/play_heuristic_game\\(rng, g_tables\\)/play_heuristic_game<Yams1v1>\\(rng, g_tables\\)/g' /home/sorin/pro_yams_ai/tests/benchmarks/solver_bench.cc)",
+      "Bash(cmake --build . --target eval -j 8)",
+      "Bash(pstree -p 2442163)",
+      "Bash(timeout 120 ./pro_yams_ai --mode eval --checkpoint /home/sorin/pro_yams_ai/checkpoints/test_td0_100k_new7/checkpoint_step_5000 --eval_games 5)",
+      "Bash(timeout 60 ./pro_yams_ai --mode eval --checkpoint /home/sorin/pro_yams_ai/checkpoints/test_timing/checkpoint_step_1000 --eval_games 5)"
     ]
   }
 }

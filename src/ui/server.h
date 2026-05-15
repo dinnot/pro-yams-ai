@@ -40,7 +40,7 @@ public:
               Sessions& sessions,
               const std::string& log_dir,
               const std::string& checkpoints_dir,
-              TournamentManager* tournament)
+              TournamentManagerT<Traits>* tournament)
         : sessions_(sessions),
           log_dir_(log_dir),
           static_dir_(static_dir),
@@ -499,7 +499,7 @@ private:
     std::string     log_dir_;
     std::string     static_dir_;
     std::string     checkpoints_dir_;
-    TournamentManager* tournament_;
+    TournamentManagerT<Traits>* tournament_;
     int             port_;
 };
 

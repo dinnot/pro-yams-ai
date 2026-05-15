@@ -23,28 +23,17 @@ int run_server_variant(int port, const std::string& static_dir,
                        const PrecomputedTables& tables,
                        ProYamsNet* model, torch::Device device) {
     SessionManagerT<Traits> sessions(tables, model, device);
+    TournamentManagerT<Traits> tournament(tables, device);
+    UIServerT<Traits> server(port, static_dir, sessions, log_dir,
+                              checkpoints_dir, &tournament);
 
-    // Tournament manager is 1v1-only for now (eval/tournament not templated).
-    // In 2v2 mode we pass a null tournament manager — the UI server tolerates it.
-    if constexpr (std::is_same_v<Traits, Yams1v1>) {
-        TournamentManager tournament(tables, device);
-        UIServerT<Traits> server(port, static_dir, sessions, log_dir,
-                                  checkpoints_dir, &tournament);
-        std::cout << "Pro Yams UI running at http://localhost:" << port << "\n";
-        std::cout << "Frontend:        " << static_dir      << "\n";
-        std::cout << "Log dir:         " << log_dir         << "\n";
-        std::cout << "Checkpoints dir: " << checkpoints_dir << "\n";
-        std::cout << "Press Ctrl+C to stop.\n";
-        server.start();
-    } else {
-        UIServerT<Traits> server(port, static_dir, sessions, log_dir,
-                                  checkpoints_dir, /*tournament=*/nullptr);
-        std::cout << "Pro Yams UI (2v2) running at http://localhost:" << port << "\n";
-        std::cout << "Frontend:        " << static_dir      << "\n";
-        std::cout << "Tournament endpoints disabled in 2v2 mode.\n";
-        std::cout << "Press Ctrl+C to stop.\n";
-        server.start();
-    }
+    const char* tag = (Traits::kNumPlayers == 4) ? "(2v2)" : "";
+    std::cout << "Pro Yams UI " << tag << " running at http://localhost:" << port << "\n";
+    std::cout << "Frontend:        " << static_dir      << "\n";
+    std::cout << "Log dir:         " << log_dir         << "\n";
+    std::cout << "Checkpoints dir: " << checkpoints_dir << "\n";
+    std::cout << "Press Ctrl+C to stop.\n";
+    server.start();
     return 0;
 }
 
