@@ -67,27 +67,40 @@ void generate_tensor_batch(const BoardState& board, const GameContext& ctx,
                             float* out);
 
 // ---------------------------------------------------------------------------
-// Helper functions (also used by tensor generation internally)
+// Helper functions (also used by tensor generation internally).
+//
+// These are variant-agnostic in their internal logic — they take a player
+// index and read board.cells[player] / ctx.upper_sum[player]. Templated on
+// Traits only so the engine/heuristic can call them with either 1v1 or 2v2
+// data structures.
 // ---------------------------------------------------------------------------
 
 /// Compute raw column score: sum of positive filled cells + upper section bonus.
 /// Does NOT include clean column bonus (that depends on duel context).
-int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
-                              int player, int column);
+template <typename Traits>
+int compute_column_raw_score(const BoardStateT<Traits>& board,
+                             const GameContextT<Traits>& ctx,
+                             int player, int column);
 
 /// Compute potential column score: raw score + max possible for empty cells
 /// + potential upper bonus (if all empty upper cells were maxed).
-int compute_column_potential_score(const BoardState& board, const GameContext& ctx,
-                                    int player, int column);
+template <typename Traits>
+int compute_column_potential_score(const BoardStateT<Traits>& board,
+                                   const GameContextT<Traits>& ctx,
+                                   int player, int column);
 
 /// Sum potential max scores across all columns for a player.
-int compute_total_potential(const BoardState& board, int player);
+template <typename Traits>
+int compute_total_potential(const BoardStateT<Traits>& board, int player);
 
 /// Count empty cells in a column for a player.
-int count_empty_cells(const BoardState& board, int player, int column);
+template <typename Traits>
+int count_empty_cells(const BoardStateT<Traits>& board, int player, int column);
 
 /// Count total filled cells for a player (all columns).
-int count_filled_cells(const BoardState& board, int player);
+template <typename Traits>
+int count_filled_cells(const BoardStateT<Traits>& board, int player);
 
 /// Sum all positive filled cell values for a player (all columns).
-int sum_all_filled(const BoardState& board, int player);
+template <typename Traits>
+int sum_all_filled(const BoardStateT<Traits>& board, int player);

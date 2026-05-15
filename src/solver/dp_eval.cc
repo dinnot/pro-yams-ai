@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "engine/constants.h"
+#include "engine/game_traits.h"
 
 namespace {
 
@@ -39,7 +40,9 @@ Variant get_variant(int col) {
     return Variant::FREE;
 }
 
-void build_Sc(int p, int col, const BoardState& board, const GameContext& ctx,
+template <typename Traits>
+void build_Sc(int p, int col, const BoardStateT<Traits>& board,
+              const GameContextT<Traits>& ctx,
               int8_t Sc_U[6], int8_t Sc_M[2], int8_t Sc_L[5],
               int& EU, int& EM, int& EL) {
     EU = 0; EM = 0; EL = 0;
@@ -95,13 +98,14 @@ void apportion_turns(int T, int EU, int EM, int EL,
     if (TL < 0) TL = 0;
 }
 
-float get_E_raw(int p, int col, int T, const BoardState& board,
-                const GameContext& ctx, const DPTables& dp) {
+template <typename Traits>
+float get_E_raw(int p, int col, int T, const BoardStateT<Traits>& board,
+                const GameContextT<Traits>& ctx, const DPTables& dp) {
     if (dp.dp_t1.empty()) return 0.0f;
 
     int8_t Sc_U[6], Sc_M[2], Sc_L[5];
     int EU, EM, EL;
-    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+    build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     int TU, TM, TL;
     apportion_turns(T, EU, EM, EL, TU, TM, TL);
 
@@ -118,14 +122,15 @@ float get_E_raw(int p, int col, int T, const BoardState& board,
     return eu + em + el + static_cast<float>(filled_score);
 }
 
-float get_P_clean(int p, int col, int T, const BoardState& board,
-                  const GameContext& ctx, const DPTables& dp) {
+template <typename Traits>
+float get_P_clean(int p, int col, int T, const BoardStateT<Traits>& board,
+                  const GameContextT<Traits>& ctx, const DPTables& dp) {
     if (dp.dp_t1.empty()) return 0.0f;
     if (ctx.lower_has_scratch[p][col]) return 0.0f;
 
     int8_t Sc_U[6], Sc_M[2], Sc_L[5];
     int EU, EM, EL;
-    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+    build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     int TU, TM, TL;
     apportion_turns(T, EU, EM, EL, TU, TM, TL);
 
@@ -143,13 +148,14 @@ float get_P_clean(int p, int col, int T, const BoardState& board,
     return pc;
 }
 
-float get_E_raw_var(int p, int col, int T, const BoardState& board,
-                    const GameContext& ctx, const DPTables& dp) {
+template <typename Traits>
+float get_E_raw_var(int p, int col, int T, const BoardStateT<Traits>& board,
+                    const GameContextT<Traits>& ctx, const DPTables& dp) {
     if (dp.dp_t1.empty()) return 0.0f;
 
     int8_t Sc_U[6], Sc_M[2], Sc_L[5];
     int EU, EM, EL;
-    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+    build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
 
     int TU, TM, TL;
     apportion_turns(T, EU, EM, EL, TU, TM, TL);
@@ -169,3 +175,28 @@ float get_E_raw_var(int p, int col, int T, const BoardState& board,
 
     return var_u + var_m + var_l;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template void build_Sc<Yams1v1>(int, int, const BoardStateT<Yams1v1>&,
+                                const GameContextT<Yams1v1>&,
+                                int8_t[6], int8_t[2], int8_t[5],
+                                int&, int&, int&);
+template void build_Sc<Yams2v2>(int, int, const BoardStateT<Yams2v2>&,
+                                const GameContextT<Yams2v2>&,
+                                int8_t[6], int8_t[2], int8_t[5],
+                                int&, int&, int&);
+template float get_E_raw<Yams1v1>(int, int, int, const BoardStateT<Yams1v1>&,
+                                  const GameContextT<Yams1v1>&, const DPTables&);
+template float get_E_raw<Yams2v2>(int, int, int, const BoardStateT<Yams2v2>&,
+                                  const GameContextT<Yams2v2>&, const DPTables&);
+template float get_P_clean<Yams1v1>(int, int, int, const BoardStateT<Yams1v1>&,
+                                    const GameContextT<Yams1v1>&, const DPTables&);
+template float get_P_clean<Yams2v2>(int, int, int, const BoardStateT<Yams2v2>&,
+                                    const GameContextT<Yams2v2>&, const DPTables&);
+template float get_E_raw_var<Yams1v1>(int, int, int, const BoardStateT<Yams1v1>&,
+                                      const GameContextT<Yams1v1>&, const DPTables&);
+template float get_E_raw_var<Yams2v2>(int, int, int, const BoardStateT<Yams2v2>&,
+                                      const GameContextT<Yams2v2>&, const DPTables&);

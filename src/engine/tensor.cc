@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "engine/duel.h"  // upper_section_bonus, crush_multiplier
+#include "engine/game_traits.h"
 #include "engine/placement.h"
 #include "solver/dp_eval.h"
 #include "solver/dp_tables.h"
@@ -14,14 +15,16 @@
 // Existing helpers
 // ---------------------------------------------------------------------------
 
-int count_empty_cells(const BoardState& board, int player, int column) {
+template <typename Traits>
+int count_empty_cells(const BoardStateT<Traits>& board, int player, int column) {
     int n = 0;
     for (int row = 0; row < kNumRows; ++row)
         if (board.cells[player][column][row] == kCellEmpty) ++n;
     return n;
 }
 
-int count_filled_cells(const BoardState& board, int player) {
+template <typename Traits>
+int count_filled_cells(const BoardStateT<Traits>& board, int player) {
     int n = 0;
     for (int col = 0; col < kNumColumns; ++col)
         for (int row = 0; row < kNumRows; ++row)
@@ -29,7 +32,8 @@ int count_filled_cells(const BoardState& board, int player) {
     return n;
 }
 
-int sum_all_filled(const BoardState& board, int player) {
+template <typename Traits>
+int sum_all_filled(const BoardStateT<Traits>& board, int player) {
     int s = 0;
     for (int col = 0; col < kNumColumns; ++col) {
         for (int row = 0; row < kNumRows; ++row) {
@@ -40,8 +44,10 @@ int sum_all_filled(const BoardState& board, int player) {
     return s;
 }
 
-int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
-                              int player, int column) {
+template <typename Traits>
+int compute_column_raw_score(const BoardStateT<Traits>& board,
+                             const GameContextT<Traits>& ctx,
+                             int player, int column) {
     int cell_sum = 0;
     for (int row = 0; row < kNumRows; ++row) {
         int8_t v = board.cells[player][column][row];
@@ -50,8 +56,10 @@ int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
     return cell_sum + upper_section_bonus(ctx.upper_sum[player][column]);
 }
 
-int compute_column_potential_score(const BoardState& board, const GameContext& ctx,
-                                    int player, int column) {
+template <typename Traits>
+int compute_column_potential_score(const BoardStateT<Traits>& board,
+                                   const GameContextT<Traits>& ctx,
+                                   int player, int column) {
     int cell_sum = 0;
     int upper_potential = ctx.upper_sum[player][column];
     for (int row = 0; row < kNumRows; ++row) {
@@ -67,7 +75,8 @@ int compute_column_potential_score(const BoardState& board, const GameContext& c
     return cell_sum + upper_section_bonus(upper_potential);
 }
 
-int compute_total_potential(const BoardState& board, int player) {
+template <typename Traits>
+int compute_total_potential(const BoardStateT<Traits>& board, int player) {
     int total = 0;
     for (int col = 0; col < kNumColumns; ++col) {
         int cell_sum = 0;
@@ -87,6 +96,33 @@ int compute_total_potential(const BoardState& board, int player) {
     }
     return total;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations of the helpers above (used by engine + heuristic).
+// generate_tensor / generate_tensor_batch stay 1v1-only for now; Task 5
+// rewrites them with rotational invariance.
+// ---------------------------------------------------------------------------
+
+template int count_empty_cells<Yams1v1>(const BoardStateT<Yams1v1>&, int, int);
+template int count_empty_cells<Yams2v2>(const BoardStateT<Yams2v2>&, int, int);
+template int count_filled_cells<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int count_filled_cells<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+template int sum_all_filled<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int sum_all_filled<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+template int compute_column_raw_score<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                               const GameContextT<Yams1v1>&,
+                                               int, int);
+template int compute_column_raw_score<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                               const GameContextT<Yams2v2>&,
+                                               int, int);
+template int compute_column_potential_score<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                                     const GameContextT<Yams1v1>&,
+                                                     int, int);
+template int compute_column_potential_score<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                                     const GameContextT<Yams2v2>&,
+                                                     int, int);
+template int compute_total_potential<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int compute_total_potential<Yams2v2>(const BoardStateT<Yams2v2>&, int);
 
 // ---------------------------------------------------------------------------
 // V2.1 helpers — DP state encoders + horizon allocators live in

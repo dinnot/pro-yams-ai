@@ -188,7 +188,11 @@
       "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench --benchmark_min_time=1s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='GoldenRuleTeammate2v2.*')",
       "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='Duel.*')",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='Duel*')"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='Duel*')",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target solver)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target heuristic)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target heuristic_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/heuristic/heuristic_tests --gtest_filter='Heuristic2v2*')"
     ]
   }
 }

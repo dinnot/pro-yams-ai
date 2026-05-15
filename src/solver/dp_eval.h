@@ -22,7 +22,9 @@ Variant get_variant(int col);
 
 // Build the upper/middle/lower Sc[] arrays for a column from the live board
 // state. Sets EU, EM, EL to the count of empty cells in each section.
-void build_Sc(int p, int col, const BoardState& board, const GameContext& ctx,
+template <typename Traits>
+void build_Sc(int p, int col, const BoardStateT<Traits>& board,
+              const GameContextT<Traits>& ctx,
               int8_t Sc_U[6], int8_t Sc_M[2], int8_t Sc_L[5],
               int& EU, int& EM, int& EL);
 
@@ -35,15 +37,18 @@ void apportion_turns(int T, int EU, int EM, int EL,
 // Includes upper-bonus expectation (from get_upper_ev), expected
 // middle/lower points, and already-filled cell scores in the lower section
 // (rows 6-12).
-float get_E_raw(int p, int col, int T, const BoardState& board,
-                const GameContext& ctx, const DPTables& dp);
+template <typename Traits>
+float get_E_raw(int p, int col, int T, const BoardStateT<Traits>& board,
+                const GameContextT<Traits>& ctx, const DPTables& dp);
 
 // Compute the expected "clean column" probability for player p in column
 // col over T turns: P(upper_sum reaches 60) * P(mid no-scratch) *
 // P(low no-scratch). Returns 0 if a lower scratch already exists.
-float get_P_clean(int p, int col, int T, const BoardState& board,
-                  const GameContext& ctx, const DPTables& dp);
+template <typename Traits>
+float get_P_clean(int p, int col, int T, const BoardStateT<Traits>& board,
+                  const GameContextT<Traits>& ctx, const DPTables& dp);
 
 // Compute the expected raw column variance Var(X) = E[X^2] - E[X]^2.
-float get_E_raw_var(int p, int col, int T, const BoardState& board,
-                    const GameContext& ctx, const DPTables& dp);
+template <typename Traits>
+float get_E_raw_var(int p, int col, int T, const BoardStateT<Traits>& board,
+                    const GameContextT<Traits>& ctx, const DPTables& dp);

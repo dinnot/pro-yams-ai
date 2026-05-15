@@ -1,5 +1,7 @@
 add_executable(heuristic_tests
     heuristic_bot_test.cc
+    # 2v2 migration Task 4:
+    heuristic_2v2_test.cc
 )
 target_link_libraries(heuristic_tests PRIVATE heuristic gtest_main)
 add_test(NAME heuristic_tests COMMAND heuristic_tests)
