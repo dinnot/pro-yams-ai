@@ -4,7 +4,13 @@
 #include <deque>
 #include <mutex>
 
-struct GameInstance;
+#include "engine/game_traits.h"
+
+// Forward declaration of the templated game instance + the 1v1 alias used by
+// this queue. (Pointers to incomplete types are fine; the queue itself never
+// dereferences GameInstance.)
+template <typename Traits> struct GameInstanceT;
+using GameInstance = GameInstanceT<Yams1v1>;
 
 // ---------------------------------------------------------------------------
 // GameQueue — thread-safe FIFO queue of GameInstance pointers.

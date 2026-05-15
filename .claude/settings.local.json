@@ -197,7 +197,9 @@
       "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='TensorBatchTest.*')",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target tensor_tests)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target self_play)",
-      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target self_play_tests)"
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target self_play_tests)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target model)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target trainer_tests)"
     ]
   }
 }

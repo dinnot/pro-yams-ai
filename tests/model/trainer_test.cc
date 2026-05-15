@@ -147,6 +147,45 @@ TEST(TrainerTest, CloneForInference_NoCrash) {
 // ---------------------------------------------------------------------------
 // Checkpoint round-trip: save + load restores model and metadata
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 2v2 migration Task 7.3: checkpoint refuses to load into a process running
+// the wrong game variant.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, Checkpoint_VariantMismatch_Throws) {
+    namespace fs = std::filesystem;
+
+    ModelConfig cfg_1v1;
+    cfg_1v1.game_variant = kGameVariant1v1;
+    cfg_1v1.hidden_layers = 2;
+    cfg_1v1.hidden_width  = 64;
+
+    const std::string tmpdir = "/tmp/pro_yams_ckpt_variant_test";
+    fs::create_directories(tmpdir);
+    const std::string ckpt_path = tmpdir + "/variant_ckpt";
+
+    // Save a 1v1 checkpoint.
+    ModelTrainer trainer_1v1(cfg_1v1, cpu_device());
+    trainer_1v1.save_checkpoint(ckpt_path, 0, 1.0, 0.0);
+
+    // Confirm metadata parses correctly.
+    auto loaded_cfg = ModelTrainer::config_from_checkpoint(ckpt_path);
+    EXPECT_EQ(loaded_cfg.game_variant, kGameVariant1v1);
+
+    // Construct a 2v2-configured trainer and try to load the 1v1 checkpoint.
+    ModelConfig cfg_2v2 = cfg_1v1;
+    cfg_2v2.game_variant = kGameVariant2v2;
+    ModelTrainer trainer_2v2(cfg_2v2, cpu_device());
+    int step; double temp, eps;
+    EXPECT_THROW(trainer_2v2.load_checkpoint(ckpt_path, step, temp, eps),
+                 std::runtime_error);
+
+    // Round-trip into a matching trainer still works.
+    ModelTrainer trainer_1v1_b(cfg_1v1, cpu_device());
+    EXPECT_NO_THROW(trainer_1v1_b.load_checkpoint(ckpt_path, step, temp, eps));
+
+    fs::remove_all(tmpdir);
+}
+
 TEST(TrainerTest, Checkpoint_RoundTrip) {
     namespace fs = std::filesystem;
 

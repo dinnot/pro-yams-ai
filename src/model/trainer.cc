@@ -134,6 +134,10 @@ void ModelTrainer::save_checkpoint(const std::string& path,
                          torch::tensor(static_cast<int64_t>(config_.hidden_width)));
     model_archive.write("input_size",
                          torch::tensor(static_cast<int64_t>(config_.input_size)));
+    // game_variant: 1 = Yams1v1, 2 = Yams2v2. Pinned so 1v1 weights cannot be
+    // silently loaded into a 2v2 process.
+    model_archive.write("game_variant",
+                         torch::tensor(static_cast<int64_t>(config_.game_variant)));
     {
         const auto& arch = config_.architecture;
         auto t = torch::from_blob(const_cast<char*>(arch.data()),
@@ -227,6 +231,18 @@ void ModelTrainer::load_checkpoint(const std::string& path,
     epsilon       = read_dbl("epsilon", 0.0);
     int ckpt_hidden_layers = static_cast<int>(read_int64("hidden_layers", config_.hidden_layers));
     int ckpt_hidden_width  = static_cast<int>(read_int64("hidden_width",  config_.hidden_width));
+    int ckpt_game_variant  = static_cast<int>(read_int64("game_variant",  kGameVariant1v1));
+
+    // Fail fast on game-variant mismatch — a 1v1 checkpoint silently loaded
+    // into a 2v2 process (or vice versa) would crash on the first forward pass
+    // with a cryptic shape error. Refuse the load instead.
+    if (ckpt_game_variant != config_.game_variant) {
+        throw std::runtime_error(
+            "Checkpoint game_variant (" + std::to_string(ckpt_game_variant) +
+            ") does not match runtime game_variant (" +
+            std::to_string(config_.game_variant) +
+            "). 1=Yams1v1, 2=Yams2v2.");
+    }
 
     if (ckpt_hidden_layers != config_.hidden_layers || ckpt_hidden_width != config_.hidden_width) {
         std::cerr << "Warning: checkpoint architecture (" << ckpt_hidden_layers
@@ -278,6 +294,8 @@ ModelConfig ModelTrainer::config_from_checkpoint(const std::string& path) {
     cfg.hidden_layers = static_cast<int>(read_int64("hidden_layers", 3));
     cfg.hidden_width  = static_cast<int>(read_int64("hidden_width",  256));
     cfg.input_size    = static_cast<int>(read_int64("input_size",    cfg.input_size));
+    // game_variant: older checkpoints predate the tag — default to 1v1.
+    cfg.game_variant  = static_cast<int>(read_int64("game_variant",  kGameVariant1v1));
 
     // Old checkpoints pre-date the resnet refactor — assume mlp.
     // New checkpoints save "architecture" explicitly.
