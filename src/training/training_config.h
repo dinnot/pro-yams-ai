@@ -15,7 +15,12 @@ struct TrainingConfig {
 
     // --- Training target ---
     TDMode td_mode   = TDMode::kMC;   // MC targets never go stale in replay buffer
-    double td_lambda = 0.0;           // Used only for kTDLambda
+    double td_lambda = 0.0;           // Used only for kTDLambda.
+    //
+    // 2v2 note: keep td_lambda unchanged from the 1v1 setup (e.g. 0.95). The
+    // per-sample TD(λ) variance coefficient is (1-λ)/(1+λ) — a function of λ
+    // alone, independent of trajectory length. The 2v2 tuned config lives at
+    // config/mlp-512/ (added in the migration's Task 9).
 
     // --- Duel margin maximization ---
     // When true, targets are tanh(margin/scale) in [-1, 1] instead of win/loss in [0, 1].

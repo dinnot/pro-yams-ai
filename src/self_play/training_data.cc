@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstring>
 
+#include "engine/game_traits.h"
+
+template <typename Traits>
 int extract_training_samples(const GameInstance& game,
                               TDMode td_mode, double td_lambda,
                               bool use_margin, double margin_scale,
@@ -18,12 +21,15 @@ int extract_training_samples(const GameInstance& game,
         ? std::tanh(static_cast<double>(game.final_duel_margin) / margin_scale)
         : game.result;
 
+    // Team-aware terminal target. In 1v1 are_teammates(p, 0) collapses to
+    // (p == 0), preserving the prior semantics. In 2v2 both Team-0 players
+    // (P0, P2) see terminal_p0 directly; Team-1 players (P1, P3) see its flip.
     auto terminal_for = [&](int8_t my_player) -> double {
+        const bool same_team_as_p0 = Traits::are_teammates(my_player, 0);
         if (use_margin) {
-            double m = (my_player == 0) ? terminal_p0 : -terminal_p0;
-            return m;
+            return same_team_as_p0 ? terminal_p0 : -terminal_p0;
         }
-        return (my_player == 0) ? terminal_p0 : 1.0 - terminal_p0;
+        return same_team_as_p0 ? terminal_p0 : 1.0 - terminal_p0;
     };
 
     auto flip = [&](double v) -> double {
@@ -47,7 +53,14 @@ int extract_training_samples(const GameInstance& game,
 
         case TDMode::kTD0:
             if (i + 1 < game.trajectory_length) {
-                target = flip(game.trajectory[i + 1].value);
+                // Team-aware bootstrap: if the next step's player is on the
+                // same team as me (including self), their value already
+                // encodes my-team win probability — do not flip. Only flip
+                // when the future state belongs to an opposing-team player.
+                const TrajectoryStep& next = game.trajectory[i + 1];
+                target = Traits::are_teammates(next.player, my_player)
+                    ? next.value
+                    : flip(next.value);
             } else {
                 target = terminal_for(my_player);
             }
@@ -61,9 +74,10 @@ int extract_training_samples(const GameInstance& game,
 
             for (int j = i + 1; j < game.trajectory_length; ++j) {
                 const TrajectoryStep& future = game.trajectory[j];
-                double bootstrap = (future.player != my_player)
-                    ? flip(future.value)
-                    : future.value;
+                // Team-aware bootstrap (see TD0 comment).
+                double bootstrap = Traits::are_teammates(future.player, my_player)
+                    ? future.value
+                    : flip(future.value);
 
                 if (future.is_exploratory) {
                     // Watkin's cut: halt trace, give remaining weight to unbiased EV
@@ -106,3 +120,16 @@ int extract_training_samples(const GameInstance& game,
 
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// Yams2v2 also instantiated so the template is exercised at build time;
+// becomes load-bearing once GameInstance is templated in Task 7.
+// ---------------------------------------------------------------------------
+
+template int extract_training_samples<Yams1v1>(const GameInstance&,
+                                               TDMode, double, bool, double, bool,
+                                               TrainingSample*, int, int);
+template int extract_training_samples<Yams2v2>(const GameInstance&,
+                                               TDMode, double, bool, double, bool,
+                                               TrainingSample*, int, int);
