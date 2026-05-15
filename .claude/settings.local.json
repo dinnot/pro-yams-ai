@@ -170,7 +170,20 @@
       "Bash(curl -s -o /dev/null -w \"style.css: %{http_code}\\\\n\" http://localhost:8090/css/style.css)",
       "Bash(xargs -I{} echo \"footer in index: {}\")",
       "Bash(node -e \"global.document = { addEventListener: \\(\\) => {} }; $\\(cat /home/sorin/pro_yams_ai/src/ui/play_static/js/play.js\\); console.log\\('parsed; helpers:', typeof computeDuel, typeof renderBreakdownTable, typeof fmtSigned\\)\")",
-      "Bash(pip3 install *)"
+      "Bash(pip3 install *)",
+      "Bash(find build* -maxdepth 3 -name \"engine_bench\" -executable)",
+      "Bash(find build* -maxdepth 3 -name \"*_test*\" -executable)",
+      "Bash(build/tests/benchmarks/engine_bench --benchmark_min_time=0.5s)",
+      "Bash(cmake --build . --target engine)",
+      "Bash(cmake --build . --target engine_tests)",
+      "Bash(cmake --build build --target engine_tests)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target engine_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build -j 24)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/engine_tests --gtest_filter='GameTraits*')",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target engine_bench)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench --benchmark_min_time=0.5s)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/engine_bench --benchmark_min_time=2s --benchmark_filter=BoardStateCopy --benchmark_repetitions=5)"
     ]
   }
 }
