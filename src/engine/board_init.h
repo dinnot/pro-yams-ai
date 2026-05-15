@@ -3,7 +3,7 @@
 #include "engine/board_state.h"
 #include "engine/game_context.h"
 
-// Forward declare RNG (defined in rng.h, implemented in Task 03)
+// Forward declare RNG (defined in rng.h)
 class RNG;
 
 // ---------------------------------------------------------------------------
@@ -12,14 +12,10 @@ class RNG;
 
 /// Initialize a fresh board: all cells empty, coefficients randomly shuffled,
 /// starting player randomly chosen.
-///
-/// @param board  Output: the initialized board
-/// @param rng    Random engine for coefficient shuffling and starting player
-void init_board(BoardState& board, RNG& rng);
+template <typename Traits>
+void init_board(BoardStateT<Traits>& board, RNG& rng);
 
 /// Initialize the GameContext to match a freshly initialized (empty) BoardState.
-/// Sets up initial legal placements for both players, zeroes all caches.
-///
-/// @param ctx   Output: initialized context
-/// @param board A freshly initialized board (all cells empty)
-void init_context(GameContext& ctx, const BoardState& board);
+/// Sets up initial legal placements for all players, zeroes all caches.
+template <typename Traits>
+void init_context(GameContextT<Traits>& ctx, const BoardStateT<Traits>& board);

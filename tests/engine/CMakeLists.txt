@@ -13,6 +13,8 @@ add_executable(engine_tests
     full_game_test.cc
     # 2v2 migration Task 1:
     game_traits_test.cc
+    # 2v2 migration Task 2:
+    golden_rule_teammate_test.cc
 )
 target_link_libraries(engine_tests PRIVATE engine gtest_main)
 add_test(NAME engine_tests COMMAND engine_tests)

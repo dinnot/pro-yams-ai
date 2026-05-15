@@ -1,4 +1,5 @@
 #include "engine/legal_moves.h"
+#include "engine/game_traits.h"
 
 #include <cassert>
 
@@ -6,7 +7,9 @@
 // Circular adjacency helper
 // ---------------------------------------------------------------------------
 
-bool has_filled_neighbor(int player, int column, int row, const BoardState& board) {
+template <typename Traits>
+bool has_filled_neighbor(int player, int column, int row,
+                         const BoardStateT<Traits>& board) {
     int prev = (row - 1 + kNumRows) % kNumRows;
     int next = (row + 1) % kNumRows;
     return board.cells[player][column][prev] != kCellEmpty ||
@@ -18,7 +21,10 @@ bool has_filled_neighbor(int player, int column, int row, const BoardState& boar
 // a player, given the current board state (column constraint only).
 // Does NOT check if the cell is empty — caller must do that.
 // ---------------------------------------------------------------------------
-static bool is_column_legal(int player, int column, int row, const BoardState& board) {
+
+template <typename Traits>
+static bool is_column_legal(int player, int column, int row,
+                            const BoardStateT<Traits>& board) {
     switch (column) {
     case kColDown:
         // Legal row = lowest-indexed empty row
@@ -47,7 +53,7 @@ static bool is_column_legal(int player, int column, int row, const BoardState& b
             if (board.cells[player][column][r] != kCellEmpty) { any_filled = true; break; }
         if (!any_filled) return (row == kRow6s || row == kRowSS);
         // Otherwise: any empty cell with at least one filled neighbour (wraps)
-        return has_filled_neighbor(player, column, row, board);
+        return has_filled_neighbor<Traits>(player, column, row, board);
     }
 
     case kColTurbo:
@@ -61,7 +67,7 @@ static bool is_column_legal(int player, int column, int row, const BoardState& b
             if (board.cells[player][column][r] != kCellEmpty) { any_filled = true; break; }
         if (!any_filled) return true;
         // Otherwise: any empty cell with at least one filled neighbour (wraps)
-        return has_filled_neighbor(player, column, row, board);
+        return has_filled_neighbor<Traits>(player, column, row, board);
     }
 
     default:
@@ -73,14 +79,17 @@ static bool is_column_legal(int player, int column, int row, const BoardState& b
 // rebuild_legal_placements — full rebuild from scratch
 // ---------------------------------------------------------------------------
 
-void rebuild_legal_placements(int player, const BoardState& board, GameContext& ctx) {
+template <typename Traits>
+void rebuild_legal_placements(int player,
+                              const BoardStateT<Traits>& board,
+                              GameContextT<Traits>& ctx) {
     ctx.legal_all[player].clear();
     ctx.legal_no_turbo[player].clear();
 
     for (int col = 0; col < kNumColumns; ++col) {
         for (int row = 0; row < kNumRows; ++row) {
             if (board.cells[player][col][row] != kCellEmpty) continue;
-            if (!is_column_legal(player, col, row, board)) continue;
+            if (!is_column_legal<Traits>(player, col, row, board)) continue;
             ctx.legal_all[player].add(col, row);
             if (col != kColTurbo)
                 ctx.legal_no_turbo[player].add(col, row);
@@ -92,8 +101,10 @@ void rebuild_legal_placements(int player, const BoardState& board, GameContext& 
 // update_legal_placements_after_move — incremental update
 // ---------------------------------------------------------------------------
 
+template <typename Traits>
 void update_legal_placements_after_move(int player, int column, int row,
-                                         const BoardState& board, GameContext& ctx) {
+                                        const BoardStateT<Traits>& board,
+                                        GameContextT<Traits>& ctx) {
     // Remove the placed cell from both caches
     ctx.legal_all[player].remove(column, row);
     if (column != kColTurbo)
@@ -137,7 +148,7 @@ void update_legal_placements_after_move(int player, int column, int row,
         // Re-add empty cells that have at least one filled neighbour
         for (int r = 0; r < kNumRows; ++r) {
             if (board.cells[player][column][r] == kCellEmpty &&
-                has_filled_neighbor(player, column, r, board)) {
+                has_filled_neighbor<Traits>(player, column, r, board)) {
                 ctx.legal_all[player].add(column, r);
                 ctx.legal_no_turbo[player].add(column, r);
             }
@@ -146,3 +157,18 @@ void update_legal_placements_after_move(int player, int column, int row,
     }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template bool has_filled_neighbor<Yams1v1>(int, int, int, const BoardStateT<Yams1v1>&);
+template bool has_filled_neighbor<Yams2v2>(int, int, int, const BoardStateT<Yams2v2>&);
+template void rebuild_legal_placements<Yams1v1>(int, const BoardStateT<Yams1v1>&, GameContextT<Yams1v1>&);
+template void rebuild_legal_placements<Yams2v2>(int, const BoardStateT<Yams2v2>&, GameContextT<Yams2v2>&);
+template void update_legal_placements_after_move<Yams1v1>(int, int, int,
+                                                          const BoardStateT<Yams1v1>&,
+                                                          GameContextT<Yams1v1>&);
+template void update_legal_placements_after_move<Yams2v2>(int, int, int,
+                                                          const BoardStateT<Yams2v2>&,
+                                                          GameContextT<Yams2v2>&);

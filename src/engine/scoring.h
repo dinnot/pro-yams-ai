@@ -6,7 +6,7 @@
 #include "engine/game_context.h"
 
 // ---------------------------------------------------------------------------
-// Dice utility functions
+// Dice utility functions (variant-independent)
 // ---------------------------------------------------------------------------
 
 /// Sort dice in ascending order in-place (insertion sort — tiny array).
@@ -32,27 +32,24 @@ int dice_sum(const int8_t dice[kNumDice]);
 ///
 /// Does NOT check column order constraints — that is get_legal_placements' job.
 /// The caller is responsible for ensuring (column, row) is a legal placement.
-///
-/// @param row    Target row (0-12)
-/// @param dice   5 dice values (1-6), need not be sorted
-/// @param player The placing player (0 or 1)
-/// @param column Target column (0-5)
-/// @param board  Current board state
-/// @param ctx    Current game context (golden_max, ss/ls status)
-/// @return Score to place (0 = scratch, >0 = valid score)
+template <typename Traits>
 int calculate_score(int row, const int8_t dice[kNumDice],
                     int player, int column,
-                    const BoardState& board, const GameContext& ctx);
+                    const BoardStateT<Traits>& board,
+                    const GameContextT<Traits>& ctx);
 
 // ---------------------------------------------------------------------------
 // Board query utilities
 // ---------------------------------------------------------------------------
 
-/// Check if the game is over (all 156 cells filled).
-bool is_terminal(const BoardState& board);
+/// Check if the game is over (all kTotalCells cells filled).
+template <typename Traits>
+bool is_terminal(const BoardStateT<Traits>& board);
 
 /// Get the number of empty cells remaining for a player.
-int cells_remaining(const BoardState& board, int player);
+template <typename Traits>
+int cells_remaining(const BoardStateT<Traits>& board, int player);
 
 /// Get the number of empty cells remaining in a specific column for a player.
-int column_cells_remaining(const BoardState& board, int player, int column);
+template <typename Traits>
+int column_cells_remaining(const BoardStateT<Traits>& board, int player, int column);
