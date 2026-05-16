@@ -68,6 +68,8 @@ private:
             res.status = 204;
         });
 
+        server_.Get("/api/info",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_info(req, res); });
         server_.Post("/api/game/new",
             [this](const httplib::Request& req, httplib::Response& res) { handle_new_game(req, res); });
         server_.Get(R"(/api/game/(\d+))",
@@ -171,6 +173,16 @@ private:
     }
 
     // ---- Handlers ----
+    // GET /api/info — static server metadata. The variant is fixed at launch,
+    // so the frontend can use this on page load to decide which player-type
+    // dropdowns to expose (P0/P1 for 1v1, P0..P3 for 2v2).
+    void handle_info(const httplib::Request&, httplib::Response& res) {
+        json_response(res, {
+            {"num_players",  Traits::kNumPlayers},
+            {"game_variant", (Traits::kNumPlayers == 4) ? "2v2" : "1v1"},
+        });
+    }
+
     void handle_new_game(const httplib::Request& req, httplib::Response& res) {
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }

@@ -7,6 +7,8 @@ const Game = {
     holdMask: 0,
     autoPlayTimer: null,
     legalCollapsed: true,
+    serverNumPlayers: 2,
+    serverVariant: '1v1',
 
     async init() {
         document.getElementById('btn-new-game').addEventListener('click', () => Game.newGame());
@@ -17,6 +19,19 @@ const Game = {
             Game.legalCollapsed = !Game.legalCollapsed;
             Game.applyLegalCollapse();
         });
+
+        // The server's variant is fixed at launch — query once so we know
+        // whether to expose the P2/P3 dropdowns.
+        try {
+            const info = await API.getInfo();
+            Game.serverNumPlayers = info.num_players || 2;
+            Game.serverVariant    = info.game_variant || '1v1';
+        } catch (_) { /* leave defaults */ }
+        document.body.dataset.variant = Game.serverVariant;
+        const show2v2 = Game.serverNumPlayers >= 4;
+        for (const el of document.querySelectorAll('.sel-2v2-only')) {
+            el.hidden = !show2v2;
+        }
     },
 
     // Ensure board-pN / board-grid-N divs exist for each player. The HTML
@@ -61,10 +76,16 @@ const Game = {
 
     async newGame() {
         Game.stopAutoPlay();
-        const p0 = document.getElementById('sel-p0').value;
-        const p1 = document.getElementById('sel-p1').value;
         const debugMode = document.getElementById('chk-debug').checked;
-        const data = await API.newGame(p0, p1, undefined, debugMode);
+        // Collect player types for every seat the server expects. The P2/P3
+        // dropdowns exist in the DOM either way but are .hidden in 1v1; for
+        // 1v1 only the first two values are sent.
+        const playerTypes = [];
+        for (let p = 0; p < Game.serverNumPlayers; p++) {
+            const sel = document.getElementById(`sel-p${p}`);
+            playerTypes.push(sel ? sel.value : 'heuristic_v2');
+        }
+        const data = await API.newGame(playerTypes, undefined, debugMode);
         Game.sessionId = data.session_id;
         Game.state = data.game_state;
         Game.holdMask = 0;

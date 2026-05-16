@@ -1,9 +1,21 @@
 // REST API client for Pro Yams UI.
 
 const API = {
-    // Game management
-    async newGame(player0, player1, seed, debugMode = false) {
-        const body = { player0, player1, debug_mode: debugMode };
+    // GET /api/info — server's fixed variant ({game_variant, num_players}).
+    async getInfo() {
+        const res = await fetch('/api/info');
+        if (!res.ok) return { game_variant: '1v1', num_players: 2 };
+        return res.json();
+    },
+
+    // Game management. playerTypes: array of strings (one per seat). The
+    // server reads player0..playerN-1 from the body and uses array length
+    // to determine seat count.
+    async newGame(playerTypes, seed, debugMode = false) {
+        const body = { debug_mode: debugMode };
+        for (let i = 0; i < playerTypes.length; i++) {
+            body['player' + i] = playerTypes[i];
+        }
         if (seed !== undefined && seed !== null && seed !== '') body.seed = Number(seed);
         else body.seed = Math.floor(Math.random() * 1000000);
         const res = await fetch('/api/game/new', {

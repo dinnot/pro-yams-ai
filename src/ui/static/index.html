@@ -67,6 +67,49 @@
         <option value="nn">P1: NN</option>
         <option value="mc">P1: MC Rollout</option>
       </select>
+      <!-- 2v2-only player selectors: shown only when /api/info reports a 4-player variant. -->
+      <select id="sel-p2" class="sel-2v2-only" hidden>
+        <option value="heuristic_v17">P2: Heuristic V17 (V14+Win Odds)</option>
+        <option value="heuristic_v16">P2: Heuristic V16 (V13+Win Odds)</option>
+        <option value="heuristic_v15">P2: Heuristic V15 (V13+aggr upper bonus)</option>
+        <option value="heuristic_v14">P2: Heuristic V14 (V13+upper bonus prot)</option>
+        <option value="heuristic_v13">P2: Heuristic V13 (best, ~57%)</option>
+        <option value="heuristic_v12">P2: Heuristic V12 (smooth+ehc.5+csq.20)</option>
+        <option value="heuristic_v11">P2: Heuristic V11 (smooth+ehc1+csq.05)</option>
+        <option value="heuristic_v10">P2: Heuristic V10 (smooth+ehc.5+csq.12)</option>
+        <option value="heuristic_v9">P2: Heuristic V9 (smooth+csq.50+turbo)</option>
+        <option value="heuristic_v8">P2: Heuristic V8 (smooth+csq.20+turbo)</option>
+        <option value="heuristic_v7">P2: Heuristic V7 (smooth+csq.10+turbo)</option>
+        <option value="heuristic_v6">P2: Heuristic V6 (smooth+csq.20)</option>
+        <option value="heuristic_v5">P2: Heuristic V5 (smooth+ehc1.5)</option>
+        <option value="heuristic_v4">P2: Heuristic V4 (smooth+ehc1.0)</option>
+        <option value="heuristic_v3">P2: Heuristic V3 (Strategic)</option>
+        <option value="heuristic_v2">P2: Heuristic V2 (DP)</option>
+        <option value="heuristic_v1">P2: Heuristic V1 (Greedy)</option>
+        <option value="human">P2: Human</option>
+        <option value="nn">P2: NN</option>
+      </select>
+      <select id="sel-p3" class="sel-2v2-only" hidden>
+        <option value="heuristic_v17">P3: Heuristic V17 (V14+Win Odds)</option>
+        <option value="heuristic_v16">P3: Heuristic V16 (V13+Win Odds)</option>
+        <option value="heuristic_v15">P3: Heuristic V15 (V13+aggr upper bonus)</option>
+        <option value="heuristic_v14">P3: Heuristic V14 (V13+upper bonus prot)</option>
+        <option value="heuristic_v13">P3: Heuristic V13 (best, ~57%)</option>
+        <option value="heuristic_v12">P3: Heuristic V12 (smooth+ehc.5+csq.20)</option>
+        <option value="heuristic_v11">P3: Heuristic V11 (smooth+ehc1+csq.05)</option>
+        <option value="heuristic_v10">P3: Heuristic V10 (smooth+ehc.5+csq.12)</option>
+        <option value="heuristic_v9">P3: Heuristic V9 (smooth+csq.50+turbo)</option>
+        <option value="heuristic_v8">P3: Heuristic V8 (smooth+csq.20+turbo)</option>
+        <option value="heuristic_v7">P3: Heuristic V7 (smooth+csq.10+turbo)</option>
+        <option value="heuristic_v6">P3: Heuristic V6 (smooth+csq.20)</option>
+        <option value="heuristic_v5">P3: Heuristic V5 (smooth+ehc1.5)</option>
+        <option value="heuristic_v4">P3: Heuristic V4 (smooth+ehc1.0)</option>
+        <option value="heuristic_v3">P3: Heuristic V3 (Strategic)</option>
+        <option value="heuristic_v2">P3: Heuristic V2 (DP)</option>
+        <option value="heuristic_v1">P3: Heuristic V1 (Greedy)</option>
+        <option value="human">P3: Human</option>
+        <option value="nn">P3: NN</option>
+      </select>
       <label class="debug-label" title="Record bot hold/placement evaluations for inspection">
         <input type="checkbox" id="chk-debug"> Debug mode
       </label>

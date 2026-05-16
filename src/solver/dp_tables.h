@@ -2,12 +2,91 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "engine/constants.h"
 
 struct PrecomputedTables;
+class DPMmap;  // RAII wrapper around the mmap'd cache file (defined in .cc).
+
+// ---------------------------------------------------------------------------
+// DPBuffer<T> — a vector-like buffer that can either own heap memory (used
+// when DP tables are computed fresh) or refer to an externally-managed region
+// (used when tables are loaded via mmap of the on-disk cache).
+//
+// Exposes the subset of std::vector's API that DP-table code uses:
+//   data(), size(), empty(), operator[], resize(), assign(n, value).
+// resize/assign always switch the buffer to owning (heap) mode.
+// ---------------------------------------------------------------------------
+template <typename T>
+class DPBuffer {
+public:
+    DPBuffer() = default;
+    DPBuffer(const DPBuffer&) = delete;
+    DPBuffer& operator=(const DPBuffer&) = delete;
+
+    DPBuffer(DPBuffer&& o) noexcept { steal(o); }
+    DPBuffer& operator=(DPBuffer&& o) noexcept {
+        if (this != &o) { release(); steal(o); }
+        return *this;
+    }
+    ~DPBuffer() { release(); }
+
+    // Owning, heap-backed allocation. Used by the compute path.
+    void assign(std::size_t n, const T& value) {
+        release();
+        if (n == 0) return;
+        data_  = new T[n];
+        size_  = n;
+        owns_  = true;
+        for (std::size_t i = 0; i < n; ++i) data_[i] = value;
+    }
+    void resize(std::size_t n) {
+        release();
+        if (n == 0) return;
+        data_  = new T[n]();   // value-initialise (zero for arithmetic types)
+        size_  = n;
+        owns_  = true;
+    }
+
+    // Non-owning view into externally-managed memory (e.g. the mmap region).
+    // Lifetime of the backing memory must outlive this buffer.
+    void adopt_view(const T* ptr, std::size_t n) {
+        release();
+        data_ = const_cast<T*>(ptr);
+        size_ = n;
+        owns_ = false;
+    }
+
+    T*          data()                       { return data_; }
+    const T*    data()  const                { return data_; }
+    std::size_t size()  const                { return size_; }
+    bool        empty() const                { return size_ == 0; }
+    T&          operator[](std::size_t i)       { return data_[i]; }
+    const T&    operator[](std::size_t i) const { return data_[i]; }
+
+private:
+    void release() {
+        if (owns_) delete[] data_;
+        data_ = nullptr;
+        size_ = 0;
+        owns_ = false;
+    }
+    void steal(DPBuffer& o) noexcept {
+        data_ = o.data_;
+        size_ = o.size_;
+        owns_ = o.owns_;
+        o.data_ = nullptr;
+        o.size_ = 0;
+        o.owns_ = false;
+    }
+
+    T*          data_ = nullptr;
+    std::size_t size_ = 0;
+    bool        owns_ = false;
+};
 
 // ---------------------------------------------------------------------------
 // DP Tables — six precomputed Dynamic Programming tables for Pro Yams.
@@ -59,15 +138,27 @@ struct DPVal {
 
 struct DPTables {
     // dp_t1[T][var][sc][R]   layout, R dim padded to kDPUpperRPad
-    std::vector<float> dp_t1;
+    DPBuffer<float> dp_t1;
     // dp_t4[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad
-    std::vector<float> dp_t4;
+    DPBuffer<float> dp_t4;
     // dp_t5[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad (E[X^2])
-    std::vector<float> dp_t5;
+    DPBuffer<float> dp_t5;
     // dp_mid[T][var][sc]
-    std::vector<DPVal> dp_mid;
+    DPBuffer<DPVal> dp_mid;
     // dp_low[T][var][sc]
-    std::vector<DPVal> dp_low;
+    DPBuffer<DPVal> dp_low;
+
+    // Owns the mmap region when tables are loaded from cache. The DPBuffer
+    // views above point into this region; declare it last so it outlives them
+    // and on destruction is freed only after the views are released.
+    std::unique_ptr<DPMmap> mapped;
+
+    DPTables();
+    ~DPTables();
+    DPTables(DPTables&&) noexcept;
+    DPTables& operator=(DPTables&&) noexcept;
+    DPTables(const DPTables&) = delete;
+    DPTables& operator=(const DPTables&) = delete;
 };
 
 // =========================================================================
