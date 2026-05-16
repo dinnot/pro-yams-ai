@@ -124,9 +124,11 @@ void worker_thread(GameQueueT<Traits>& available,
 
                 double heuristic_evs[kMaxAfterstateRequests];
                 const HeuristicVersion hv = game->heuristic_version;
+                bool is_odds_bot = false;
 
                 if (static_cast<int>(hv) >= static_cast<int>(HeuristicVersion::V4)) {
                     const ResearchConfig& rcfg = get_research_config_for(hv);
+                    is_odds_bot = rcfg.output_win_odds;
                     heuristic_evaluate_research<Traits>(game->state.board, game->ctx,
                                                        game->solver_buffers.requests,
                                                        game->solver_buffers.request_count,
@@ -148,7 +150,6 @@ void worker_thread(GameQueueT<Traits>& available,
                                                heuristic_evs);
                 }
 
-                const bool is_odds_bot = (hv == HeuristicVersion::V16 || hv == HeuristicVersion::V17);
                 const bool is_margin_style = (hv != HeuristicVersion::V1 && !is_odds_bot);
                 int n = game->solver_buffers.request_count;
                 for (int i = 0; i < n; i++) {

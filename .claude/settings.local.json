@@ -257,7 +257,8 @@
       "Bash(build/tests/training/training_tests)",
       "Bash(build/tests/model/model_tests)",
       "Bash(awk '{print $2}')",
-      "Bash(xargs -r kill)"
+      "Bash(xargs -r kill)",
+      "Bash(cmake --build . --target tests -j)"
     ]
   }
 }

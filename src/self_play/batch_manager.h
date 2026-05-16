@@ -148,7 +148,11 @@ public:
                 }
             }
 
-            if (!installed) {
+            if (installed) {
+                // Wake any coordinator parked on ready_cv_ so it can compute
+                // the new timeout deadline against active_batch_start_.
+                ready_cv_.notify_one();
+            } else {
                 std::lock_guard<std::mutex> pool_lock(pool_mtx_);
                 free_batches_.push_back(candidate);
                 pool_cv_.notify_one();
@@ -209,19 +213,24 @@ public:
         while (ready_batches_.empty() && !shutdown_.load(std::memory_order_relaxed)) {
             lock.unlock();
 
-            auto now = std::chrono::steady_clock::now();
-            bool flushed = false;
-
+            bool has_deadline = false;
+            std::chrono::steady_clock::time_point deadline;
             Batch* flushed_batch = nullptr;
+
             {
                 std::unique_lock<std::mutex> act_lock(active_mtx_, std::try_to_lock);
                 if (act_lock.owns_lock() &&
                     active_batch_ &&
                     active_batch_->reserved_count.load(std::memory_order_relaxed) > 0) {
-                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - active_batch_start_).count();
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - active_batch_start_).count();
                     if (elapsed >= timeout_ms_) {
                         flushed_batch = flush_active_batch_locked();
-                        flushed = true;
+                    } else {
+                        deadline = active_batch_start_ +
+                                   std::chrono::milliseconds(timeout_ms_);
+                        has_deadline = true;
                     }
                 }
             }
@@ -230,13 +239,21 @@ public:
 
             if (flushed_batch) {
                 ready_batches_.push_back(flushed_batch);
-            }
-
-            if (flushed) {
                 continue;
             }
 
-            ready_cv_.wait_for(lock, std::chrono::milliseconds(1));
+            if (has_deadline) {
+                // Sleep until either a ready batch arrives or the active
+                // batch's timeout is reached.
+                ready_cv_.wait_until(lock, deadline);
+            } else {
+                // No active batch (or active_mtx_ was contended). Park until
+                // a batch is pushed or installed. The timeout_ms_ fallback
+                // closes the small window where reserve()'s install-notify
+                // races with this thread's wait (and as a safety net if the
+                // try_lock above missed an in-flight install).
+                ready_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms_));
+            }
         }
 
         if (shutdown_.load(std::memory_order_relaxed) && ready_batches_.empty()) {

@@ -1,6 +1,7 @@
 #include "heuristic/heuristic_bot.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
@@ -710,109 +711,103 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
 
 // ---------------------------------------------------------------------------
 // Research config registry — V4..V17.
+//
+// Built once at first call via a C++11 magic-static lambda — the standard
+// guarantees the initialization is thread-safe and runs exactly once, so
+// concurrent self-play workers can read the table without locking.
 // ---------------------------------------------------------------------------
 const ResearchConfig& get_research_config_for(HeuristicVersion v) {
-    static ResearchConfig cache[18];
-    static bool initialized[18] = {false};
+    static const auto cache = []() {
+        std::array<ResearchConfig, 18> table{};
+        auto& v4  = table[4];
+        v4.crush = CrushMode::FLOAT_SMOOTH;
+        v4.early_high_coeff_bonus = 1.0;
+
+        auto& v5  = table[5];
+        v5.crush = CrushMode::FLOAT_SMOOTH;
+        v5.early_high_coeff_bonus = 1.5;
+
+        auto& v6  = table[6];
+        v6.crush = CrushMode::FLOAT_SMOOTH;
+        v6.coeff_sq_bonus = 0.20;
+
+        auto& v7  = table[7];
+        v7.crush = CrushMode::FLOAT_SMOOTH;
+        v7.coeff_sq_bonus = 0.10;
+        v7.turbo_avoidance = 1.0;
+
+        auto& v8  = table[8];
+        v8.crush = CrushMode::FLOAT_SMOOTH;
+        v8.coeff_sq_bonus = 0.20;
+        v8.turbo_avoidance = 1.0;
+
+        auto& v9  = table[9];
+        v9.crush = CrushMode::FLOAT_SMOOTH;
+        v9.coeff_sq_bonus = 0.50;
+        v9.turbo_avoidance = 1.0;
+
+        auto& v10 = table[10];
+        v10.crush = CrushMode::FLOAT_SMOOTH;
+        v10.early_high_coeff_bonus = 0.5;
+        v10.coeff_sq_bonus = 0.12;
+
+        auto& v11 = table[11];
+        v11.crush = CrushMode::FLOAT_SMOOTH;
+        v11.early_high_coeff_bonus = 1.0;
+        v11.coeff_sq_bonus = 0.05;
+
+        auto& v12 = table[12];
+        v12.crush = CrushMode::FLOAT_SMOOTH;
+        v12.early_high_coeff_bonus = 0.5;
+        v12.coeff_sq_bonus = 0.20;
+
+        auto& v13 = table[13];
+        v13.crush = CrushMode::FLOAT_SMOOTH;
+        v13.coeff_sq_bonus = 0.15;
+        v13.turbo_avoidance = 1.0;
+        v13.use_v3_rules = true;
+        v13.v3.w_r3_high_coeff = 0.10;
+
+        auto& v14 = table[14];
+        v14.crush = CrushMode::FLOAT_SMOOTH;
+        v14.coeff_sq_bonus = 0.15;
+        v14.turbo_avoidance = 1.0;
+        v14.use_v3_rules = true;
+        v14.v3.w_r3_high_coeff = 0.10;
+        v14.upper_bonus_penalty = 20.0;
+
+        auto& v15 = table[15];
+        v15.crush = CrushMode::FLOAT_SMOOTH;
+        v15.coeff_sq_bonus = 0.15;
+        v15.turbo_avoidance = 1.0;
+        v15.use_v3_rules = true;
+        v15.v3.w_r3_high_coeff = 0.10;
+        v15.upper_bonus_penalty = 200.0;
+
+        auto& v16 = table[16];
+        v16.crush = CrushMode::FLOAT_SMOOTH;
+        v16.coeff_sq_bonus = 0.15;
+        v16.turbo_avoidance = 1.0;
+        v16.use_v3_rules = true;
+        v16.v3.w_r3_high_coeff = 0.10;
+        v16.output_win_odds = true;
+
+        auto& v17 = table[17];
+        v17.crush = CrushMode::FLOAT_SMOOTH;
+        v17.coeff_sq_bonus = 0.15;
+        v17.turbo_avoidance = 1.0;
+        v17.use_v3_rules = true;
+        v17.v3.w_r3_high_coeff = 0.10;
+        v17.upper_bonus_penalty = 20.0;
+        v17.output_win_odds = true;
+
+        return table;
+    }();
 
     int idx = static_cast<int>(v);
     if (idx < 4 || idx > 17) {
         throw std::invalid_argument("get_research_config_for: V1/V2/V3 use their own evaluators");
     }
-
-    if (initialized[idx]) {
-        return cache[idx];
-    }
-
-    ResearchConfig c;
-    switch (v) {
-        case HeuristicVersion::V4:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.early_high_coeff_bonus = 1.0;
-            break;
-        case HeuristicVersion::V5:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.early_high_coeff_bonus = 1.5;
-            break;
-        case HeuristicVersion::V6:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.20;
-            break;
-        case HeuristicVersion::V7:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.10;
-            c.turbo_avoidance = 1.0;
-            break;
-        case HeuristicVersion::V8:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.20;
-            c.turbo_avoidance = 1.0;
-            break;
-        case HeuristicVersion::V9:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.50;
-            c.turbo_avoidance = 1.0;
-            break;
-        case HeuristicVersion::V10:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.early_high_coeff_bonus = 0.5;
-            c.coeff_sq_bonus = 0.12;
-            break;
-        case HeuristicVersion::V11:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.early_high_coeff_bonus = 1.0;
-            c.coeff_sq_bonus = 0.05;
-            break;
-        case HeuristicVersion::V12:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.early_high_coeff_bonus = 0.5;
-            c.coeff_sq_bonus = 0.20;
-            break;
-        case HeuristicVersion::V13:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.15;
-            c.turbo_avoidance = 1.0;
-            c.use_v3_rules = true;
-            c.v3.w_r3_high_coeff = 0.10;
-            break;
-        case HeuristicVersion::V14:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.15;
-            c.turbo_avoidance = 1.0;
-            c.use_v3_rules = true;
-            c.v3.w_r3_high_coeff = 0.10;
-            c.upper_bonus_penalty = 20.0;
-            break;
-        case HeuristicVersion::V15:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.15;
-            c.turbo_avoidance = 1.0;
-            c.use_v3_rules = true;
-            c.v3.w_r3_high_coeff = 0.10;
-            c.upper_bonus_penalty = 200.0;
-            break;
-        case HeuristicVersion::V16:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.15;
-            c.turbo_avoidance = 1.0;
-            c.use_v3_rules = true;
-            c.v3.w_r3_high_coeff = 0.10;
-            c.output_win_odds = true;
-            break;
-        case HeuristicVersion::V17:
-            c.crush = CrushMode::FLOAT_SMOOTH;
-            c.coeff_sq_bonus = 0.15;
-            c.turbo_avoidance = 1.0;
-            c.use_v3_rules = true;
-            c.v3.w_r3_high_coeff = 0.10;
-            c.upper_bonus_penalty = 20.0;
-            c.output_win_odds = true;
-            break;
-        default:
-            throw std::invalid_argument("get_research_config_for: unknown version");
-    }
-    cache[idx] = c;
-    initialized[idx] = true;
     return cache[idx];
 }
 

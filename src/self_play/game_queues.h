@@ -48,7 +48,10 @@ public:
             for (int i = 0; i < count; ++i)
                 queue_.push_back(games[i]);
         }
-        cv_.notify_all();
+        // Wake exactly `count` waiters — notify_all would thunder-herd every
+        // sleeping worker, contend on mutex_, and then send most back to sleep.
+        for (int i = 0; i < count; ++i)
+            cv_.notify_one();
     }
 
     /// Push multiple games to the front of the queue, preserving their order.
@@ -59,7 +62,8 @@ public:
             for (int i = count - 1; i >= 0; --i)
                 queue_.push_front(games[i]);
         }
-        cv_.notify_all();
+        for (int i = 0; i < count; ++i)
+            cv_.notify_one();
     }
 
     /// Pop a game. Blocks until one is available.
