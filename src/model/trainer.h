@@ -1,8 +1,10 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <torch/torch.h>
+#include <c10/cuda/CUDAStream.h>
 #include "model/pro_yams_net.h"
 #include "model/inference.h"
 
@@ -71,6 +73,11 @@ private:
     torch::Device                       device_;
     ModelConfig                         config_;
     int                                 training_step_ = 0;
+
+    // High-priority CUDA stream reserved for training so train kernels are
+    // scheduled ahead of inference batches that share the GPU. Inference
+    // coordinators use normal-priority pool streams (see coordinator.cc).
+    std::optional<c10::cuda::CUDAStream> train_stream_;
 };
 
 // ---------------------------------------------------------------------------

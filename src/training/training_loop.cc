@@ -48,8 +48,6 @@ double avg_us(int64_t total_us, int64_t count) {
     return count > 0 ? static_cast<double>(total_us) / static_cast<double>(count) : 0.0;
 }
 
-constexpr int kMaxTrainStepsPerSchedulerPass = 4;
-
 void write_self_play_debug_stats(std::ofstream& f,
                                  const SelfPlayDebugStatsSnapshot& s,
                                  const char* label) {
@@ -268,26 +266,14 @@ void TrainingLoopT<Traits>::run(int num_steps) {
 
             pending_train_steps_ += static_cast<double>(collected) * steps_per_game;
             int steps_to_do = static_cast<int>(pending_train_steps_);
-            if (steps_to_do > kMaxTrainStepsPerSchedulerPass) {
-                steps_to_do = kMaxTrainStepsPerSchedulerPass;
-            }
             pending_train_steps_ -= steps_to_do;
 
             double total_train_ms = 0;
-            int collected_during_train = 0;
             for (int i = 0; i < steps_to_do; ++i) {
                 auto t_train_start = std::chrono::steady_clock::now();
                 do_training_step();
                 auto t_train_end = std::chrono::steady_clock::now();
                 total_train_ms += std::chrono::duration<double, std::milli>(t_train_end - t_train_start).count();
-
-                // Keep the finite self-play game pool moving while training
-                // runs. Large 2v2 batches can spend seconds in this loop; if
-                // completed games are not recycled until the end, workers run
-                // out of active games and throughput collapses.
-                int extra_collected = collect_completed_games();
-                collected_during_train += extra_collected;
-                pending_train_steps_ += static_cast<double>(extra_collected) * steps_per_game;
 
                 maybe_swap_model();
                 maybe_checkpoint();
@@ -301,7 +287,6 @@ void TrainingLoopT<Traits>::run(int num_steps) {
                 std::ofstream f(queue_log_path, std::ios::app);
                 if (f.is_open()) {
                     f << "Collected " << collected << " games in " << collect_ms << " ms\n"
-                      << "Recycled " << collected_during_train << " games during training\n"
                       << "Ran " << steps_to_do << " full train steps in " << total_train_ms << " ms\n\n";
                     auto sp_stats = orchestrator_->collect_debug_stats_delta();
                     write_self_play_debug_stats(f, sp_stats, "collect/train interval");

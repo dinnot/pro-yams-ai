@@ -8,6 +8,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <c10/cuda/CUDAGuard.h>
+
 #include "engine/tensor.h"  // kTensorSize
 
 // ---------------------------------------------------------------------------
@@ -25,12 +27,22 @@ ModelTrainer::ModelTrainer(const ModelConfig& config, torch::Device device)
         model_->parameters(),
         torch::optim::AdamOptions(config.learning_rate)
     );
+
+    if (device_.is_cuda()) {
+        train_stream_ = c10::cuda::getStreamFromPool(
+            /*isHighPriority=*/true, device_.index());
+    }
 }
 
 double ModelTrainer::train_step(const float* states, const double* targets,
                                   int batch_size) {
     assert(batch_size > 0);
     model_->train();
+
+    std::optional<c10::cuda::CUDAStreamGuard> stream_guard;
+    if (train_stream_.has_value()) {
+        stream_guard.emplace(*train_stream_);
+    }
 
     // Build input tensor — copy into an owned tensor before moving to device.
     // Using from_blob directly can cause autograd issues in some libtorch builds.
