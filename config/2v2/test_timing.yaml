@@ -1,14 +1,14 @@
-num_steps: 1000
+num_steps: 500
 
 training:
   game_variant: "2v2"
 
   replay_capacity: 50000
   min_buffer_size: 20000
-  train_batch_size: 16384
-  train_steps_per_collect: 0.041
+  train_batch_size: 8192
+  train_steps_per_collect: 0.082
   model_swap_interval: 100
-  checkpoint_interval: 1000
+  checkpoint_interval: 500
   max_checkpoints: 2
 
   td_mode: td0
@@ -21,12 +21,12 @@ training:
   temperature_decay_start_value: 0
   initial_epsilon: 0
 
-  eval_interval: 1000
+  eval_interval: 500
   eval_games: 500
 
-  checkpoint_dir: checkpoints/2v2/test_timing6
-  log_dir: ./logs/2v2/test_timing6
-  log_path: ./logs/2v2/test_timing6/training_log.csv
+  checkpoint_dir: checkpoints/2v2/test_timing14
+  log_dir: ./logs/2v2/test_timing14
+  log_path: ./logs/2v2/test_timing14/training_log.csv
   debug_mode: true
 
   initial_heuristic_weight: 1.0
@@ -45,7 +45,7 @@ training:
     batch_timeout_ms: 5
     num_workers: 20
     num_games: 2048
-    num_coordinators: 5
+    num_coordinators: 3
     debug_mode: true
 
   model:

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "engine/game_traits.h"
 #include "engine/rng.h"
@@ -102,6 +103,9 @@ private:
 
     static constexpr int kMaxCollectBatch = 512;
     Instance* collect_buf_[kMaxCollectBatch];
+
+    std::vector<float>  train_states_;
+    std::vector<double> train_targets_;
 };
 
 // Backward-compat aliases.

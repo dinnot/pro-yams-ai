@@ -140,6 +140,17 @@ inline float pts_to_Nx(int N, float me, float opp, float scale) {
     }
 }
 
+template <typename Traits>
+static void copy_tensor_context_fields(const GameContextT<Traits>& src,
+                                       GameContextT<Traits>& dst) {
+    std::memcpy(dst.golden_max, src.golden_max, sizeof(dst.golden_max));
+    std::memcpy(dst.upper_sum, src.upper_sum, sizeof(dst.upper_sum));
+    std::memcpy(dst.ss_scratched, src.ss_scratched, sizeof(dst.ss_scratched));
+    std::memcpy(dst.ls_scratched, src.ls_scratched, sizeof(dst.ls_scratched));
+    std::memcpy(dst.lower_has_scratch, src.lower_has_scratch,
+                sizeof(dst.lower_has_scratch));
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -539,7 +550,8 @@ void generate_tensor_batch(const BoardStateT<Traits>& board,
 
     for (int i = 0; i < request_count; ++i) {
         BoardStateT<Traits> board_clone = board;
-        GameContextT<Traits> ctx_clone = ctx;
+        GameContextT<Traits> ctx_clone;
+        copy_tensor_context_fields<Traits>(ctx, ctx_clone);
 
         const AfterstateRequest& req = requests[i];
         const int col = req.placement.column;

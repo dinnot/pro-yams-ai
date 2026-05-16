@@ -67,6 +67,24 @@ public:
         return actual;
     }
 
+    /// Sample directly into model input/target arrays. This avoids a second
+    /// full TrainingSample copy in the training loop for large 2v2 batches.
+    int sample_batch_arrays(float* states, double* targets, int count, RNG& rng) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        int n = std::min(total_added_, capacity_);
+        if (n <= 0) return 0;
+        int actual = std::min(count, n);
+        constexpr int kTSize = Traits::kTensorSize;
+        for (int i = 0; i < actual; ++i) {
+            int idx = rng.uniform_int(0, n - 1);
+            const Sample& s = data_[static_cast<size_t>(idx)];
+            std::memcpy(states + static_cast<size_t>(i) * kTSize,
+                        s.state, kTSize * sizeof(float));
+            targets[static_cast<size_t>(i)] = s.target;
+        }
+        return actual;
+    }
+
     /// Current number of samples stored.
     int size() const {
         std::lock_guard<std::mutex> lock(mutex_);

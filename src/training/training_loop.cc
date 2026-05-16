@@ -48,6 +48,8 @@ double avg_us(int64_t total_us, int64_t count) {
     return count > 0 ? static_cast<double>(total_us) / static_cast<double>(count) : 0.0;
 }
 
+constexpr int kMaxTrainStepsPerSchedulerPass = 4;
+
 void write_self_play_debug_stats(std::ofstream& f,
                                  const SelfPlayDebugStatsSnapshot& s,
                                  const char* label) {
@@ -266,14 +268,26 @@ void TrainingLoopT<Traits>::run(int num_steps) {
 
             pending_train_steps_ += static_cast<double>(collected) * steps_per_game;
             int steps_to_do = static_cast<int>(pending_train_steps_);
+            if (steps_to_do > kMaxTrainStepsPerSchedulerPass) {
+                steps_to_do = kMaxTrainStepsPerSchedulerPass;
+            }
             pending_train_steps_ -= steps_to_do;
 
             double total_train_ms = 0;
+            int collected_during_train = 0;
             for (int i = 0; i < steps_to_do; ++i) {
                 auto t_train_start = std::chrono::steady_clock::now();
                 do_training_step();
                 auto t_train_end = std::chrono::steady_clock::now();
                 total_train_ms += std::chrono::duration<double, std::milli>(t_train_end - t_train_start).count();
+
+                // Keep the finite self-play game pool moving while training
+                // runs. Large 2v2 batches can spend seconds in this loop; if
+                // completed games are not recycled until the end, workers run
+                // out of active games and throughput collapses.
+                int extra_collected = collect_completed_games();
+                collected_during_train += extra_collected;
+                pending_train_steps_ += static_cast<double>(extra_collected) * steps_per_game;
 
                 maybe_swap_model();
                 maybe_checkpoint();
@@ -287,6 +301,7 @@ void TrainingLoopT<Traits>::run(int num_steps) {
                 std::ofstream f(queue_log_path, std::ios::app);
                 if (f.is_open()) {
                     f << "Collected " << collected << " games in " << collect_ms << " ms\n"
+                      << "Recycled " << collected_during_train << " games during training\n"
                       << "Ran " << steps_to_do << " full train steps in " << total_train_ms << " ms\n\n";
                     auto sp_stats = orchestrator_->collect_debug_stats_delta();
                     write_self_play_debug_stats(f, sp_stats, "collect/train interval");
@@ -360,28 +375,28 @@ int TrainingLoopT<Traits>::collect_completed_games() {
 
 template <typename Traits>
 void TrainingLoopT<Traits>::do_training_step() {
-    std::vector<Sample> batch(static_cast<size_t>(config_.train_batch_size));
+    constexpr int kTSize = Traits::kTensorSize;
+    const size_t max_state_count =
+        static_cast<size_t>(config_.train_batch_size) * kTSize;
+    if (train_states_.size() < max_state_count) {
+        train_states_.resize(max_state_count);
+    }
+    if (train_targets_.size() < static_cast<size_t>(config_.train_batch_size)) {
+        train_targets_.resize(static_cast<size_t>(config_.train_batch_size));
+    }
+
     auto t1 = std::chrono::steady_clock::now();
-    int n = buffer_->sample_batch(batch.data(), config_.train_batch_size, sample_rng_);
+    int n = buffer_->sample_batch_arrays(train_states_.data(), train_targets_.data(),
+                                         config_.train_batch_size, sample_rng_);
     auto t2 = std::chrono::steady_clock::now();
 
     if (n <= 0) return;
 
-    constexpr int kTSize = Traits::kTensorSize;
-    std::vector<float>  states(static_cast<size_t>(n) * kTSize);
-    std::vector<double> targets(static_cast<size_t>(n));
-
     auto t3 = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; ++i) {
-        std::memcpy(states.data() + i * kTSize,
-                    batch[static_cast<size_t>(i)].state,
-                    kTSize * sizeof(float));
-        targets[static_cast<size_t>(i)] = batch[static_cast<size_t>(i)].target;
-    }
     auto t4 = std::chrono::steady_clock::now();
 
     auto t_start = std::chrono::steady_clock::now();
-    last_loss_ = trainer_->train_step(states.data(), targets.data(), n);
+    last_loss_ = trainer_->train_step(train_states_.data(), train_targets_.data(), n);
     auto t_end = std::chrono::steady_clock::now();
 
     double sample_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
