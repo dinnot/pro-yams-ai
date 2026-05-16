@@ -52,8 +52,12 @@ void heuristic_evaluate(const BoardStateT<Traits>& board,
 // ---------------------------------------------------------------------------
 namespace {
 
+// `total_empty_all_players` should be sum over p of (78 - filled[p]) — i.e.,
+// every empty cell on every sheet. Previously this parameter was per-player
+// (== 78 - filled_player), which made PROPORTIONAL algebraically reduce to
+// EMPTY_ONLY.
 inline int compute_T(TStrategy strat, int empty_in_col,
-                     int filled_player, int total_empty_player) {
+                     int filled_player, int total_empty_all_players) {
     switch (strat) {
         case TStrategy::V2_DEFAULT:
             return std::max(empty_in_col,
@@ -67,8 +71,13 @@ inline int compute_T(TStrategy strat, int empty_in_col,
         case TStrategy::EMPTY_DOUBLE:
             return empty_in_col * 2;
         case TStrategy::PROPORTIONAL: {
-            if (total_empty_player <= 0 || empty_in_col == 0) return empty_in_col;
-            int prop = ((78 - filled_player) * empty_in_col) / total_empty_player;
+            if (total_empty_all_players <= 0 || empty_in_col == 0) return empty_in_col;
+            // Per-player share of remaining turns, scaled by this column's
+            // share of the player's empty cells. Floor at empty_in_col so T
+            // never drops below the minimum number of placements the column
+            // will actually receive.
+            int prop = ((78 - filled_player) * empty_in_col)
+                       / total_empty_all_players;
             return std::max(empty_in_col, prop);
         }
     }
@@ -328,10 +337,10 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
                                 requests[i].score, b, c);
 
         int filled[Traits::kNumPlayers];
-        int total_empty[Traits::kNumPlayers];
+        int total_empty_all = 0;
         for (int p = 0; p < Traits::kNumPlayers; ++p) {
             filled[p] = count_filled_cells<Traits>(b, p);
-            total_empty[p] = 78 - filled[p];
+            total_empty_all += (78 - filled[p]);
         }
 
         double team0_margin = 0.0;
@@ -350,7 +359,7 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
                 // t_me applies to the active player; t_opp applies to everyone else
                 // (including the teammate in 2v2).
                 const TStrategy strat = (p == p_me) ? cfg.t_me : cfg.t_opp;
-                T[p] = compute_T(strat, empty, filled[p], total_empty[p]);
+                T[p] = compute_T(strat, empty, filled[p], total_empty_all);
                 E[p] = get_E_raw<Traits>(p, col, T[p], b, c, dp);
                 P_clean[p] = get_P_clean<Traits>(p, col, T[p], b, c, dp);
                 if (cfg.output_win_odds) {
@@ -369,6 +378,16 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
             }
 
             // Cross-team pairings.
+            //
+            // For win-odds variance, per-player E[p] and clean-indicator
+            // Bern(P_clean[p]) appear in MULTIPLE pairings in 2v2 (e.g. P0
+            // pairs with both P1 and P3). They're perfectly correlated with
+            // themselves, so Var(sum) = (sum of coefficients)^2 * Var, NOT
+            // sum of coefficient^2 * Var. We collect each player's linear
+            // coefficients first, then aggregate variance correctly outside
+            // the pair loop. In 1v1 this collapses to the prior formula.
+            double A_p[Traits::kNumPlayers] = {};  // coeff on E[p]    (signed)
+            double B_p[Traits::kNumPlayers] = {};  // coeff on Bern(P_clean[p])
             for (int ti = 0; ti < Traits::kPlayersPerTeam; ++ti) {
                 for (int tj = 0; tj < Traits::kPlayersPerTeam; ++tj) {
                     const int t0p = Traits::kTeam0[ti];
@@ -405,14 +424,19 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
                     team0_margin += pair_term;
 
                     if (cfg.output_win_odds) {
-                        const float var_clean_t0 = P_clean[t0p] * (1.0f - P_clean[t0p])
-                                                 * bonus_val * bonus_val;
-                        const float var_clean_t1 = P_clean[t1p] * (1.0f - P_clean[t1p])
-                                                 * bonus_val * bonus_val;
-                        global_variance += (Var[t0p] + var_clean_t0 +
-                                            Var[t1p] + var_clean_t1)
-                                         * (coeff_mult * coeff_mult);
+                        A_p[t0p] += coeff_mult;
+                        A_p[t1p] -= coeff_mult;
+                        B_p[t0p] += coeff_mult * bonus_val;
+                        B_p[t1p] -= coeff_mult * bonus_val;
                     }
+                }
+            }
+
+            if (cfg.output_win_odds) {
+                for (int p = 0; p < Traits::kNumPlayers; ++p) {
+                    global_variance += A_p[p] * A_p[p] * Var[p];
+                    global_variance += B_p[p] * B_p[p] *
+                                       P_clean[p] * (1.0 - P_clean[p]);
                 }
             }
         }
@@ -448,20 +472,24 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
             }
         }
 
+        // All additive bonuses below evaluate the POST-placement state
+        // (clones b / c). Reading base_board/base_ctx would mean the bonus
+        // is identical whether the candidate scored or scratched — destroying
+        // the differential utility that distinguishes good vs bad placements.
         if (cfg.early_high_coeff_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             if (coeff >= 14) {
-                const int empty_in_col = count_empty_cells<Traits>(base_board, p_me, col);
+                const int empty_in_col = count_empty_cells<Traits>(b, p_me, col);
                 margin += cfg.early_high_coeff_bonus * empty_in_col * coeff;
             }
         }
 
         if (cfg.early_progressive_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             if (coeff >= 14) {
-                const int empty_in_col = count_empty_cells<Traits>(base_board, p_me, col);
+                const int empty_in_col = count_empty_cells<Traits>(b, p_me, col);
                 const double phase = std::max(0, 78 - filled[p_me]) / 78.0;
                 margin += cfg.early_progressive_bonus * empty_in_col * coeff * phase;
             }
@@ -469,25 +497,25 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
 
         if (cfg.coeff_sq_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
-            const int empty_in_col = count_empty_cells<Traits>(base_board, p_me, col);
+            const int coeff = b.coefficients[col];
+            const int empty_in_col = count_empty_cells<Traits>(b, p_me, col);
             margin += cfg.coeff_sq_bonus * empty_in_col * coeff * coeff;
         }
 
         if (cfg.completion_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
-            const int filled_in_col = 13 - count_empty_cells<Traits>(base_board, p_me, col);
+            const int coeff = b.coefficients[col];
+            const int filled_in_col = 13 - count_empty_cells<Traits>(b, p_me, col);
             margin += cfg.completion_bonus * filled_in_col * coeff;
         }
 
         // dominance_bonus — 2v2: "more cells than AVERAGE opponent."
         if (cfg.dominance_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             int my_pos = 0;
             for (int r = 0; r < kNumRows; ++r)
-                if (base_board.cells[p_me][col][r] > 0) ++my_pos;
+                if (b.cells[p_me][col][r] > 0) ++my_pos;
 
             int opp_pos_sum = 0;
             int opp_count = 0;
@@ -495,7 +523,7 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
                 if (Traits::are_teammates(op, p_me)) continue;
                 ++opp_count;
                 for (int r = 0; r < kNumRows; ++r)
-                    if (base_board.cells[op][col][r] > 0) ++opp_pos_sum;
+                    if (b.cells[op][col][r] > 0) ++opp_pos_sum;
             }
             if (opp_count > 0) {
                 const double avg_opp_pos = static_cast<double>(opp_pos_sum) / opp_count;
@@ -508,15 +536,15 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
         if (cfg.upper100_bonus != 0.0 && requests[i].placement.row <= kRow6s
             && requests[i].score > 0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
-            const int upper_now = base_ctx.upper_sum[p_me][col];
+            const int coeff = b.coefficients[col];
+            const int upper_now = c.upper_sum[p_me][col];
             const double t = std::min(1.0, std::max(0.0, upper_now / 100.0));
             margin += cfg.upper100_bonus * requests[i].score * coeff * t;
         }
 
         if (cfg.hc_scratch_penalty != 0.0 && requests[i].score == 0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             if (coeff >= 14) {
                 margin -= cfg.hc_scratch_penalty * coeff;
             }
@@ -525,7 +553,7 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
         if (cfg.upper_priority_bonus != 0.0 && requests[i].score > 0) {
             const int row = requests[i].placement.row;
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             if (row >= kRow4s && row <= kRow6s) {
                 margin += cfg.upper_priority_bonus * requests[i].score * coeff;
             }
@@ -533,9 +561,9 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
 
         if (cfg.coeff_sq_high_only != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
+            const int coeff = b.coefficients[col];
             if (coeff >= 14) {
-                const int empty_in_col = count_empty_cells<Traits>(base_board, p_me, col);
+                const int empty_in_col = count_empty_cells<Traits>(b, p_me, col);
                 margin += cfg.coeff_sq_high_only * empty_in_col * coeff * coeff;
             }
         }
@@ -548,8 +576,9 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
 
         if (cfg.last_cell_bonus != 0.0) {
             const int col = requests[i].placement.column;
-            const int coeff = base_board.coefficients[col];
-            if (count_empty_cells<Traits>(base_board, p_me, col) == 1) {
+            const int coeff = b.coefficients[col];
+            // Post-placement: zero empty cells means this placement closed the column.
+            if (count_empty_cells<Traits>(b, p_me, col) == 0) {
                 margin += cfg.last_cell_bonus * coeff;
             }
         }
@@ -577,7 +606,7 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
             const int col_i = requests[i].placement.column;
             const int empty_in_col = count_empty_cells<Traits>(b, p_me, col_i);
             const int T_me_local = compute_T(cfg.t_me, empty_in_col, filled[p_me],
-                                             total_empty[p_me]);
+                                             total_empty_all);
             const float P_clean_me_local = get_P_clean<Traits>(p_me, col_i, T_me_local,
                                                                b, c, dp);
             const int coeff = b.coefficients[col_i];

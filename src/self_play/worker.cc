@@ -77,7 +77,9 @@ void worker_thread(GameQueueT<Traits>& available,
             BM* target_bm = &batch_manager;
             if (opponent_batch_manager != nullptr &&
                 game->use_past_opponent &&
-                game->state.board.current_player == game->past_opponent_player) {
+                game->past_opponent_player >= 0 &&
+                Traits::are_teammates(game->state.board.current_player,
+                                      game->past_opponent_player)) {
                 target_bm = opponent_batch_manager;
             }
 

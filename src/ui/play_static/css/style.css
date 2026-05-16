@@ -230,6 +230,47 @@ main {
 .bonus-cell .cell-top  { background: transparent; color: var(--top-color);  font-size: 0.5rem; height: 12px; line-height: 12px; }
 .bonus-cell .cell-main { font-size: 0.62rem; color: var(--main-color); font-weight: 600; }
 
+/* ---------- 2v2: four mini sheets in a 2x2 grid ---------- */
+.sheet.sheets-2v2 { overflow: auto; }
+.sheets-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.mini-sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 4px;
+  border: 1.5px solid transparent;
+}
+.mini-sheet.team-0 { border-color: #1d4f6d; }   /* cool/you tone */
+.mini-sheet.team-1 { border-color: #6d3a1d; }   /* warm/nn tone  */
+.mini-sheet.current {
+  box-shadow: 0 0 0 2px var(--accent-2);
+}
+.mini-sheet.is-human { background: #14253a; }
+.mini-sheet-header {
+  font-size: 0.6rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 1px 0 3px 0;
+}
+.mini-sheet .board-grid {
+  font-size: 0.6rem;
+  grid-template-columns: 22px repeat(6, minmax(0, 1fr));
+  gap: 1px;
+}
+.mini-sheet .cell-main { font-size: 0.62rem; }
+.mini-sheet .cell-top  { font-size: 0.46rem; height: 10px; line-height: 10px; }
+.mini-sheet .bonus-cell .cell-main { font-size: 0.5rem; }
+
 /* ---------- Footer (dice + reroll) ---------- */
 /* In the natural flex column flow so the sheet above can size against the
    remaining viewport height. */

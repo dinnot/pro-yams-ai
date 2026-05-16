@@ -152,6 +152,8 @@ struct PCData {
     float e_raw;
     int raw_score;
     int pot_score;
+    bool is_clean;        // matches compute_duel: upper_sum >= 60 && !lower_has_scratch
+    bool clean_possible;  // upper_potential >= 60 && !lower_has_scratch (for pot_score upper bound)
     float p_one[13]; // kNumRows
     float grp_E[18];
     float grp_F[15];
@@ -170,6 +172,15 @@ static void compute_pc_data(const BoardStateT<Traits>& board,
     d.upper_sum = ctx.upper_sum[p][col];
     d.raw_score = compute_column_raw_score<Traits>(board, ctx, p, col);
     d.pot_score = compute_column_potential_score<Traits>(board, ctx, p, col);
+    d.is_clean = (ctx.upper_sum[p][col] >= 60) && (!ctx.lower_has_scratch[p][col]);
+    // Upper-bound clean-possible: column can still earn the clean bonus iff
+    // the upper section can still reach 60 and no lower row has scratched yet.
+    int upper_potential_for_clean = ctx.upper_sum[p][col];
+    for (int row = 0; row <= kRow6s; ++row) {
+        if (board.cells[p][col][row] == kCellEmpty)
+            upper_potential_for_clean += kMaxScorePerRow[row];
+    }
+    d.clean_possible = (upper_potential_for_clean >= 60) && (!ctx.lower_has_scratch[p][col]);
 
     for (int row = 0; row < kNumRows; ++row) {
         int8_t v = board.cells[p][col][row];
@@ -340,11 +351,17 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
             out[idx++] = static_cast<float>(rem_me)  / static_cast<float>(kNumRows);
             out[idx++] = static_cast<float>(rem_opp) / static_cast<float>(kNumRows);
 
-            const int my_r  = pc[t0_ci][col].raw_score;
-            const int opp_r = pc[t1_ci][col].raw_score;
-            const int crush_my  = crush_multiplier(my_r,  opp_r);
-            const int crush_opp = crush_multiplier(opp_r, my_r);
+            const int my_r_raw  = pc[t0_ci][col].raw_score;
+            const int opp_r_raw = pc[t1_ci][col].raw_score;
+            const int crush_my  = crush_multiplier(my_r_raw,  opp_r_raw);
+            const int crush_opp = crush_multiplier(opp_r_raw, my_r_raw);
             const int active_crush = std::max(crush_my, crush_opp);
+            // Apply per-pairing clean-column bonus the same way compute_duel does:
+            // bonus value is 200 when no crush, 100 when crush, applied to each
+            // clean player within the pairing.
+            const int clean_bonus_val = (active_crush > 1) ? 100 : 200;
+            const int my_r  = my_r_raw  + (pc[t0_ci][col].is_clean ? clean_bonus_val : 0);
+            const int opp_r = opp_r_raw + (pc[t1_ci][col].is_clean ? clean_bonus_val : 0);
             const long long margin_now =
                 static_cast<long long>(my_r - opp_r) * coeff * active_crush;
             out[idx++] = std::tanh(static_cast<float>(margin_now) / 15000.0f);
@@ -366,9 +383,11 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
 
             const float curr_scales[4] = {500.0f, 750.0f, 1000.0f, 1250.0f};
             for (int k = 0; k < 4; ++k) {
+                // pts_to_Nx works against raw (pre-clean-bonus) scores because
+                // crush thresholds are evaluated on raw_score, not adj_score.
                 out[idx++] = pts_to_Nx(k + 2,
-                                       static_cast<float>(my_r),
-                                       static_cast<float>(opp_r),
+                                       static_cast<float>(my_r_raw),
+                                       static_cast<float>(opp_r_raw),
                                        curr_scales[k]);
             }
             for (int k = 0; k < 4; ++k) {
@@ -404,17 +423,27 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
     // "Locked-in" margin flags: did MY TEAM already secure / lose the game
     // (against the opposing team's max / min potential)? In 1v1 this collapses
     // to the previous my-vs-opp comparison.
+    //
+    // For the upper bound used in opp_max / my_max we add the maximum possible
+    // clean-column bonus (200, taken when there is no crush) on top of
+    // pot_score whenever the column can still earn it. Without this the
+    // "locked-in win" flag (my_min > opp_max) can fire prematurely, since
+    // compute_duel can add up to 200 per-column to opp's adj score.
     int my_min = 0, my_max = 0, opp_min = 0, opp_max = 0;
     for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
         // Canonical seats: 0, 2, ... are "my team"; 1, 3, ... are opposing.
         const bool on_my_team = ((ci % 2) == 0);
         for (int col = 0; col < kNumColumns; ++col) {
+            const int min_adj = pc[ci][col].raw_score +
+                                (pc[ci][col].is_clean ? 100 : 0);  // crush ⇒ 100
+            const int max_adj = pc[ci][col].pot_score +
+                                (pc[ci][col].clean_possible ? 200 : 0);
             if (on_my_team) {
-                my_min += pc[ci][col].raw_score;
-                my_max += pc[ci][col].pot_score;
+                my_min += min_adj;
+                my_max += max_adj;
             } else {
-                opp_min += pc[ci][col].raw_score;
-                opp_max += pc[ci][col].pot_score;
+                opp_min += min_adj;
+                opp_max += max_adj;
             }
         }
     }

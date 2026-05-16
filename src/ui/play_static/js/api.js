@@ -1,16 +1,22 @@
 // REST API client for the Pro Yams Play frontend.
 
 const API = {
-    async newGame(player0, player1) {
+    // playerTypes is an array of strings (one per seat: 'human', 'nn',
+    // 'heuristic_v2', etc.) The server reads player0..playerN-1 keys and
+    // defaults missing seats to heuristic — so the array length tells the
+    // server the variant implicitly (2 entries → 1v1, 4 entries → 2v2).
+    async newGame(playerTypes) {
+        const body = {
+            seed: Math.floor(Math.random() * 1000000),
+            debug_mode: false,
+        };
+        for (let i = 0; i < playerTypes.length; i++) {
+            body['player' + i] = playerTypes[i];
+        }
         const res = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                player0,
-                player1,
-                seed: Math.floor(Math.random() * 1000000),
-                debug_mode: false,
-            }),
+            body: JSON.stringify(body),
         });
         return res.json();
     },

@@ -34,9 +34,10 @@ using TrainingSample2v2 = TrainingSampleT<Yams2v2>;
 // P(player-who-placed's TEAM wins). For Yams1v1 every player is their own
 // (singleton) team — collapses to the pre-2v2 behaviour bit-for-bit.
 //
-// `exclude_player` (-1 = none) skips trajectory steps belonging to that player
-// when emitting samples; used for past-opponent games so the current model is
-// not trained on the older opponent's decisions.
+// `exclude_player` (-1 = none) skips trajectory steps for that player AND its
+// teammates (via Traits::are_teammates), so in 2v2 the whole past-opponent
+// team is dropped — preventing the current model from training on the older
+// opponent's decisions. In 1v1 this collapses to the prior single-seat skip.
 // ---------------------------------------------------------------------------
 template <typename Traits = Yams1v1>
 int extract_training_samples(const GameInstanceT<Traits>& game,

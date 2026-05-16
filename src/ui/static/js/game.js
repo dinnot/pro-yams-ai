@@ -145,7 +145,8 @@ const Game = {
         }
     },
 
-    // Mirrors compute_duel() from duel.cc.
+    // Mirrors compute_duel<Traits>() from duel.cc. Iterates every cross-team
+    // pairing (1 in 1v1, 4 in 2v2). totalDuel is Team-0 minus Team-1 margin.
     computeDuel(gs) {
         if (!gs.boards || !gs.coefficients) return null;
 
@@ -166,10 +167,13 @@ const Game = {
             return 1;
         };
 
+        const numPlayers = gs.num_players ||
+            (gs.player_types ? gs.player_types.length : 2);
+        const team0 = numPlayers === 4 ? [0, 2] : [0];
+        const team1 = numPlayers === 4 ? [1, 3] : [1];
         const UPPER = ROW_NAMES.slice(0, 6);
         const LOWER = ROW_NAMES.slice(6);
-        const boards = [gs.boards.player0, gs.boards.player1];
-        const coeffs  = gs.coefficients;
+        const coeffs = gs.coefficients;
 
         let totalDuel = 0;
         const colData = [];
@@ -177,10 +181,10 @@ const Game = {
         for (let c = 0; c < 6; c++) {
             const colKey = COLUMN_KEYS[c];
             const coeff  = coeffs[c];
-            const players = [];
 
-            for (let p = 0; p < 2; p++) {
-                const b = boards[p];
+            const players = [];
+            for (let p = 0; p < numPlayers; p++) {
+                const b = gs.boards[`player${p}`];
                 let upperSum = 0, cellsSum = 0, lowerHasScratch = false;
                 for (const rn of UPPER) {
                     const v = b?.[colKey]?.[rn] ?? -1;
@@ -192,23 +196,46 @@ const Game = {
                     if (v > 0) cellsSum += v;
                 }
                 const uBonus = upperBonus(upperSum);
-                players.push({ upperSum, cellsSum, uBonus, raw: cellsSum + uBonus, lowerHasScratch });
+                players.push({
+                    seat: p,
+                    upperSum, cellsSum, uBonus,
+                    raw: cellsSum + uBonus,
+                    lowerHasScratch,
+                    isClean: upperSum >= 60 && !lowerHasScratch,
+                    cBonus: 0,
+                    adjusted: cellsSum + uBonus,
+                });
             }
 
-            const crush0 = crushMult(players[0].raw, players[1].raw);
-            const crush1 = crushMult(players[1].raw, players[0].raw);
-            const activeCrush = Math.max(crush0, crush1);
-            const cleanBonus = activeCrush > 1 ? 100 : 200;
-
-            for (const pl of players) {
-                pl.isClean = pl.upperSum >= 60 && !pl.lowerHasScratch;
-                pl.cBonus   = pl.isClean ? cleanBonus : 0;
-                pl.adjusted = pl.raw + pl.cBonus;
+            const pairings = [];
+            let colDuel = 0;
+            let maxCrush = 1;
+            for (const t0p of team0) {
+                for (const t1p of team1) {
+                    const a = players[t0p], b = players[t1p];
+                    const crush0 = crushMult(a.raw, b.raw);
+                    const crush1 = crushMult(b.raw, a.raw);
+                    const activeCrush = Math.max(crush0, crush1);
+                    if (activeCrush > maxCrush) maxCrush = activeCrush;
+                    const cleanBonus = activeCrush > 1 ? 100 : 200;
+                    const adjA = a.raw + (a.isClean ? cleanBonus : 0);
+                    const adjB = b.raw + (b.isClean ? cleanBonus : 0);
+                    const duelPts = (adjA - adjB) * activeCrush * coeff;
+                    colDuel += duelPts;
+                    pairings.push({ t0p, t1p, activeCrush, cleanBonus,
+                                    adjA, adjB, duelPts });
+                    if (a.isClean && cleanBonus > a.cBonus) {
+                        a.cBonus = cleanBonus; a.adjusted = a.raw + cleanBonus;
+                    }
+                    if (b.isClean && cleanBonus > b.cBonus) {
+                        b.cBonus = cleanBonus; b.adjusted = b.raw + cleanBonus;
+                    }
+                }
             }
 
-            const duelPts = (players[0].adjusted - players[1].adjusted) * activeCrush * coeff;
-            totalDuel += duelPts;
-            colData.push({ c, colKey, coeff, players, activeCrush, duelPts });
+            totalDuel += colDuel;
+            colData.push({ c, colKey, coeff, players, pairings,
+                           activeCrush: maxCrush, duelPts: colDuel });
         }
 
         return { totalDuel, colData };
@@ -224,43 +251,46 @@ const Game = {
         const { totalDuel, colData } = Game.computeDuel(gs);
         panel.style.display = 'block';
 
+        const numPlayers = gs.num_players ||
+            (gs.player_types ? gs.player_types.length : 2);
         const fmt = (n) => n > 0 ? `+${n}` : String(n);
         const bonusCell = (v) => v > 0 ? `<span class="bonus-val">+${v}</span>` : '<span style="color:#444">—</span>';
 
+        // Header: 4 stat columns per player + Crush + Duel pts.
+        let header1 = `<tr><th rowspan="2">Column</th>`;
+        for (let p = 0; p < numPlayers; p++) {
+            header1 += `<th colspan="4" style="border-bottom:1px solid #0f3460">Player ${p}</th>`;
+        }
+        header1 += `<th rowspan="2">Crush</th><th rowspan="2">Duel pts</th></tr>`;
+        let header2 = `<tr>`;
+        for (let p = 0; p < numPlayers; p++) {
+            header2 += `<th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>`;
+        }
+        header2 += `</tr>`;
+
         let html = `<h4>Score Breakdown</h4>
         <table class="score-table">
-            <thead>
-                <tr>
-                    <th rowspan="2">Column</th>
-                    <th colspan="4" style="border-bottom:1px solid #0f3460">Player 0</th>
-                    <th colspan="4" style="border-bottom:1px solid #0f3460">Player 1</th>
-                    <th rowspan="2">Crush</th>
-                    <th rowspan="2">Duel pts</th>
-                </tr>
-                <tr>
-                    <th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>
-                    <th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>
-                </tr>
-            </thead>
+            <thead>${header1}${header2}</thead>
             <tbody>`;
 
         for (const col of colData) {
-            const [p0, p1] = col.players;
             const ptsCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
-            html += `<tr>
-                <td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>
-                <td>${p0.cellsSum}</td><td>${bonusCell(p0.uBonus)}</td><td>${bonusCell(p0.cBonus)}</td><td class="adj-val">${p0.adjusted}</td>
-                <td>${p1.cellsSum}</td><td>${bonusCell(p1.uBonus)}</td><td>${bonusCell(p1.cBonus)}</td><td class="adj-val">${p1.adjusted}</td>
-                <td class="crush-val">×${col.activeCrush}</td>
-                <td class="${ptsCls}">${fmt(col.duelPts)}</td>
-            </tr>`;
+            let row = `<tr><td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
+            for (const pl of col.players) {
+                row += `<td>${pl.cellsSum}</td><td>${bonusCell(pl.uBonus)}</td>` +
+                       `<td>${bonusCell(pl.cBonus)}</td><td class="adj-val">${pl.adjusted}</td>`;
+            }
+            row += `<td class="crush-val">×${col.activeCrush}</td>` +
+                   `<td class="${ptsCls}">${fmt(col.duelPts)}</td></tr>`;
+            html += row;
         }
 
         const totalCls = totalDuel > 0 ? 'pts-pos' : totalDuel < 0 ? 'pts-neg' : '';
+        const totalColSpan = 1 + 4 * numPlayers + 1;  // Column + per-player + Crush
         html += `</tbody>
             <tfoot>
                 <tr class="score-total">
-                    <td colspan="10" style="text-align:right;color:#aaa">Total duel score</td>
+                    <td colspan="${totalColSpan}" style="text-align:right;color:#aaa">Total duel score (T0 − T1)</td>
                     <td class="${totalCls}">${fmt(totalDuel)}</td>
                 </tr>
             </tfoot>

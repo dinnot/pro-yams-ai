@@ -36,7 +36,12 @@ int extract_training_samples(const GameInstanceT<Traits>& game,
     for (int i = 0; i < traj_len && out < max_samples; ++i) {
         const TrajectoryStepT<Traits>& step = game.trajectory[i];
         int8_t my_player = step.player;
-        if (exclude_player >= 0 && my_player == exclude_player) continue;
+        // In 2v2, exclude_player names one seat but the whole team plays the
+        // past opponent — skip every trajectory step belonging to that team.
+        // In 1v1, are_teammates(p, q) reduces to (p == q), preserving prior
+        // behaviour exactly.
+        if (exclude_player >= 0 &&
+            Traits::are_teammates(my_player, exclude_player)) continue;
 
         std::memcpy(samples[out].state, step.tensor,
                     Traits::kTensorSize * sizeof(float));

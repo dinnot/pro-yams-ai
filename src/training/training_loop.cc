@@ -270,7 +270,11 @@ int TrainingLoopT<Traits>::collect_completed_games() {
             double activate = opponent_rng_.uniform_double();
             if (activate < config_.past_opponent_probability) {
                 use_past = true;
-                // In 1v1 there are two seats; in 2v2, four. Pick a random seat.
+                // Pick a random seat; the worker and trainer treat any seat on
+                // the same team as the past opponent (see Traits::are_teammates
+                // in worker.cc / training_data.cc). In 1v1 this is one player;
+                // in 2v2 it covers an entire team, keeping the current network
+                // playing strictly against the past one (no mixed-team self-play).
                 past_player = opponent_rng_.uniform_int(0, Traits::kNumPlayers - 1);
             }
         }
