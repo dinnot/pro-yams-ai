@@ -277,48 +277,137 @@ const Game = {
         const fmt = (n) => n > 0 ? `+${n}` : String(n);
         const bonusCell = (v) => v > 0 ? `<span class="bonus-val">+${v}</span>` : '<span style="color:#444">—</span>';
 
-        // Header: 4 stat columns per player + Crush + Duel pts.
-        let header1 = `<tr><th rowspan="2">Column</th>`;
-        for (let p = 0; p < numPlayers; p++) {
-            header1 += `<th colspan="4" style="border-bottom:1px solid #0f3460">Player ${p}</th>`;
-        }
-        header1 += `<th rowspan="2">Crush</th><th rowspan="2">Duel pts</th></tr>`;
-        let header2 = `<tr>`;
-        for (let p = 0; p < numPlayers; p++) {
-            header2 += `<th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>`;
-        }
-        header2 += `</tr>`;
-
-        let html = `<h4>Score Breakdown</h4>
-        <table class="score-table">
-            <thead>${header1}${header2}</thead>
-            <tbody>`;
-
-        for (const col of colData) {
-            const ptsCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
-            let row = `<tr><td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
-            for (const pl of col.players) {
-                row += `<td>${pl.cellsSum}</td><td>${bonusCell(pl.uBonus)}</td>` +
-                       `<td>${bonusCell(pl.cBonus)}</td><td class="adj-val">${pl.adjusted}</td>`;
+        let html;
+        if (numPlayers === 4) {
+            html = Game.renderBreakdown2v2(colData, totalDuel, fmt);
+        } else {
+            // 1v1: one row per column with full per-player stat columns.
+            let header1 = `<tr><th rowspan="2">Column</th>`;
+            for (let p = 0; p < numPlayers; p++) {
+                header1 += `<th colspan="4" style="border-bottom:1px solid #0f3460">Player ${p}</th>`;
             }
-            row += `<td class="crush-val">×${col.activeCrush}</td>` +
-                   `<td class="${ptsCls}">${fmt(col.duelPts)}</td></tr>`;
-            html += row;
-        }
+            header1 += `<th rowspan="2">Crush</th><th rowspan="2">Duel pts</th></tr>`;
+            let header2 = `<tr>`;
+            for (let p = 0; p < numPlayers; p++) {
+                header2 += `<th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>`;
+            }
+            header2 += `</tr>`;
 
-        const totalCls = totalDuel > 0 ? 'pts-pos' : totalDuel < 0 ? 'pts-neg' : '';
-        const totalColSpan = 1 + 4 * numPlayers + 1;  // Column + per-player + Crush
-        html += `</tbody>
-            <tfoot>
-                <tr class="score-total">
-                    <td colspan="${totalColSpan}" style="text-align:right;color:#aaa">Total duel score (T0 − T1)</td>
-                    <td class="${totalCls}">${fmt(totalDuel)}</td>
-                </tr>
-            </tfoot>
-        </table>`;
+            html = `<h4>Score Breakdown</h4>
+            <table class="score-table">
+                <thead>${header1}${header2}</thead>
+                <tbody>`;
+
+            for (const col of colData) {
+                const ptsCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
+                let row = `<tr><td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
+                for (const pl of col.players) {
+                    row += `<td>${pl.cellsSum}</td><td>${bonusCell(pl.uBonus)}</td>` +
+                           `<td>${bonusCell(pl.cBonus)}</td><td class="adj-val">${pl.adjusted}</td>`;
+                }
+                row += `<td class="crush-val">×${col.activeCrush}</td>` +
+                       `<td class="${ptsCls}">${fmt(col.duelPts)}</td></tr>`;
+                html += row;
+            }
+
+            const totalCls = totalDuel > 0 ? 'pts-pos' : totalDuel < 0 ? 'pts-neg' : '';
+            const totalColSpan = 1 + 4 * numPlayers + 1;
+            html += `</tbody>
+                <tfoot>
+                    <tr class="score-total">
+                        <td colspan="${totalColSpan}" style="text-align:right;color:#aaa">Total duel score (T0 − T1)</td>
+                        <td class="${totalCls}">${fmt(totalDuel)}</td>
+                    </tr>
+                </tfoot>
+            </table>`;
+        }
 
         panel.innerHTML = html;
         return totalDuel;
+    },
+
+    renderBreakdown2v2(colData, totalDuel, fmt) {
+        // Accumulate per-player signed contribution: T0 players gain, T1 players lose.
+        const playerTotals = [0, 0, 0, 0];
+        for (const col of colData) {
+            for (const pr of col.pairings) {
+                playerTotals[pr.t0p] += pr.duelPts;
+                playerTotals[pr.t1p] -= pr.duelPts;
+            }
+        }
+
+        // 8 columns: Column | T0 | adj | vs | T1 | adj | ×crush | pts
+        let html = `<h4>Score Breakdown</h4>
+        <table class="score-table">
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>T0</th><th>adj</th>
+                <th></th>
+                <th>T1</th><th>adj</th>
+                <th>×crush</th><th>pts</th>
+              </tr>
+            </thead>
+            <tbody>`;
+
+        for (const col of colData) {
+            const nPr = col.pairings.length;
+            for (let i = 0; i < nPr; i++) {
+                const pr = col.pairings[i];
+                const ptsCls = pr.duelPts > 0 ? 'pts-pos' : pr.duelPts < 0 ? 'pts-neg' : '';
+                html += `<tr>`;
+                if (i === 0) {
+                    html += `<td rowspan="${nPr + 1}" class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
+                }
+                html += `<td>P${pr.t0p}</td><td class="adj-val">${pr.adjA}</td>
+                         <td style="color:#555">vs</td>
+                         <td>P${pr.t1p}</td><td class="adj-val">${pr.adjB}</td>
+                         <td class="crush-val">×${pr.activeCrush}</td>
+                         <td class="${ptsCls}">${fmt(pr.duelPts)}</td>
+                       </tr>`;
+            }
+            // Subtotal row — shares the rowspan column cell, so 7 cells here.
+            const colCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
+            html += `<tr class="col-subtotal">
+                       <td colspan="6" style="text-align:right;color:#aaa">Column total (T0 − T1)</td>
+                       <td class="${colCls}">${fmt(col.duelPts)}</td>
+                     </tr>`;
+        }
+
+        html += `</tbody><tfoot>`;
+
+        // Team 0 per-player then sum — 8 cells per row in tfoot.
+        for (const p of [0, 2]) {
+            const cls = playerTotals[p] > 0 ? 'pts-pos' : playerTotals[p] < 0 ? 'pts-neg' : '';
+            html += `<tr>
+                       <td colspan="7" style="text-align:right;color:#aaa">P${p} total</td>
+                       <td class="${cls}">${fmt(playerTotals[p])}</td>
+                     </tr>`;
+        }
+        const t0 = playerTotals[0] + playerTotals[2];
+        const t0Cls = t0 > 0 ? 'pts-pos' : t0 < 0 ? 'pts-neg' : '';
+        html += `<tr class="score-total">
+                   <td colspan="7" style="text-align:right">Team 0 (P0 + P2)</td>
+                   <td class="${t0Cls}">${fmt(t0)}</td>
+                 </tr>`;
+
+        // Team 1 per-player then sum.
+        for (const p of [1, 3]) {
+            const cls = playerTotals[p] > 0 ? 'pts-pos' : playerTotals[p] < 0 ? 'pts-neg' : '';
+            html += `<tr>
+                       <td colspan="7" style="text-align:right;color:#aaa">P${p} total</td>
+                       <td class="${cls}">${fmt(playerTotals[p])}</td>
+                     </tr>`;
+        }
+        const t1 = playerTotals[1] + playerTotals[3];
+        const t1Cls = t1 > 0 ? 'pts-pos' : t1 < 0 ? 'pts-neg' : '';
+        html += `<tr class="score-total">
+                   <td colspan="7" style="text-align:right">Team 1 (P1 + P3)</td>
+                   <td class="${t1Cls}">${fmt(t1)}</td>
+                 </tr>`;
+
+        html += `</tfoot></table>`;
+        return html;
     },
 
     async updateUI() {
@@ -332,9 +421,16 @@ const Game = {
         if (gs.game_over) {
             const scoreStr = duel != null ? ` (duel score: ${duel > 0 ? '+' + duel : duel})` : '';
             const r = gs.result;
-            if (r === 1.0) Game.setStatus(`Game over — Player 0 wins!${scoreStr}`, 'win');
-            else if (r === 0.0) Game.setStatus(`Game over — Player 1 wins!${scoreStr}`, 'win');
-            else Game.setStatus(`Game over — Draw!${scoreStr}`, 'draw');
+            const numP = gs.num_players || (gs.player_types ? gs.player_types.length : 2);
+            if (r === 1.0) {
+                const winners = numP === 4 ? 'P0 and P2' : 'Player 0';
+                Game.setStatus(`Game over — ${winners} win!${scoreStr}`, 'win');
+            } else if (r === 0.0) {
+                const winners = numP === 4 ? 'P1 and P3' : 'Player 1';
+                Game.setStatus(`Game over — ${winners} win!${scoreStr}`, 'win');
+            } else {
+                Game.setStatus(`Game over — Draw!${scoreStr}`, 'draw');
+            }
             document.getElementById('btn-step').disabled = true;
             document.getElementById('btn-play-all').disabled = true;
         } else if (gs.waiting_for_human) {
