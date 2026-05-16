@@ -91,7 +91,7 @@ TEST_P(CoordinatorActivationTest, BatchAssembly_DistributesEVs) {
     std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 3 &&
@@ -144,7 +144,7 @@ TEST(CoordinatorTest, BatchOverflow_FlowsToMultipleBatches) {
     std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     // Wait for BOTH games to flow through.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -178,7 +178,7 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
     std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 1 &&
@@ -214,7 +214,7 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     // Pump 1001 games through to trigger the % 1000 reporting.
     // Each game will be a tiny batch.
@@ -250,4 +250,3 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     // Clean up
     std::filesystem::remove(cfg.debug_log_path);
 }
-

@@ -79,13 +79,15 @@ void SelfPlayOrchestratorT<Traits>::start() {
     workers_.reserve(config_.num_workers);
     BatchManagerT<Traits>* opp_bm_ptr =
         opponent_batch_manager_ ? opponent_batch_manager_.get() : nullptr;
+    SelfPlayDebugStats* stats_ptr = config_.debug_mode ? &debug_stats_ : nullptr;
     for (int i = 0; i < config_.num_workers; ++i) {
         workers_.emplace_back(worker_thread<Traits>,
             std::ref(available_queue_), std::ref(*batch_manager_),
             opp_bm_ptr,
             std::ref(completed_queue_),
             std::ref(tables_), std::ref(solver_config_),
-            std::ref(shutdown_));
+            std::ref(shutdown_),
+            stats_ptr);
     }
 
     coordinators_.reserve(config_.num_coordinators);
@@ -93,7 +95,8 @@ void SelfPlayOrchestratorT<Traits>::start() {
         coordinators_.emplace_back(coordinator_thread<Traits>,
             std::ref(*batch_manager_), std::ref(available_queue_),
             std::ref(inference_), std::ref(config_),
-            std::ref(shutdown_), i);
+            std::ref(shutdown_), i,
+            stats_ptr);
     }
 
     if (opponent_batch_manager_) {
@@ -102,7 +105,8 @@ void SelfPlayOrchestratorT<Traits>::start() {
             opponent_coordinators_.emplace_back(coordinator_thread<Traits>,
                 std::ref(*opponent_batch_manager_), std::ref(available_queue_),
                 std::ref(*opponent_inference_), std::ref(config_),
-                std::ref(shutdown_), 100 + i);
+                std::ref(shutdown_), 100 + i,
+                stats_ptr);
         }
     }
 }

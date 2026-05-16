@@ -53,7 +53,8 @@ TEST(WorkerTest, NeedRequests_PushesToPending) {
                    std::ref(available), std::ref(bm),
                    static_cast<BatchManager*>(nullptr),
                    std::ref(completed),
-                   std::ref(*g_tables), greedy_config(), std::ref(shutdown));
+                   std::ref(*g_tables), greedy_config(), std::ref(shutdown),
+                   nullptr);
     wt.join();
 
     EXPECT_EQ(game->phase, GamePhase::kWaitingInference);
@@ -91,7 +92,8 @@ TEST(WorkerTest, NeedResolve_RecordsTrajectory) {
                    std::ref(available), std::ref(bm),
                    static_cast<BatchManager*>(nullptr),
                    std::ref(completed),
-                   std::ref(*g_tables), greedy_config(), std::ref(shutdown));
+                   std::ref(*g_tables), greedy_config(), std::ref(shutdown),
+                   nullptr);
     wt.join();
 
     // With rolls_left=0 solver always places, so trajectory must have 1 step.

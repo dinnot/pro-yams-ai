@@ -3,6 +3,7 @@
 #include <atomic>
 #include "engine/game_traits.h"
 #include "self_play/batch_manager.h"
+#include "self_play/debug_stats.h"
 #include "self_play/game_queues.h"
 #include "model/inference.h"
 
@@ -35,4 +36,5 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
                         InferenceEngine& inference,
                         const SelfPlayConfig& config,
                         std::atomic<bool>& shutdown,
-                        int coordinator_id);
+                        int coordinator_id,
+                        SelfPlayDebugStats* debug_stats = nullptr);

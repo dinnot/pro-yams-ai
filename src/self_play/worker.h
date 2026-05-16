@@ -3,6 +3,7 @@
 #include <atomic>
 #include "engine/game_traits.h"
 #include "self_play/batch_manager.h"
+#include "self_play/debug_stats.h"
 #include "self_play/game_queues.h"
 #include "solver/precomputed_tables.h"
 #include "solver/solver.h"
@@ -28,4 +29,5 @@ void worker_thread(GameQueueT<Traits>& available,
                    BatchManagerT<Traits>* opponent_batch_manager,
                    GameQueueT<Traits>& completed,
                    const PrecomputedTables& tables, const SolverConfig& config,
-                   std::atomic<bool>& shutdown);
+                   std::atomic<bool>& shutdown,
+                   SelfPlayDebugStats* debug_stats = nullptr);

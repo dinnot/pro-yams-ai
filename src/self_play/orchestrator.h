@@ -63,6 +63,9 @@ public:
 
     int available_queue_size() const { return available_queue_.size(); }
     int completed_queue_size() const { return completed_queue_.size(); }
+    SelfPlayDebugStatsSnapshot collect_debug_stats_delta() {
+        return debug_stats_.exchange_snapshot();
+    }
 
 private:
     SelfPlayConfig           config_;
@@ -82,6 +85,7 @@ private:
     std::vector<std::thread> coordinators_;
     std::vector<std::thread> opponent_coordinators_;
     std::atomic<bool>        shutdown_{false};
+    SelfPlayDebugStats       debug_stats_;
 };
 
 // Backward-compat aliases.

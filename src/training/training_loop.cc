@@ -44,6 +44,72 @@ std::vector<std::string> list_checkpoint_stems(const std::string& dir) {
     return out;
 }
 
+double avg_us(int64_t total_us, int64_t count) {
+    return count > 0 ? static_cast<double>(total_us) / static_cast<double>(count) : 0.0;
+}
+
+void write_self_play_debug_stats(std::ofstream& f,
+                                 const SelfPlayDebugStatsSnapshot& s,
+                                 const char* label) {
+    const double avg_req_per_need =
+        s.worker_need_requests > 0
+            ? static_cast<double>(s.worker_requests) / s.worker_need_requests
+            : 0.0;
+    const double avg_tensor_batch =
+        s.worker_need_requests > 0
+            ? static_cast<double>(s.worker_tensors) / s.worker_need_requests
+            : 0.0;
+    const double avg_heur_req =
+        s.heuristic_eval_calls > 0
+            ? static_cast<double>(s.heuristic_requests) / s.heuristic_eval_calls
+            : 0.0;
+    const double avg_coord_batch =
+        s.coordinator_batches > 0
+            ? static_cast<double>(s.coordinator_tensors) / s.coordinator_batches
+            : 0.0;
+
+    f << "--- Self-play worker stats (" << label << ") ---\n"
+      << "Worker phases: need_requests=" << s.worker_need_requests
+      << " need_resolve=" << s.worker_need_resolve
+      << " completed=" << s.worker_completed_games
+      << " placements=" << s.worker_placements
+      << " rerolls=" << s.worker_rerolls << "\n"
+      << "Requests/tensors: requests=" << s.worker_requests
+      << " tensors=" << s.worker_tensors
+      << " avg_req_per_need=" << avg_req_per_need
+      << " avg_tensors_per_need=" << avg_tensor_batch << "\n"
+      << "Worker avg us: get_requests=" << avg_us(s.solver_get_requests_us, s.worker_need_requests)
+      << " reserve=" << avg_us(s.batch_reserve_us, s.worker_need_requests)
+      << " tensor_batch=" << avg_us(s.tensor_batch_us, s.worker_need_requests)
+      << " commit=" << avg_us(s.batch_commit_us, s.worker_need_requests)
+      << " pure_resolve=" << avg_us(s.pure_resolve_us, s.worker_need_resolve)
+      << " heuristic_eval=" << avg_us(s.heuristic_eval_us, s.heuristic_eval_calls)
+      << " blend_total=" << avg_us(s.blend_us, s.heuristic_eval_calls)
+      << " solver_resolve=" << avg_us(s.solver_resolve_us, s.worker_need_resolve)
+      << " chosen_tensor=" << avg_us(s.chosen_tensor_us, s.worker_placements)
+      << " action=" << avg_us(s.perform_action_us, s.worker_placements + s.worker_rerolls)
+      << "\n"
+      << "Heuristic: calls=" << s.heuristic_eval_calls
+      << " requests=" << s.heuristic_requests
+      << " avg_req=" << avg_heur_req
+      << " total_eval_ms=" << (static_cast<double>(s.heuristic_eval_us) / 1000.0)
+      << " versions=";
+    for (int i = 1; i < 18; ++i) {
+        if (s.heuristic_v_counts[i] > 0) {
+            f << " V" << i << ":" << s.heuristic_v_counts[i];
+        }
+    }
+    f << "\n"
+      << "Coordinator: batches=" << s.coordinator_batches
+      << " games=" << s.coordinator_games
+      << " tensors=" << s.coordinator_tensors
+      << " avg_tensors_per_batch=" << avg_coord_batch
+      << " avg_pop_wait_us=" << avg_us(s.coordinator_pop_wait_us, s.coordinator_batches)
+      << " avg_inference_us=" << avg_us(s.coordinator_inference_us, s.coordinator_batches)
+      << " avg_distribute_us=" << avg_us(s.coordinator_distribute_us, s.coordinator_batches)
+      << "\n\n";
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -222,6 +288,8 @@ void TrainingLoopT<Traits>::run(int num_steps) {
                 if (f.is_open()) {
                     f << "Collected " << collected << " games in " << collect_ms << " ms\n"
                       << "Ran " << steps_to_do << " full train steps in " << total_train_ms << " ms\n\n";
+                    auto sp_stats = orchestrator_->collect_debug_stats_delta();
+                    write_self_play_debug_stats(f, sp_stats, "collect/train interval");
                 }
             }
         }
@@ -330,6 +398,8 @@ void TrainingLoopT<Traits>::do_training_step() {
               << "Trainer train_step() time: " << train_ms << " ms for batch size " << n << "\n"
               << "sample_batch() time: " << sample_ms << " ms\n"
               << "memcpy loop time: " << memcpy_ms << " ms\n\n";
+            auto sp_stats = orchestrator_->collect_debug_stats_delta();
+            write_self_play_debug_stats(f, sp_stats, "train-step checkpoint");
         }
     }
 

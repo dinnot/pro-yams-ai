@@ -139,27 +139,12 @@ void heuristic_evaluate_v2(const BoardStateT<Traits>& base_board,
     for (int p = 0; p < Traits::kNumPlayers; ++p)
         filled[p] = count_filled_cells<Traits>(base_board, p) + (p == p_me ? 1 : 0);
 
-    // Precompute E_raw / P_clean for every (player, column) on the base
-    // state. apply_placement only mutates the placed column, so for any
-    // other column these values are valid for every request.
-    float base_E[Traits::kNumPlayers][kNumColumns];
-    float base_P_clean[Traits::kNumPlayers][kNumColumns];
-    for (int p = 0; p < Traits::kNumPlayers; ++p) {
-        for (int col = 0; col < kNumColumns; ++col) {
-            const int empty = count_empty_cells<Traits>(base_board, p, col);
-            const int T = std::max(empty, empty + (78 - filled[p]) / 6);
-            base_E[p][col]       = get_E_raw<Traits>(p, col, T, base_board, base_ctx, dp);
-            base_P_clean[p][col] = get_P_clean<Traits>(p, col, T, base_board, base_ctx, dp);
-        }
-    }
-
     for (int i = 0; i < request_count; ++i) {
         BoardStateT<Traits> b = base_board;
         GameContextT<Traits> c = base_ctx;
-        const int placed_col = requests[i].placement.column;
         // Clone consumed only for column-DP lookups — legal caches unused.
         apply_placement<Traits>(p_me,
-                                placed_col,
+                                requests[i].placement.column,
                                 requests[i].placement.row,
                                 requests[i].score, b, c,
                                 /*update_legal_cache=*/false);
@@ -170,18 +155,11 @@ void heuristic_evaluate_v2(const BoardStateT<Traits>& base_board,
             // Per-player E_raw and P_clean for this column.
             float E[Traits::kNumPlayers];
             float P_clean[Traits::kNumPlayers];
-            if (col == placed_col) {
-                for (int p = 0; p < Traits::kNumPlayers; ++p) {
-                    const int empty = count_empty_cells<Traits>(b, p, col);
-                    const int T = std::max(empty, empty + (78 - filled[p]) / 6);
-                    E[p]       = get_E_raw<Traits>(p, col, T, b, c, dp);
-                    P_clean[p] = get_P_clean<Traits>(p, col, T, b, c, dp);
-                }
-            } else {
-                for (int p = 0; p < Traits::kNumPlayers; ++p) {
-                    E[p]       = base_E[p][col];
-                    P_clean[p] = base_P_clean[p][col];
-                }
+            for (int p = 0; p < Traits::kNumPlayers; ++p) {
+                const int empty = count_empty_cells<Traits>(b, p, col);
+                const int T = std::max(empty, empty + (78 - filled[p]) / 6);
+                E[p]       = get_E_raw<Traits>(p, col, T, b, c, dp);
+                P_clean[p] = get_P_clean<Traits>(p, col, T, b, c, dp);
             }
 
             // Cross-team pairings (1v1: 1×1, 2v2: 2×2).
@@ -254,24 +232,11 @@ void heuristic_evaluate_v3(const BoardStateT<Traits>& base_board,
     // Filled count for p_me post-placement is base+1 for every candidate.
     const int filled_me = count_filled_cells<Traits>(base_board, p_me) + 1;
 
-    // Pre-compute E_raw / P_clean for p_me on each column from the base state.
-    // For any column other than the placed one, the post-placement (b, c)
-    // values are identical to the base values — reuse without recomputing.
-    float base_E_me[kNumColumns];
-    float base_P_clean_me[kNumColumns];
-    for (int col = 0; col < kNumColumns; ++col) {
-        const int empty_me = count_empty_cells<Traits>(base_board, p_me, col);
-        const int T_me = std::max(empty_me, empty_me + (78 - filled_me) / 6);
-        base_E_me[col]       = get_E_raw<Traits>(p_me, col, T_me, base_board, base_ctx, dp);
-        base_P_clean_me[col] = get_P_clean<Traits>(p_me, col, T_me, base_board, base_ctx, dp);
-    }
-
     for (int i = 0; i < request_count; ++i) {
         BoardStateT<Traits> b = base_board;
         GameContextT<Traits> c = base_ctx;
-        const int placed_col = requests[i].placement.column;
         apply_placement<Traits>(p_me,
-                                placed_col,
+                                requests[i].placement.column,
                                 requests[i].placement.row,
                                 requests[i].score, b, c,
                                 /*update_legal_cache=*/false);
@@ -286,16 +251,9 @@ void heuristic_evaluate_v3(const BoardStateT<Traits>& base_board,
             const int empty_me = count_empty_cells<Traits>(b, p_me, col);
             if (empty_me == 0) continue;
 
-            float E_me;
-            float P_clean;
-            if (col == placed_col) {
-                const int T_me = std::max(empty_me, empty_me + (78 - filled_me) / 6);
-                E_me    = get_E_raw<Traits>(p_me, col, T_me, b, c, dp);
-                P_clean = get_P_clean<Traits>(p_me, col, T_me, b, c, dp);
-            } else {
-                E_me    = base_E_me[col];
-                P_clean = base_P_clean_me[col];
-            }
+            const int T_me = std::max(empty_me, empty_me + (78 - filled_me) / 6);
+            const float E_me = get_E_raw<Traits>(p_me, col, T_me, b, c, dp);
+            const float P_clean = get_P_clean<Traits>(p_me, col, T_me, b, c, dp);
 
             // Rule 1: aim for at least 150 raw points per column.
             // 2v2: drop the aim only when ALL opponents are so scratched they
@@ -384,35 +342,12 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
         total_empty_all += (78 - filled[p]);
     }
 
-    // Pre-compute E_raw / P_clean / Var per (player, column) on the base
-    // state. Only the placed column differs after apply_placement, so for every
-    // other column these values are valid across all candidates.
-    float base_E      [Traits::kNumPlayers][kNumColumns];
-    float base_P_clean[Traits::kNumPlayers][kNumColumns];
-    float base_Var    [Traits::kNumPlayers][kNumColumns];
-    for (int p = 0; p < Traits::kNumPlayers; ++p) {
-        const TStrategy strat = (p == p_me) ? cfg.t_me : cfg.t_opp;
-        for (int col = 0; col < kNumColumns; ++col) {
-            const int empty = count_empty_cells<Traits>(base_board, p, col);
-            const int T_pc  = compute_T(strat, empty, filled[p], total_empty_all);
-            base_E[p][col]       = get_E_raw<Traits>(p, col, T_pc,
-                                                     base_board, base_ctx, dp);
-            base_P_clean[p][col] = get_P_clean<Traits>(p, col, T_pc,
-                                                       base_board, base_ctx, dp);
-            if (cfg.output_win_odds) {
-                base_Var[p][col] = get_E_raw_var<Traits>(p, col, T_pc,
-                                                         base_board, base_ctx, dp);
-            }
-        }
-    }
-
     for (int i = 0; i < request_count; ++i) {
         BoardStateT<Traits> b = base_board;
         GameContextT<Traits> c = base_ctx;
-        const int placed_col = requests[i].placement.column;
         // Clone consumed only for column DP/score lookups — legal caches unused.
         apply_placement<Traits>(p_me,
-                                placed_col,
+                                requests[i].placement.column,
                                 requests[i].placement.row,
                                 requests[i].score, b, c,
                                 /*update_legal_cache=*/false);
@@ -427,24 +362,14 @@ void heuristic_evaluate_research(const BoardStateT<Traits>& base_board,
             float E[Traits::kNumPlayers];
             float P_clean[Traits::kNumPlayers];
             float Var[Traits::kNumPlayers];  // populated only if output_win_odds
-            if (col == placed_col) {
-                for (int p = 0; p < Traits::kNumPlayers; ++p) {
-                    const int empty = count_empty_cells<Traits>(b, p, col);
-                    const TStrategy strat = (p == p_me) ? cfg.t_me : cfg.t_opp;
-                    const int T_pc = compute_T(strat, empty, filled[p], total_empty_all);
-                    E[p]       = get_E_raw<Traits>(p, col, T_pc, b, c, dp);
-                    P_clean[p] = get_P_clean<Traits>(p, col, T_pc, b, c, dp);
-                    if (cfg.output_win_odds) {
-                        Var[p] = get_E_raw_var<Traits>(p, col, T_pc, b, c, dp);
-                    }
-                }
-            } else {
-                for (int p = 0; p < Traits::kNumPlayers; ++p) {
-                    E[p]       = base_E[p][col];
-                    P_clean[p] = base_P_clean[p][col];
-                    if (cfg.output_win_odds) {
-                        Var[p] = base_Var[p][col];
-                    }
+            for (int p = 0; p < Traits::kNumPlayers; ++p) {
+                const int empty = count_empty_cells<Traits>(b, p, col);
+                const TStrategy strat = (p == p_me) ? cfg.t_me : cfg.t_opp;
+                const int T_pc = compute_T(strat, empty, filled[p], total_empty_all);
+                E[p]       = get_E_raw<Traits>(p, col, T_pc, b, c, dp);
+                P_clean[p] = get_P_clean<Traits>(p, col, T_pc, b, c, dp);
+                if (cfg.output_win_odds) {
+                    Var[p] = get_E_raw_var<Traits>(p, col, T_pc, b, c, dp);
                 }
             }
 

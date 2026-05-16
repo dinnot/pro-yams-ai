@@ -24,9 +24,9 @@ training:
   eval_interval: 1000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/2v2/test_timing3
-  log_dir: ./logs/2v2/test_timing3
-  log_path: ./logs/2v2/test_timing3/training_log.csv
+  checkpoint_dir: checkpoints/2v2/test_timing6
+  log_dir: ./logs/2v2/test_timing6
+  log_path: ./logs/2v2/test_timing6/training_log.csv
   debug_mode: true
 
   initial_heuristic_weight: 1.0

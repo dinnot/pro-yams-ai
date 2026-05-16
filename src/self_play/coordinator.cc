@@ -23,7 +23,8 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
                         InferenceEngine& inference,
                         const SelfPlayConfig& config,
                         std::atomic<bool>& shutdown,
-                        int coordinator_id) {
+                        int coordinator_id,
+                        SelfPlayDebugStats* debug_stats) {
     using GI = GameInstanceT<Traits>;
     using IB = InferenceBatchT<Traits>;
 
@@ -53,7 +54,14 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
     while (!shutdown.load(std::memory_order_relaxed)) {
         auto t_assembly_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
+        auto t_pop0 = debug_stats ? Clock::now() : Clock::time_point();
         IB* batch = batch_manager.pop_ready_batch();
+        auto t_pop1 = debug_stats ? Clock::now() : Clock::time_point();
+        if (debug_stats) {
+            debug_stats->coordinator_pop_wait_us.fetch_add(
+                std::chrono::duration_cast<std::chrono::microseconds>(t_pop1 - t_pop0).count(),
+                std::memory_order_relaxed);
+        }
         if (!batch) break;
 
         int total_tensors = batch->committed_count.load(std::memory_order_relaxed);
@@ -64,11 +72,19 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
             continue;
         }
 
-        auto t_inference_start = config.debug_mode ? Clock::now() : Clock::time_point();
+        auto t_inference_start = (debug_stats || config.debug_mode) ? Clock::now()
+                                                                    : Clock::time_point();
 
         auto input_slice = batch->storage.narrow(0, 0, total_tensors);
         inference.batch_inference(input_slice, total_tensors,
                                   batch_results.data());
+        auto t_inference_done = debug_stats ? Clock::now() : Clock::time_point();
+        if (debug_stats) {
+            debug_stats->coordinator_inference_us.fetch_add(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    t_inference_done - t_inference_start).count(),
+                std::memory_order_relaxed);
+        }
 
         auto t_distribute_start = config.debug_mode ? Clock::now() : Clock::time_point();
 
@@ -88,6 +104,16 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
         }
 
         batch_manager.recycle_batch(batch);
+        auto t_distribute_done = debug_stats ? Clock::now() : Clock::time_point();
+        if (debug_stats) {
+            debug_stats->coordinator_batches.fetch_add(1, std::memory_order_relaxed);
+            debug_stats->coordinator_games.fetch_add(num_entries, std::memory_order_relaxed);
+            debug_stats->coordinator_tensors.fetch_add(total_tensors, std::memory_order_relaxed);
+            debug_stats->coordinator_distribute_us.fetch_add(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    t_distribute_done - t_inference_done).count(),
+                std::memory_order_relaxed);
+        }
 
         if (config.debug_mode) {
             auto t_end = Clock::now();
@@ -139,7 +165,7 @@ void coordinator_thread(BatchManagerT<Traits>& batch_manager,
 // ---------------------------------------------------------------------------
 template void coordinator_thread<Yams1v1>(BatchManagerT<Yams1v1>&, GameQueueT<Yams1v1>&,
                                           InferenceEngine&, const SelfPlayConfig&,
-                                          std::atomic<bool>&, int);
+                                          std::atomic<bool>&, int, SelfPlayDebugStats*);
 template void coordinator_thread<Yams2v2>(BatchManagerT<Yams2v2>&, GameQueueT<Yams2v2>&,
                                           InferenceEngine&, const SelfPlayConfig&,
-                                          std::atomic<bool>&, int);
+                                          std::atomic<bool>&, int, SelfPlayDebugStats*);
