@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "engine/game_traits.h"
 
@@ -31,6 +32,39 @@ int extract_training_samples(const GameInstanceT<Traits>& game,
     auto flip = [&](double v) -> double {
         return use_margin ? -v : 1.0 - v;
     };
+
+    // Precompute team-0-perspective TD(λ) targets in a single O(N) backward
+    // pass. For each trajectory step i, g_team0[i] is the TD(λ) target as
+    // seen from team 0's perspective. Per-step targets for the actual
+    // my_player are obtained by flipping when my_player is on team 1.
+    //
+    // Recursion (no per-step reward, no discount):
+    //   g[N-1] = terminal_p0
+    //   For i < N-1:
+    //     If step i+1 is exploratory   ⇒ g[i] = v_{i+1}           (trace cut)
+    //     Else                          ⇒ g[i] = (1-λ)·v_{i+1} + λ·g[i+1]
+    //   where v_j = future.value if are_teammates(player_j, 0) else flip(value).
+    //
+    // The weights in the original forward loop summed to 1, so the previous
+    // sum/weight_sum division is unnecessary here — the recursion preserves
+    // that property by construction.
+    std::vector<double> g_team0;
+    if (td_mode == TDMode::kTDLambda && traj_len > 0) {
+        g_team0.resize(traj_len);
+        g_team0[traj_len - 1] = terminal_p0;
+        for (int idx = traj_len - 2; idx >= 0; --idx) {
+            const TrajectoryStepT<Traits>& next = game.trajectory[idx + 1];
+            const double v_next = Traits::are_teammates(next.player, 0)
+                ? next.value
+                : flip(next.value);
+            if (next.is_exploratory) {
+                g_team0[idx] = v_next;
+            } else {
+                g_team0[idx] = (1.0 - td_lambda) * v_next
+                             + td_lambda * g_team0[idx + 1];
+            }
+        }
+    }
 
     int out = 0;
     for (int i = 0; i < traj_len && out < max_samples; ++i) {
@@ -65,37 +99,8 @@ int extract_training_samples(const GameInstanceT<Traits>& game,
             break;
 
         case TDMode::kTDLambda: {
-            double accumulated = 0.0;
-            double weight_sum  = 0.0;
-            double lam_power   = 1.0;
-            bool trace_cut     = false;
-
-            for (int j = i + 1; j < game.trajectory_length; ++j) {
-                const TrajectoryStepT<Traits>& future = game.trajectory[j];
-                double bootstrap = Traits::are_teammates(future.player, my_player)
-                    ? future.value
-                    : flip(future.value);
-
-                if (future.is_exploratory) {
-                    accumulated += lam_power * bootstrap;
-                    weight_sum  += lam_power;
-                    trace_cut = true;
-                    break;
-                } else {
-                    double w = (1.0 - td_lambda) * lam_power;
-                    accumulated += w * bootstrap;
-                    weight_sum  += w;
-                    lam_power   *= td_lambda;
-                }
-            }
-
-            if (!trace_cut) {
-                double terminal = terminal_for(my_player);
-                accumulated += lam_power * terminal;
-                weight_sum  += lam_power;
-            }
-
-            target = (weight_sum > 0.0) ? accumulated / weight_sum : terminal_for(my_player);
+            const double g = g_team0[i];
+            target = Traits::are_teammates(my_player, 0) ? g : flip(g);
             break;
         }
         }

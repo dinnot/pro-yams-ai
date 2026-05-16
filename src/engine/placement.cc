@@ -24,7 +24,8 @@ static void recalc_golden_max(int column, int row,
 template <typename Traits>
 void apply_placement(int player, int column, int row, int score,
                      BoardStateT<Traits>& board,
-                     GameContextT<Traits>& ctx) {
+                     GameContextT<Traits>& ctx,
+                     bool update_legal_cache) {
     assert(board.cells[player][column][row] == kCellEmpty &&
            "Cannot place in an already filled cell!");
 
@@ -77,8 +78,12 @@ void apply_placement(int player, int column, int row, int score,
         ctx.non_turbo_cells_remaining[player]--;
     }
 
-    // 8. Update legal placements (incremental)
-    update_legal_placements_after_move<Traits>(player, column, row, board, ctx);
+    // 8. Update legal placements (incremental). Skipped when the caller
+    //    will only consult the resulting context for board/score lookups
+    //    and not for legal-move iteration.
+    if (update_legal_cache) {
+        update_legal_placements_after_move<Traits>(player, column, row, board, ctx);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +92,9 @@ void apply_placement(int player, int column, int row, int score,
 
 template void apply_placement<Yams1v1>(int, int, int, int,
                                        BoardStateT<Yams1v1>&,
-                                       GameContextT<Yams1v1>&);
+                                       GameContextT<Yams1v1>&,
+                                       bool);
 template void apply_placement<Yams2v2>(int, int, int, int,
                                        BoardStateT<Yams2v2>&,
-                                       GameContextT<Yams2v2>&);
+                                       GameContextT<Yams2v2>&,
+                                       bool);

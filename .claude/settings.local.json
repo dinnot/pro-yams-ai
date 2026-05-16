@@ -255,7 +255,9 @@
       "Bash(/usr/bin/time -v build/tests/training/training_tests)",
       "Bash(build/tests/self_play/self_play_tests)",
       "Bash(build/tests/training/training_tests)",
-      "Bash(build/tests/model/model_tests)"
+      "Bash(build/tests/model/model_tests)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs -r kill)"
     ]
   }
 }

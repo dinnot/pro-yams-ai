@@ -535,6 +535,8 @@ void generate_tensor_batch(const BoardStateT<Traits>& board,
         }
     }
 
+    PCData saved_col[Traits::kNumPlayers];
+
     for (int i = 0; i < request_count; ++i) {
         BoardStateT<Traits> board_clone = board;
         GameContextT<Traits> ctx_clone = ctx;
@@ -544,24 +546,30 @@ void generate_tensor_batch(const BoardStateT<Traits>& board,
         const int row = req.placement.row;
         const int score = req.score;
 
-        apply_placement<Traits>(player, col, row, score, board_clone, ctx_clone);
+        // The clone is consumed solely by compute_pc_data, which never reads
+        // the legal_all / legal_no_turbo caches.
+        apply_placement<Traits>(player, col, row, score, board_clone, ctx_clone,
+                                /*update_legal_cache=*/false);
 
-        PCData pc[Traits::kNumPlayers][6];
-        for (int ci = 0; ci < Traits::kNumPlayers; ++ci)
-            for (int c = 0; c < 6; ++c)
-                pc[ci][c] = base_pc[ci][c];
-
-        // The placement updates ctx.golden_max[col][row], which influences
-        // every player's expected EV in that column. Recompute the affected
-        // column for ALL players, not just the active one.
+        // Mutate base_pc in place for the affected column, write the tensor,
+        // then restore. The placement updates ctx.golden_max[col][row], which
+        // influences every player's expected EV in that column, so we have to
+        // recompute the affected column for ALL players (not just active).
+        for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+            saved_col[ci] = base_pc[ci][col];
+        }
         for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
             const int p_other = canonical[ci];
             compute_pc_data<Traits>(board_clone, ctx_clone, p_other, col,
-                                    filled[ci], tables, pc[ci][col]);
+                                    filled[ci], tables, base_pc[ci][col]);
         }
 
-        write_tensor_from_pc<Traits>(board_clone, player, pc,
+        write_tensor_from_pc<Traits>(board_clone, player, base_pc,
                                      out + static_cast<ptrdiff_t>(i) * Traits::kTensorSize);
+
+        for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+            base_pc[ci][col] = saved_col[ci];
+        }
     }
 }
 
