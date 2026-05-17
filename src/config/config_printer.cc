@@ -1,6 +1,7 @@
 #include "config/config_printer.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
+#include "distil/distil_config.h"
 #include "model/model_config.h"
 #include "self_play/training_data.h"  // TDMode
 
@@ -15,8 +16,81 @@ const char* td_mode_str(TDMode m) {
     return "unknown";
 }
 
+const char* teacher_kind_str(TeacherKind k) {
+    return (k == TeacherKind::kNN) ? "nn" : "heuristic";
+}
+
 const char* game_variant_str(int v) {
     return (v == kGameVariant2v2) ? "2v2" : "1v1";
+}
+
+void emit_model_block(YAML::Emitter& out, const ModelConfig& m) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "input_size"        << YAML::Value << m.input_size;
+    out << YAML::Key << "hidden_layers"     << YAML::Value << m.hidden_layers;
+    out << YAML::Key << "hidden_width"      << YAML::Value << m.hidden_width;
+    out << YAML::Key << "learning_rate"     << YAML::Value << m.learning_rate;
+    out << YAML::Key << "output_activation" << YAML::Value << m.output_activation;
+    out << YAML::Key << "loss_function"     << YAML::Value << m.loss_function;
+    out << YAML::Key << "architecture"      << YAML::Value << m.architecture;
+    out << YAML::EndMap;
+}
+
+void emit_self_play_block(YAML::Emitter& out, const SelfPlayConfig& sp) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "max_inference_batch" << YAML::Value << sp.max_inference_batch;
+    out << YAML::Key << "min_games_per_batch" << YAML::Value << sp.min_games_per_batch;
+    out << YAML::Key << "batch_timeout_ms"    << YAML::Value << sp.batch_timeout_ms;
+    out << YAML::Key << "num_workers"         << YAML::Value << sp.num_workers;
+    out << YAML::Key << "num_games"           << YAML::Value << sp.num_games;
+    out << YAML::Key << "num_coordinators"    << YAML::Value << sp.num_coordinators;
+    out << YAML::EndMap;
+}
+
+void emit_distil_block(YAML::Emitter& out, const DistilConfig& dc) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "game_variant" << YAML::Value
+        << game_variant_str(dc.student_model.game_variant);
+    out << YAML::Key << "teacher_kind" << YAML::Value
+        << teacher_kind_str(dc.teacher_kind);
+    out << YAML::Key << "teacher_heuristic_version" << YAML::Value
+        << dc.teacher_heuristic_version;
+    out << YAML::Key << "teacher_checkpoint" << YAML::Value
+        << dc.teacher_checkpoint_path;
+
+    out << YAML::Key << "shuffle_chunk_size"      << YAML::Value << dc.shuffle_chunk_size;
+    out << YAML::Key << "min_chunk_size_to_start" << YAML::Value << dc.min_chunk_size_to_start;
+    out << YAML::Key << "train_batch_size"        << YAML::Value << dc.train_batch_size;
+    out << YAML::Key << "max_buffered_samples"    << YAML::Value << dc.max_buffered_samples;
+
+    out << YAML::Key << "checkpoint_interval" << YAML::Value << dc.checkpoint_interval;
+    out << YAML::Key << "max_checkpoints"     << YAML::Value << dc.max_checkpoints;
+
+    out << YAML::Key << "max_steps"                     << YAML::Value << dc.max_steps;
+    out << YAML::Key << "min_steps"                     << YAML::Value << dc.min_steps;
+    out << YAML::Key << "eval_interval"                 << YAML::Value << dc.eval_interval;
+    out << YAML::Key << "eval_games"                    << YAML::Value << dc.eval_games;
+    out << YAML::Key << "reference_heuristic_version"   << YAML::Value << dc.reference_heuristic_version;
+    out << YAML::Key << "convergence_win_rate_delta"    << YAML::Value << dc.convergence_win_rate_delta;
+    out << YAML::Key << "convergence_patience"          << YAML::Value << dc.convergence_patience;
+    out << YAML::Key << "convergence_match_mse"         << YAML::Value << dc.convergence_match_mse;
+    out << YAML::Key << "final_eval_games"              << YAML::Value << dc.final_eval_games;
+
+    out << YAML::Key << "use_duel_margin_maximization"   << YAML::Value << dc.use_duel_margin_maximization;
+    out << YAML::Key << "duel_margin_maximization_scale" << YAML::Value << dc.duel_margin_maximization_scale;
+
+    out << YAML::Key << "checkpoint_dir" << YAML::Value << dc.checkpoint_dir;
+    out << YAML::Key << "log_dir"        << YAML::Value << dc.log_dir;
+    out << YAML::Key << "log_path"       << YAML::Value << dc.log_path;
+    out << YAML::Key << "debug_mode"     << YAML::Value << dc.debug_mode;
+
+    out << YAML::Key << "self_play";
+    out << YAML::Value; emit_self_play_block(out, dc.self_play);
+
+    out << YAML::Key << "student";
+    out << YAML::Value; emit_model_block(out, dc.student_model);
+
+    out << YAML::EndMap;
 }
 
 void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
@@ -26,7 +100,14 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
 
     out << YAML::BeginMap;
     out << YAML::Key << "num_steps" << YAML::Value << cfg.num_steps;
-    
+    out << YAML::Key << "mode"      << YAML::Value << cfg.mode;
+
+    // Both blocks are emitted unconditionally. `--mode config` is a debug
+    // dump; printing only the block matching `cfg.mode` made it hard to tell
+    // what a YAML for one mode actually parsed to when explored from another.
+    out << YAML::Key << "distil";
+    out << YAML::Value; emit_distil_block(out, cfg.distil);
+
     out << YAML::Key << "training";
     out << YAML::Value << YAML::BeginMap;
     out << YAML::Key << "game_variant"         << YAML::Value << game_variant_str(m.game_variant);

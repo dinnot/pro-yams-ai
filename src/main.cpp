@@ -11,6 +11,8 @@
 #include "config/config_loader.h"
 #include "config/config_printer.h"
 #include "config/config_validator.h"
+#include "distil/distil_loop.h"
+#include "distil/distil_resume.h"
 #include "engine/game_traits.h"
 #include "eval/evaluator.h"
 #include "model/model_config.h"
@@ -204,6 +206,97 @@ static int mode_eval(AppConfig cfg) {
 }
 
 // ---------------------------------------------------------------------------
+// run_distil_variant<Traits>
+// ---------------------------------------------------------------------------
+template <typename Traits>
+static int run_distil_variant(const AppConfig& cfg,
+                              torch::Device train_device,
+                              torch::Device infer_device,
+                              const PrecomputedTables& tables) {
+    DistilLoopT<Traits> loop(cfg.distil, tables, train_device, infer_device);
+
+    if (!cfg.resume_path.empty() && !cfg.checkpoint_path.empty()) {
+        std::cerr << "Error: --resume and --checkpoint cannot be used together.\n";
+        return 1;
+    }
+
+    if (!cfg.resume_path.empty()) {
+        std::cout << "Resuming distillation from: " << cfg.resume_path << "\n";
+        try {
+            if (!resume_distil_from_checkpoint<Traits>(loop, cfg.resume_path)) {
+                std::cerr << "Error: no checkpoints found in " << cfg.resume_path << "\n";
+                return 1;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to resume distillation: " << e.what() << "\n";
+            return 1;
+        }
+    } else if (!cfg.checkpoint_path.empty()) {
+        std::cout << "Initialising student weights from: "
+                  << cfg.checkpoint_path << "\n";
+        try {
+            loop.trainer().load_weights(cfg.checkpoint_path);
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to load student checkpoint: "
+                      << e.what() << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "Starting distillation (max_steps="
+              << cfg.distil.max_steps << ")\n";
+    g_training_stop = [&loop] { loop.stop(); };
+    std::signal(SIGINT,  signal_handler);
+    std::signal(SIGTERM, signal_handler);
+    loop.run();
+    g_training_stop = nullptr;
+
+    // Throughput / volume summary (the win-rate headline block is printed
+    // by DistilLoopT::final_report inside run()).
+    TrainingMetrics m = loop.metrics();
+    const long turns = loop.total_turns_processed();
+    const double per_game = (m.games_played > 0)
+        ? static_cast<double>(m.total_samples_emitted) / m.games_played
+        : 0.0;
+    std::cout << "\nThroughput: " << m.training_step << " steps  "
+              << "loss=" << m.loss << "  "
+              << "games=" << m.games_played << "  "
+              << "placements=" << turns << "  "
+              << "trained=" << m.total_samples_trained << "  "
+              << "emitted=" << m.total_samples_emitted
+              << " (~" << per_game << "/game)\n";
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// mode_distil
+// ---------------------------------------------------------------------------
+static int mode_distil(const AppConfig& cfg) {
+    torch::Device train_device = torch::cuda::is_available()
+                                 ? torch::Device(torch::kCUDA)
+                                 : torch::Device(torch::kCPU);
+    torch::Device infer_device = train_device;
+
+    std::cout << "Building solver tables...\n";
+    PrecomputedTables tables;
+    init_precomputed_tables(tables);
+
+    if (!cfg.distil.log_dir.empty()) {
+        std::filesystem::create_directories(cfg.distil.log_dir);
+        save_config(cfg, cfg.distil.log_dir + "/config.yaml");
+    }
+    std::filesystem::create_directories(cfg.distil.checkpoint_dir);
+    save_config(cfg, cfg.distil.checkpoint_dir + "/config.yaml");
+
+    if (cfg.distil.student_model.game_variant == kGameVariant2v2) {
+        std::cout << "Distil variant: 2v2 (Yams2v2)\n";
+        return run_distil_variant<Yams2v2>(cfg, train_device, infer_device, tables);
+    }
+    std::cout << "Distil variant: 1v1 (Yams1v1)\n";
+    return run_distil_variant<Yams1v1>(cfg, train_device, infer_device, tables);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
@@ -238,6 +331,11 @@ int main(int argc, char* argv[]) {
         return mode_eval(config);
     }
 
+    if (config.mode == "distil") {
+        if (!load_and_validate(config)) return 1;
+        return mode_distil(config);
+    }
+
     if (config.mode == "play") {
         std::cout << "Play mode (not yet implemented)\n";
         return 0;
@@ -254,6 +352,6 @@ int main(int argc, char* argv[]) {
     }
 
     std::cerr << "Unknown mode: " << config.mode << "\n";
-    std::cerr << "Available: info, config, train, eval, play, benchmark, generate\n";
+    std::cerr << "Available: info, config, train, eval, distil, play, benchmark, generate\n";
     return 1;
 }

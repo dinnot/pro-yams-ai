@@ -49,6 +49,59 @@ TEST(EvalResultTest, WinRateZeroGames) {
     EXPECT_DOUBLE_EQ(r.nn_win_rate_as_p1(), 0.0);
 }
 
+// ---------------------------------------------------------------------------
+// run_heuristic_vs_heuristic: V2-vs-V2 is symmetric (~50%) and never crashes.
+// ---------------------------------------------------------------------------
+TEST(HeuristicVsHeuristicTest, V2VsV2_Approx50Percent) {
+    ensure_tables();
+    EvalResult r = run_heuristic_vs_heuristic<Yams1v1>(
+        *g_tables, HeuristicVersion::V2, HeuristicVersion::V2,
+        /*num_games=*/50, /*base_seed=*/12345);
+    EXPECT_EQ(r.total_games, 50);
+    EXPECT_GT(r.nn_wins + r.heuristic_wins + r.draws, 0);
+    // Symmetry: candidate's win rate should be roughly 0.5 (±0.25 with N=50).
+    EXPECT_NEAR(r.nn_win_rate(), 0.5, 0.25)
+        << "V2-vs-V2 should be symmetric near 50%";
+}
+
+TEST(HeuristicVsHeuristicTest, V2VsV1_V2Dominates) {
+    ensure_tables();
+    EvalResult r = run_heuristic_vs_heuristic<Yams1v1>(
+        *g_tables, HeuristicVersion::V2, HeuristicVersion::V1,
+        /*num_games=*/100, /*base_seed=*/777);
+    // V2 (DP-driven) is strictly stronger than V1 (greedy score*coeff).
+    // 100-game stdev on a 0.65-true win rate is ~5%, so 0.55 is a safe floor.
+    EXPECT_GT(r.nn_win_rate(), 0.55)
+        << "V2 should beat V1 comfortably (got " << r.nn_win_rate() << ")";
+}
+
+// ---------------------------------------------------------------------------
+// run_evaluation_vs: NN vs a FIXED heuristic — deterministic seeded result.
+// ---------------------------------------------------------------------------
+TEST(RunEvaluationVsTest, RunsWithoutCrash_FixedVersion) {
+    ensure_tables();
+    auto model = make_model();
+    EvalResult r = run_evaluation_vs<Yams1v1>(
+        *model, torch::kCPU, *g_tables,
+        HeuristicVersion::V2, /*num_games=*/10, /*base_seed=*/42);
+    EXPECT_EQ(r.total_games, 10);
+    EXPECT_EQ(r.nn_wins + r.heuristic_wins + r.draws, 10);
+}
+
+TEST(RunEvaluationVsTest, Deterministic_SameSeedSameResult) {
+    ensure_tables();
+    auto model = make_model();
+    EvalResult a = run_evaluation_vs<Yams1v1>(
+        *model, torch::kCPU, *g_tables,
+        HeuristicVersion::V2, 8, 555);
+    EvalResult b = run_evaluation_vs<Yams1v1>(
+        *model, torch::kCPU, *g_tables,
+        HeuristicVersion::V2, 8, 555);
+    EXPECT_EQ(a.nn_wins, b.nn_wins);
+    EXPECT_EQ(a.heuristic_wins, b.heuristic_wins);
+    EXPECT_DOUBLE_EQ(a.avg_duel_margin, b.avg_duel_margin);
+}
+
 TEST(RunEvaluationTest, AlternatingSides) {
     ensure_tables();
     auto model = make_model();

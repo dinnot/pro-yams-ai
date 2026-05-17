@@ -5,6 +5,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "distil/distil_config.h"
 #include "engine/game_traits.h"
 #include "model/model_config.h"
 #include "self_play/training_data.h"  // TDMode
@@ -15,6 +16,13 @@ static TDMode parse_td_mode(const std::string& s) {
     if (s == "tdlambda")  return TDMode::kTDLambda;
     throw std::runtime_error("Unknown td_mode value: '" + s +
                              "' (expected: mc, td0, tdlambda)");
+}
+
+static TeacherKind parse_teacher_kind(const std::string& s) {
+    if (s == "heuristic") return TeacherKind::kHeuristic;
+    if (s == "nn")        return TeacherKind::kNN;
+    throw std::runtime_error("Unknown teacher_kind value: '" + s +
+                             "' (expected: heuristic, nn)");
 }
 
 // Map "1v1" / "2v2" → kGameVariant1v1 / kGameVariant2v2.
@@ -116,6 +124,58 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Distil YAML loader. Mirrors load_training_config for the shared fields and
+// adds teacher selection, shuffle-queue and convergence knobs.
+// ---------------------------------------------------------------------------
+void load_distil_config(const YAML::Node& n, DistilConfig& dc) {
+    if (n["teacher_kind"])
+        dc.teacher_kind = parse_teacher_kind(n["teacher_kind"].as<std::string>());
+    maybe_assign(n, "teacher_heuristic_version", dc.teacher_heuristic_version);
+    maybe_assign(n, "teacher_checkpoint",        dc.teacher_checkpoint_path);
+
+    maybe_assign(n, "shuffle_chunk_size",      dc.shuffle_chunk_size);
+    maybe_assign(n, "min_chunk_size_to_start", dc.min_chunk_size_to_start);
+    maybe_assign(n, "train_batch_size",        dc.train_batch_size);
+    maybe_assign(n, "max_buffered_samples",    dc.max_buffered_samples);
+
+    maybe_assign(n, "checkpoint_interval",     dc.checkpoint_interval);
+    maybe_assign(n, "max_checkpoints",         dc.max_checkpoints);
+
+    maybe_assign(n, "max_steps",                  dc.max_steps);
+    maybe_assign(n, "min_steps",                  dc.min_steps);
+    maybe_assign(n, "eval_interval",              dc.eval_interval);
+    maybe_assign(n, "eval_games",                 dc.eval_games);
+    maybe_assign(n, "reference_heuristic_version", dc.reference_heuristic_version);
+    maybe_assign(n, "convergence_win_rate_delta", dc.convergence_win_rate_delta);
+    maybe_assign(n, "convergence_patience",       dc.convergence_patience);
+    maybe_assign(n, "convergence_match_mse",      dc.convergence_match_mse);
+    maybe_assign(n, "final_eval_games",           dc.final_eval_games);
+
+    maybe_assign(n, "use_duel_margin_maximization",   dc.use_duel_margin_maximization);
+    maybe_assign(n, "duel_margin_maximization_scale", dc.duel_margin_maximization_scale);
+
+    maybe_assign(n, "checkpoint_dir", dc.checkpoint_dir);
+    maybe_assign(n, "log_dir",        dc.log_dir);
+    maybe_assign(n, "log_path",       dc.log_path);
+    maybe_assign(n, "debug_mode",     dc.debug_mode);
+
+    // game_variant at the distil level takes precedence; load it BEFORE the
+    // student block so the student block can still override it if explicitly set.
+    if (n["game_variant"]) {
+        dc.student_model.game_variant =
+            parse_game_variant(n["game_variant"].as<std::string>());
+    }
+    if (n["self_play"]) load_self_play_config(n["self_play"], dc.self_play);
+    if (n["student"])   load_model_config(n["student"], dc.student_model);
+
+    // Default-promote input_size for 2v2 if the user only set game_variant.
+    if (dc.student_model.game_variant == kGameVariant2v2 &&
+        dc.student_model.input_size == Yams1v1::kTensorSize) {
+        dc.student_model.input_size = Yams2v2::kTensorSize;
+    }
+}
+
 }  // namespace
 
 AppConfig default_config() {
@@ -123,6 +183,30 @@ AppConfig default_config() {
 }
 
 void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
+    // Pre-scan for --mode so shared-flag routing (training vs distil) is
+    // mode-aware regardless of CLI argument order.
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--mode") {
+            config.mode = argv[i + 1];
+            break;
+        }
+    }
+    const bool to_distil = (config.mode == "distil");
+
+    // Routing for shared knobs (num_workers, batch_size, learning_rate, etc.).
+    SelfPlayConfig& sp_target = to_distil ? config.distil.self_play
+                                          : config.training.self_play;
+    ModelConfig&    m_target  = to_distil ? config.distil.student_model
+                                          : config.training.model;
+    int&            batch_target  = to_distil ? config.distil.train_batch_size
+                                              : config.training.train_batch_size;
+    int&            eval_int_t    = to_distil ? config.distil.eval_interval
+                                              : config.training.eval_interval;
+    int&            eval_games_t  = to_distil ? config.distil.eval_games
+                                              : config.training.eval_games;
+    bool&           debug_target  = to_distil ? config.distil.debug_mode
+                                              : config.training.debug_mode;
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--mode" && i + 1 < argc) config.mode = argv[++i];
@@ -130,44 +214,87 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--checkpoint" && i + 1 < argc) config.checkpoint_path = argv[++i];
         else if (arg == "--resume" && i + 1 < argc) config.resume_path = argv[++i];
         else if (arg == "--seed" && i + 1 < argc) config.seed = std::stoull(argv[++i]);
-        else if (arg == "--num_steps" && i + 1 < argc) config.num_steps = std::stoi(argv[++i]);
-        else if (arg == "--learning_rate" && i + 1 < argc) config.training.model.learning_rate = std::stod(argv[++i]);
-        else if (arg == "--hidden_layers" && i + 1 < argc) config.training.model.hidden_layers = std::stoi(argv[++i]);
-        else if (arg == "--hidden_width" && i + 1 < argc) config.training.model.hidden_width = std::stoi(argv[++i]);
-        else if (arg == "--output_activation" && i + 1 < argc) config.training.model.output_activation = argv[++i];
+        else if (arg == "--num_steps" && i + 1 < argc) {
+            int v = std::stoi(argv[++i]);
+            config.num_steps = v;
+            if (to_distil) config.distil.max_steps = v;
+        }
+        else if (arg == "--learning_rate" && i + 1 < argc) m_target.learning_rate = std::stod(argv[++i]);
+        else if (arg == "--hidden_layers" && i + 1 < argc) m_target.hidden_layers = std::stoi(argv[++i]);
+        else if (arg == "--hidden_width"  && i + 1 < argc) m_target.hidden_width  = std::stoi(argv[++i]);
+        else if (arg == "--output_activation" && i + 1 < argc) m_target.output_activation = argv[++i];
         else if (arg == "--td_mode" && i + 1 < argc) {
+            // Training-only knob; silently routes to training.
             config.training.td_mode = parse_td_mode(argv[++i]);
         }
-        else if (arg == "--batch_size" && i + 1 < argc) config.training.train_batch_size = std::stoi(argv[++i]);
+        else if (arg == "--batch_size" && i + 1 < argc) batch_target = std::stoi(argv[++i]);
         else if (arg == "--train_steps_per_collect" && i + 1 < argc) config.training.train_steps_per_collect = std::stod(argv[++i]);
         else if (arg == "--replay_buffer_size" && i + 1 < argc) config.training.replay_capacity = std::stoi(argv[++i]);
         else if (arg == "--placement_temperature" && i + 1 < argc) config.training.initial_temperature = std::stod(argv[++i]);
         else if (arg == "--temperature_decay_start_step" && i + 1 < argc) config.training.temperature_decay_start_step = std::stoi(argv[++i]);
-        else if (arg == "--num_workers" && i + 1 < argc) config.training.self_play.num_workers = std::stoi(argv[++i]);
-        else if (arg == "--num_games" && i + 1 < argc) config.training.self_play.num_games = std::stoi(argv[++i]);
-        else if (arg == "--num_coordinators" && i + 1 < argc) config.training.self_play.num_coordinators = std::stoi(argv[++i]);
-        else if (arg == "--eval_games" && i + 1 < argc) config.training.eval_games = std::stoi(argv[++i]);
-        else if (arg == "--eval_interval" && i + 1 < argc) config.training.eval_interval = std::stoi(argv[++i]);
-        else if (arg == "--debug_mode" && i + 1 < argc) config.training.debug_mode = (std::stoi(argv[++i]) != 0);
+        else if (arg == "--num_workers" && i + 1 < argc) sp_target.num_workers = std::stoi(argv[++i]);
+        else if (arg == "--num_games"   && i + 1 < argc) sp_target.num_games   = std::stoi(argv[++i]);
+        else if (arg == "--num_coordinators" && i + 1 < argc) sp_target.num_coordinators = std::stoi(argv[++i]);
+        else if (arg == "--eval_games"  && i + 1 < argc) eval_games_t = std::stoi(argv[++i]);
+        else if (arg == "--eval_interval" && i + 1 < argc) eval_int_t  = std::stoi(argv[++i]);
+        else if (arg == "--debug_mode"  && i + 1 < argc) debug_target = (std::stoi(argv[++i]) != 0);
         else if (arg == "--initial_heuristic_weight" && i + 1 < argc) config.training.initial_heuristic_weight = std::stod(argv[++i]);
         else if (arg == "--heuristic_decay_steps" && i + 1 < argc) config.training.heuristic_decay_steps = std::stoi(argv[++i]);
         else if (arg == "--heuristic_version" && i + 1 < argc) config.training.heuristic_version = std::stoi(argv[++i]);
-        else if (arg == "--use_duel_margin_maximization" && i + 1 < argc) config.training.use_duel_margin_maximization = (std::stoi(argv[++i]) != 0);
-        else if (arg == "--duel_margin_maximization_scale" && i + 1 < argc) config.training.duel_margin_maximization_scale = std::stod(argv[++i]);
+        else if (arg == "--use_duel_margin_maximization" && i + 1 < argc) {
+            bool v = (std::stoi(argv[++i]) != 0);
+            if (to_distil) config.distil.use_duel_margin_maximization   = v;
+            else           config.training.use_duel_margin_maximization = v;
+        }
+        else if (arg == "--duel_margin_maximization_scale" && i + 1 < argc) {
+            double v = std::stod(argv[++i]);
+            if (to_distil) config.distil.duel_margin_maximization_scale   = v;
+            else           config.training.duel_margin_maximization_scale = v;
+        }
         else if (arg == "--past_opponent_probability" && i + 1 < argc) config.training.past_opponent_probability = std::stod(argv[++i]);
         else if (arg == "--game_variant" && i + 1 < argc) {
-            config.training.model.game_variant = parse_game_variant(argv[++i]);
-            // CLI override: if the user didn't also override input_size, snap
-            // it to the variant default. A subsequent --hidden_width / etc.
-            // call doesn't disturb this; explicit --input_size if added later
-            // would.
-            if (config.training.model.game_variant == kGameVariant2v2 &&
-                config.training.model.input_size == Yams1v1::kTensorSize) {
-                config.training.model.input_size = Yams2v2::kTensorSize;
-            } else if (config.training.model.game_variant == kGameVariant1v1 &&
-                       config.training.model.input_size == Yams2v2::kTensorSize) {
-                config.training.model.input_size = Yams1v1::kTensorSize;
+            int gv = parse_game_variant(argv[++i]);
+            m_target.game_variant = gv;
+            // Snap input_size to variant default unless the user pinned a custom one.
+            if (gv == kGameVariant2v2 && m_target.input_size == Yams1v1::kTensorSize) {
+                m_target.input_size = Yams2v2::kTensorSize;
+            } else if (gv == kGameVariant1v1 && m_target.input_size == Yams2v2::kTensorSize) {
+                m_target.input_size = Yams1v1::kTensorSize;
             }
+        }
+        // --- Distil-only flags ---
+        else if (arg == "--teacher_kind" && i + 1 < argc) {
+            config.distil.teacher_kind = parse_teacher_kind(argv[++i]);
+        }
+        else if (arg == "--teacher_heuristic_version" && i + 1 < argc) {
+            config.distil.teacher_heuristic_version = std::stoi(argv[++i]);
+        }
+        else if (arg == "--teacher_checkpoint" && i + 1 < argc) {
+            config.distil.teacher_checkpoint_path = argv[++i];
+        }
+        else if (arg == "--max_steps" && i + 1 < argc) {
+            config.distil.max_steps = std::stoi(argv[++i]);
+        }
+        else if (arg == "--min_steps" && i + 1 < argc) {
+            config.distil.min_steps = std::stoi(argv[++i]);
+        }
+        else if (arg == "--reference_heuristic_version" && i + 1 < argc) {
+            config.distil.reference_heuristic_version = std::stoi(argv[++i]);
+        }
+        else if (arg == "--convergence_win_rate_delta" && i + 1 < argc) {
+            config.distil.convergence_win_rate_delta = std::stod(argv[++i]);
+        }
+        else if (arg == "--convergence_patience" && i + 1 < argc) {
+            config.distil.convergence_patience = std::stoi(argv[++i]);
+        }
+        else if (arg == "--final_eval_games" && i + 1 < argc) {
+            config.distil.final_eval_games = std::stoi(argv[++i]);
+        }
+        else if (arg == "--max_buffered_samples" && i + 1 < argc) {
+            config.distil.max_buffered_samples = std::stoi(argv[++i]);
+        }
+        else if (arg == "--convergence_match_mse" && i + 1 < argc) {
+            config.distil.convergence_match_mse = std::stod(argv[++i]);
         }
     }
 }
@@ -220,6 +347,8 @@ AppConfig load_config(const std::string& path) {
 
     AppConfig cfg;
     maybe_assign(root, "num_steps", cfg.num_steps);
+    if (root["mode"]) cfg.mode = root["mode"].as<std::string>();
     if (root["training"]) load_training_config(root["training"], cfg.training);
+    if (root["distil"])   load_distil_config(root["distil"],     cfg.distil);
     return cfg;
 }

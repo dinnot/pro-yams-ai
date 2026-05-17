@@ -1,16 +1,19 @@
 #pragma once
 
+#include "distil/distil_config.h"
 #include "training/training_config.h"
 
 // ---------------------------------------------------------------------------
 // AppConfig — top-level application configuration.
 //
-// Wraps TrainingConfig and adds run-level parameters not specific to
-// a single training session (e.g. how long to train).
+// Wraps the per-mode configs (TrainingConfig for `train` / `eval`,
+// DistilConfig for `distil`) plus a few run-level parameters. The active
+// substruct is selected by `mode`; the unused one keeps its defaults.
 // ---------------------------------------------------------------------------
 struct AppConfig {
     TrainingConfig training;
-    int num_steps = 100000;  // Gradient steps to run in train mode
+    DistilConfig   distil;
+    int num_steps = 100000;  // Gradient steps in train mode (synonym for distil.max_steps in distil mode)
     std::string mode = "info";
     std::string config_path;
     std::string checkpoint_path;  // Init weights from this checkpoint (fresh training)

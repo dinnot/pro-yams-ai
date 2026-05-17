@@ -9,6 +9,7 @@
 #include "engine/game_state.h"
 #include "engine/game_traits.h"
 #include "engine/rng.h"
+#include "heuristic/heuristic_bot.h"  // HeuristicVersion
 #include "model/pro_yams_net.h"
 #include "solver/precomputed_tables.h"
 #include "solver/solver.h"
@@ -93,11 +94,48 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
 //
 // Games alternate which player (1v1) or team (2v2) the NN controls. Runs
 // synchronously on the calling thread. The model is set to eval mode.
+// The heuristic opponent's version is randomised per game via
+// random_heuristic_version().
 // ---------------------------------------------------------------------------
 template <typename Traits>
 EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
                            const PrecomputedTables& tables,
                            int num_games, uint64_t base_seed);
+
+// ---------------------------------------------------------------------------
+// run_evaluation_vs<Traits> — NN versus one specific heuristic version.
+//
+// Used by the distillation loop to measure the student's win rate against
+// a fixed reference heuristic (default V2). The heuristic version stays
+// constant across all games, so the result is a clean, deterministic
+// estimate of "NN strength vs <ref>" rather than the mixed-bag average
+// produced by run_evaluation.
+//
+// `EvalResult.nn_*` fields refer to the NN candidate (same as run_evaluation).
+// ---------------------------------------------------------------------------
+template <typename Traits>
+EvalResult run_evaluation_vs(ProYamsNet& model, torch::Device device,
+                              const PrecomputedTables& tables,
+                              HeuristicVersion heuristic_version,
+                              int num_games, uint64_t base_seed);
+
+// ---------------------------------------------------------------------------
+// run_heuristic_vs_heuristic<Traits> — two heuristic bots play against each
+// other for num_games. Used by distillation to cache the teacher's win
+// rate against the reference heuristic at startup (the teacher is fixed,
+// so we measure it once).
+//
+// `EvalResult.nn_*` fields refer to the *candidate* side (i.e. the
+// candidate's wins / wr_as_p0 / wr_as_p1) — same shape as the NN-eval
+// path, so downstream code can treat both EvalResults the same way.
+// V_n-vs-V_n collapses to ~50% by symmetry; the function runs it anyway
+// to keep the code path uniform.
+// ---------------------------------------------------------------------------
+template <typename Traits>
+EvalResult run_heuristic_vs_heuristic(const PrecomputedTables& tables,
+                                       HeuristicVersion candidate_version,
+                                       HeuristicVersion reference_version,
+                                       int num_games, uint64_t base_seed);
 
 // 1v1 convenience overloads (existing 1v1-only call sites can keep working
 // without sprinkling <Yams1v1> everywhere).
