@@ -1,14 +1,14 @@
-num_steps: 10000
+num_steps: 100000
 
 training:
   game_variant: "2v2"
 
   replay_capacity: 1000000
   min_buffer_size: 100000
-  train_batch_size: 16384
+  train_batch_size: 8192
   train_steps_per_collect: 0.041
   model_swap_interval: 100
-  checkpoint_interval: 1000
+  checkpoint_interval: 10000
   max_checkpoints: 5
 
   td_mode: tdlambda
@@ -16,21 +16,21 @@ training:
 
   initial_temperature: 1.0
   min_temperature: 0.1
-  temperature_decay: 0.999769768
+  temperature_decay: 0.999977
   temperature_decay_start_step: 0
   temperature_decay_start_value: 1.0
   initial_epsilon: 0
 
-  eval_interval: 1000
+  eval_interval: 10000
   eval_games: 500
 
-  checkpoint_dir: checkpoints/2v2/seed_baseline_10k
-  log_dir: ./logs/2v2/seed_baseline_10k
-  log_path: ./logs/2v2/seed_baseline_10k/training_log.csv
+  checkpoint_dir: checkpoints/2v2/mlp-512/seed
+  log_dir: ./logs/2v2/mlp-512/seed
+  log_path: ./logs/2v2/mlp-512/seed/training_log.csv
   debug_mode: false
 
   initial_heuristic_weight: 1.0
-  heuristic_decay_steps: 8000
+  heuristic_decay_steps: 80000
   logs_on_start: false
 
   use_duel_margin_maximization: false
@@ -43,12 +43,12 @@ training:
     max_inference_batch: 4096
     min_games_per_batch: 2
     batch_timeout_ms: 5
-    num_workers: 20
+    num_workers: 24
     num_games: 2048
     num_coordinators: 3
 
   model:
-    input_size: 2126
+    input_size: 986
     hidden_layers: 3
     hidden_width: 512
     learning_rate: 0.0004

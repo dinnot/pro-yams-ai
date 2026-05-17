@@ -6,7 +6,7 @@ training:
   replay_capacity: 50000
   min_buffer_size: 20000
   train_batch_size: 8192
-  train_steps_per_collect: 0.082
+  train_steps_per_collect: 0.041
   model_swap_interval: 100
   checkpoint_interval: 500
   max_checkpoints: 2
@@ -24,9 +24,9 @@ training:
   eval_interval: 500
   eval_games: 500
 
-  checkpoint_dir: checkpoints/2v2/test_timing14
-  log_dir: ./logs/2v2/test_timing14
-  log_path: ./logs/2v2/test_timing14/training_log.csv
+  checkpoint_dir: checkpoints/2v2/test_timing15
+  log_dir: ./logs/2v2/test_timing15
+  log_path: ./logs/2v2/test_timing15/training_log.csv
   debug_mode: true
 
   initial_heuristic_weight: 1.0
