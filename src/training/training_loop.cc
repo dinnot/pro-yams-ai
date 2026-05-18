@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -381,7 +382,15 @@ void TrainingLoopT<Traits>::do_training_step() {
     auto t4 = std::chrono::steady_clock::now();
 
     auto t_start = std::chrono::steady_clock::now();
-    last_loss_ = trainer_->train_step(train_states_.data(), train_targets_.data(), n);
+    // train_step returns the PREVIOUS step's loss (NaN on first call) — the
+    // current step's GPU work is queued asynchronously so the next batch's
+    // CPU-side sampling overlaps with it. Only update last_loss_ when we
+    // actually receive a finite value.
+    double prev_loss = trainer_->train_step(
+        train_states_.data(), train_targets_.data(), n);
+    if (std::isfinite(prev_loss)) {
+        last_loss_ = prev_loss;
+    }
     auto t_end = std::chrono::steady_clock::now();
 
     double sample_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
@@ -501,6 +510,12 @@ template <typename Traits>
 void TrainingLoopT<Traits>::maybe_evaluate() {
     if (config_.eval_interval <= 0) return;
     if (training_step_ % config_.eval_interval != 0) return;
+
+    // Drain the deferred train step so eval reads committed weights. The
+    // materialised loss is already cached inside the trainer; the next
+    // do_training_step will return it via train_step. No EMA/last_loss_
+    // update here to avoid double-counting if eval fires twice.
+    trainer_->wait_until_step_complete();
 
     EvalResult eval = run_evaluation<Traits>(
         trainer_->model_mut(), trainer_->device(),

@@ -101,36 +101,56 @@ void distil_worker_thread(GameQueueT<Traits>& available,
         } else {
             // -----------------------------------------------------------
             // Normal path: tensors → teacher.evaluate → emit samples → resolve.
+            //
+            // Within a single turn the board state (and hence requests +
+            // tensors + teacher evs) is invariant across rerolls — only the
+            // dice change. So we only emit training samples on the FIRST
+            // roll of the turn (rolls_left == 2). Emitting on every roll
+            // would push 2..3× duplicate samples into the shuffle queue,
+            // destroying SGD batch diversity. Tensors are skipped on
+            // subsequent rolls when the teacher doesn't need them (heuristic).
             // -----------------------------------------------------------
             const int n = game->solver_buffers.request_count;
             assert(n <= kMaxAfterstateRequests);
 
-            generate_tensor_batch<Traits>(
-                game->state.board, game->ctx,
-                game->state.board.current_player,
-                game->solver_buffers.requests, n,
-                tables,
-                tensor_scratch.data());
+            const bool emit_samples = (game->state.rolls_left == 2);
+            const bool need_tensors = emit_samples || teacher.needs_tensor_input();
 
+            if (need_tensors) {
+                generate_tensor_batch<Traits>(
+                    game->state.board, game->ctx,
+                    game->state.board.current_player,
+                    game->solver_buffers.requests, n,
+                    tables,
+                    tensor_scratch.data());
+            }
+
+            // Compute training targets (squashed) into a scratch array;
+            // solver_resolve consumes the RAW evs written into buffers.evs.
+            // Decoupling avoids the E[tanh(X)] ≠ tanh(E[X]) bias that
+            // averaging squashed margins introduces into expectimax.
+            double targets[kMaxAfterstateRequests];
             teacher.evaluate(game->state.board, game->ctx,
                              game->solver_buffers.requests, n,
-                             teacher.needs_tensor_input()
-                                 ? tensor_scratch.data() : nullptr,
+                             need_tensors ? tensor_scratch.data() : nullptr,
+                             emit_samples ? targets : nullptr,
                              game->solver_buffers.evs);
 
-            // Emit one (state, teacher_ev) sample per visited afterstate.
-            for (int i = 0; i < n; ++i) {
-                std::memcpy(sample_scratch[i].state,
-                            tensor_scratch.data() + static_cast<size_t>(i) * kT,
-                            kT * sizeof(float));
-                sample_scratch[i].target = game->solver_buffers.evs[i];
-            }
-            shuffle_queue.add_batch(sample_scratch.data(), n);
-            if (stats) {
-                stats->samples_emitted.fetch_add(n, std::memory_order_relaxed);
+            if (emit_samples) {
+                for (int i = 0; i < n; ++i) {
+                    std::memcpy(sample_scratch[i].state,
+                                tensor_scratch.data() + static_cast<size_t>(i) * kT,
+                                kT * sizeof(float));
+                    sample_scratch[i].target = targets[i];
+                }
+                shuffle_queue.add_batch(sample_scratch.data(), n);
+                if (stats) {
+                    stats->samples_emitted.fetch_add(n, std::memory_order_relaxed);
+                }
             }
 
-            // Resolve greedily — teacher's evs determine the action.
+            // Resolve greedily — teacher's raw evs in buffers.evs drive the
+            // action via expectimax.
             SolverResult result = solver_resolve<Traits>(
                 game->state, game->ctx, tables, game->solver_buffers,
                 greedy_cfg, game->rng);

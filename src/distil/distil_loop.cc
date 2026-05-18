@@ -1,6 +1,7 @@
 #include "distil/distil_loop.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -190,6 +191,12 @@ void DistilLoopT<Traits>::maybe_evaluate() {
     if (config_.eval_interval <= 0) return;
     if (training_step_ % config_.eval_interval != 0) return;
 
+    // Drain the deferred train step so eval reads committed weights.
+    // (No EMA update here — that's owned by do_training_step, which will
+    // observe the materialised value on its next call. Folding it in here
+    // too would risk double-counting if eval is called twice in a row.)
+    student_trainer_->wait_until_step_complete();
+
     const auto ref = static_cast<HeuristicVersion>(
         config_.reference_heuristic_version);
 
@@ -298,6 +305,14 @@ void DistilLoopT<Traits>::run() {
         stop_reason_ = StopReason::kMaxSteps;
     }
 
+    // Capture the very last train step's loss before tearing down the
+    // workers (deferred .item() — the last submitted step is still pending).
+    double pending = student_trainer_->wait_until_step_complete();
+    if (std::isfinite(pending)) {
+        last_loss_ = pending;
+        distil::update_ema(rolling_mse_, last_loss_, /*alpha=*/0.05);
+    }
+
     // Stop the queue FIRST so any producers blocked on the back-pressure cap
     // wake up and exit; only then can orchestrator_->stop() join them.
     queue_->stop();
@@ -315,14 +330,22 @@ void DistilLoopT<Traits>::run() {
 
 template <typename Traits>
 void DistilLoopT<Traits>::do_training_step(int n) {
-    last_loss_ = student_trainer_->train_step(
+    // train_step returns the PREVIOUS step's loss (NaN on the very first
+    // call) — the current step's loss is materialised at the start of the
+    // next train_step. This lets the GPU's batch-N compute overlap with the
+    // CPU's batch-N+1 sampling. EMA tolerates the 1-step lag.
+    double prev_loss = student_trainer_->train_step(
         train_states_.data(), train_targets_.data(), n);
     ++training_step_;
     total_samples_trained_ += n;
-    // The per-batch loss IS the student-vs-teacher MSE on this batch (each
-    // sample is one (state, teacher_ev) pair). EMA-smooth so the optional
-    // match-MSE convergence criterion isn't whipsawed by per-batch noise.
-    distil::update_ema(rolling_mse_, last_loss_, /*alpha=*/0.05);
+    if (std::isfinite(prev_loss)) {
+        last_loss_ = prev_loss;
+        // The per-batch loss IS the student-vs-teacher MSE on this batch
+        // (each sample is one (state, teacher_ev) pair). EMA-smooth so the
+        // optional match-MSE convergence criterion isn't whipsawed by
+        // per-batch noise.
+        distil::update_ema(rolling_mse_, last_loss_, /*alpha=*/0.05);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -12,32 +12,32 @@ distil:
     hidden_width: 512
     architecture: mlp
     output_activation: sigmoid
-    loss_function: bce
-    learning_rate: 0.0001
+    loss_function: mse
+    learning_rate: 0.0004
 
   train_batch_size: 16384
   shuffle_chunk_size: 262144
   min_chunk_size_to_start: 16384
-  max_buffered_samples: 2000000
+  max_buffered_samples: 1000000
 
-  max_steps: 500000
-  min_steps: 5000
+  max_steps: 200000
+  min_steps: 10000
 
   reference_heuristic_version: 14
   convergence_win_rate_delta: 0.02
   convergence_patience: 3
   convergence_match_mse: -1.0
 
-  eval_interval: 5000
-  eval_games: 500
+  eval_interval: 10000
+  eval_games: 1000
   final_eval_games: 1000
 
-  checkpoint_interval: 5000
-  max_checkpoints: 2
+  checkpoint_interval: 10000
+  max_checkpoints: 20
 
   use_duel_margin_maximization: false
-  duel_margin_maximization_scale: 4000.0
+  duel_margin_maximization_scale: 20000.0
 
-  checkpoint_dir: checkpoints/distil_v14_2v2
-  log_dir: logs/distil_v14_2v2
-  log_path: logs/distil_v14_2v2/distil_log.csv
+  checkpoint_dir: checkpoints/distil_v14_mse_2v2
+  log_dir: logs/distil_v14_mse_2v2
+  log_path: logs/distil_v14_mse_2v2/distil_log.csv

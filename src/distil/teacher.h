@@ -25,11 +25,20 @@ class Teacher {
 public:
     virtual ~Teacher() = default;
 
-    /// Score every afterstate in `requests[0..n)` and write the result into
-    /// `evs[0..n)`. The exact value semantics (win-prob vs. margin, scale)
-    /// depend on the concrete teacher; they must match the student's
-    /// `output_activation` so the supervised targets are in-range for the
-    /// student's loss.
+    /// Score every afterstate in `requests[0..n)` twice:
+    ///
+    ///   - `targets[i]` — value used as the student's training target.
+    ///     Must be in-range for the student's loss (e.g. [-1,1] for tanh /
+    ///     margin mode, [0,1] for sigmoid / win-prob mode).
+    ///
+    ///   - `solver_evs[i]` — value handed to solver_resolve to drive the
+    ///     teacher's expectimax action selection. For heuristic teachers
+    ///     this is the RAW (unsquashed) margin / win-prob — averaging raw
+    ///     values is unbiased (E[X]), whereas averaging tanh-squashed
+    ///     values penalises variance and produces a pathologically
+    ///     risk-averse policy. NN teachers can use the same squashed
+    ///     value for both — the network's training target IS its action
+    ///     value, so the action is consistent with the prediction.
     ///
     /// @param tensors May be nullptr when needs_tensor_input() == false
     ///                (heuristic teachers do not consume tensors).
@@ -37,7 +46,8 @@ public:
                           const GameContextT<Traits>& ctx,
                           const AfterstateRequest* requests, int n,
                           const float* tensors,
-                          double* evs) = 0;
+                          double* targets,
+                          double* solver_evs) = 0;
 
     /// True when the teacher requires the worker to materialise the
     /// per-request state tensors before calling evaluate(). NN teachers

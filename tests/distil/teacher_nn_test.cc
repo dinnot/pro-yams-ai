@@ -118,9 +118,11 @@ TEST(NNTeacherTest, EvaluateMatchesDirectInference) {
         buffers.requests, n, *g_tables, tensors.data());
 
     // Teacher path.
-    std::vector<double> evs_teacher(n, 0.0);
+    std::vector<double> targets_teacher(n, 0.0);
+    std::vector<double> solver_evs_teacher(n, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, n,
-                     tensors.data(), evs_teacher.data());
+                     tensors.data(),
+                     targets_teacher.data(), solver_evs_teacher.data());
 
     // Direct path through a fresh engine wrapping the teacher's model.
     InferenceEngine direct(
@@ -130,7 +132,10 @@ TEST(NNTeacherTest, EvaluateMatchesDirectInference) {
     direct.batch_inference(tensors.data(), n, evs_direct.data());
 
     for (int i = 0; i < n; ++i) {
-        EXPECT_NEAR(evs_teacher[i], evs_direct[i], 1e-9) << "i=" << i;
+        // For an NN teacher, the prediction IS the action value: targets and
+        // solver_evs are the same numbers, both equal to direct inference.
+        EXPECT_NEAR(targets_teacher[i],    evs_direct[i], 1e-9) << "i=" << i;
+        EXPECT_NEAR(solver_evs_teacher[i], evs_direct[i], 1e-9) << "i=" << i;
     }
 
     std::filesystem::remove(stem + ".model");

@@ -108,6 +108,36 @@ TEST(ModelTest, OutputRange_Sigmoid) {
 }
 
 // ---------------------------------------------------------------------------
+// forward_logits is sigmoid^{-1}(forward) for sigmoid models, and
+// tanh^{-1}(forward) for tanh models. This is the contract the trainer
+// relies on for binary_cross_entropy_with_logits.
+// ---------------------------------------------------------------------------
+TEST(ModelTest, ForwardLogits_IsPreActivation_Sigmoid) {
+    ModelConfig cfg;
+    cfg.output_activation = "sigmoid";
+    ProYamsNet net(cfg);
+    net.eval();
+    torch::NoGradGuard no_grad;
+    auto input  = torch::rand({64, kTensorSize});
+    auto logits = net.forward_logits(input.clone());
+    auto probs  = net.forward(input.clone());
+    // sigmoid(logits) should equal forward() output.
+    EXPECT_TRUE(torch::sigmoid(logits).allclose(probs, /*rtol=*/1e-5, /*atol=*/1e-6));
+}
+
+TEST(ModelTest, ForwardLogits_IsPreActivation_Tanh) {
+    ModelConfig cfg;
+    cfg.output_activation = "tanh";
+    ProYamsNet net(cfg);
+    net.eval();
+    torch::NoGradGuard no_grad;
+    auto input  = torch::rand({64, kTensorSize});
+    auto logits = net.forward_logits(input.clone());
+    auto out    = net.forward(input.clone());
+    EXPECT_TRUE(torch::tanh(logits).allclose(out, /*rtol=*/1e-5, /*atol=*/1e-6));
+}
+
+// ---------------------------------------------------------------------------
 // Determinism: same model, same input → same output
 // ---------------------------------------------------------------------------
 TEST(ModelTest, Determinism_SameInputSameOutput) {

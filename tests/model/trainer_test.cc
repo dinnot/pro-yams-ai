@@ -37,9 +37,61 @@ TEST(TrainerTest, TrainStep_ReturnsFiniteLoss) {
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
     }
 
-    double loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    // train_step returns the PREVIOUS step's loss (NaN on first call) —
+    // grab the current step's loss via wait_until_step_complete.
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double loss = trainer.wait_until_step_complete();
     EXPECT_TRUE(std::isfinite(loss)) << "Loss is not finite: " << loss;
     EXPECT_GE(loss, 0.0) << "Loss is negative";
+}
+
+// ---------------------------------------------------------------------------
+// BCE path uses binary_cross_entropy_with_logits internally — finite loss
+// + decreases over a few steps. The numerical-stability win (vs plain BCE
+// on sigmoided outputs) is what motivated the forward_logits refactor.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, BCE_WithLogits_TrainsStably) {
+    torch::manual_seed(123);
+    ModelConfig cfg;
+    cfg.hidden_layers     = 2;
+    cfg.hidden_width      = 64;
+    cfg.output_activation = "sigmoid";
+    cfg.loss_function     = "bce";
+    cfg.learning_rate     = 0.001;
+    ModelTrainer trainer(cfg, cpu_device());
+
+    int batch_size = 64;
+    std::vector<float>  states(batch_size * kTensorSize);
+    std::vector<double> targets(batch_size);
+
+    torch::manual_seed(456);
+    auto state_t = torch::rand({batch_size, kTensorSize});
+    std::memcpy(states.data(), state_t.data_ptr<float>(),
+                batch_size * kTensorSize * sizeof(float));
+    // Mix easy (0, 1) and hard (smooth) targets — hard ones used to inflate
+    // naive BCE near sigmoid saturation.
+    for (int i = 0; i < batch_size; ++i) {
+        targets[i] = (i % 3 == 0) ? 0.05
+                                  : (i % 3 == 1 ? 0.95 : 0.5);
+    }
+
+    // Submit first step then materialise its loss (train_step returns prev).
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double first = trainer.wait_until_step_complete();
+    EXPECT_TRUE(std::isfinite(first));
+    double last = first;
+    for (int i = 0; i < 50; ++i) {
+        // After the first call, train_step returns the previous step's loss;
+        // that's good enough for the per-iter finiteness check.
+        last = trainer.train_step(states.data(), targets.data(), batch_size);
+        ASSERT_TRUE(std::isfinite(last))
+            << "BCE-with-logits produced non-finite loss at step " << i;
+    }
+    // Flush the last submitted step for the final comparison.
+    last = trainer.wait_until_step_complete();
+    EXPECT_LT(last, first)
+        << "BCE-with-logits training failed to descend (first=" << first
+        << " last=" << last << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -65,10 +117,12 @@ TEST(TrainerTest, LossDecreases_Over100Steps) {
     for (int i = 0; i < batch_size; ++i)
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
 
-    double first_loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double first_loss = trainer.wait_until_step_complete();
     double last_loss  = first_loss;
     for (int i = 1; i < 200; ++i)
         last_loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    last_loss = trainer.wait_until_step_complete();
 
     EXPECT_LT(last_loss, first_loss)
         << "Loss did not decrease after 200 steps (first=" << first_loss
@@ -98,9 +152,9 @@ TEST(TrainerTest, Overfitting_TinyDataset) {
     for (int i = 0; i < n; ++i)
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
 
-    double loss = 1.0;
     for (int step = 0; step < 3000; ++step)
-        loss = trainer.train_step(states.data(), targets.data(), n);
+        trainer.train_step(states.data(), targets.data(), n);
+    double loss = trainer.wait_until_step_complete();
 
     EXPECT_LT(loss, 0.01)
         << "Model failed to memorise tiny dataset (loss=" << loss << ")";
@@ -255,9 +309,10 @@ TEST(TrainerTest, Checkpoint_ContinuedTraining) {
     for (auto& v : states) v = static_cast<float>(rand()) / RAND_MAX;
 
     // Train 20 steps
-    double loss_before = 0;
     for (int i = 0; i < 20; ++i)
-        loss_before = trainer.train_step(states.data(), targets.data(), 32);
+        trainer.train_step(states.data(), targets.data(), 32);
+    double loss_before = trainer.wait_until_step_complete();
+    (void)loss_before;  // captured for parity with the original assertion intent
 
     // Save and reload
     const std::string ckpt = tmpdir + "/cont";
@@ -269,7 +324,8 @@ TEST(TrainerTest, Checkpoint_ContinuedTraining) {
 
     // First step after load should give a reasonable loss, not far from the
     // pre-save value. BCE minimum with target=0.5 is -log(0.5) ≈ 0.693.
-    double loss_after = trainer2.train_step(states.data(), targets.data(), 32);
+    trainer2.train_step(states.data(), targets.data(), 32);
+    double loss_after = trainer2.wait_until_step_complete();
     EXPECT_LT(loss_after, 0.75)
         << "Loss spiked after checkpoint load (may indicate optimizer state not restored)";
 

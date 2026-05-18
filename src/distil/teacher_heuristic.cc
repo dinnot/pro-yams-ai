@@ -52,33 +52,39 @@ void HeuristicTeacher<Traits>::evaluate(
     const GameContextT<Traits>& ctx,
     const AfterstateRequest* requests, int n,
     const float* /*tensors*/,
-    double* evs) {
+    double* targets,
+    double* solver_evs) {
     bool is_odds_bot = false;
+    // Write the RAW heuristic output directly into solver_evs. solver_resolve
+    // averages these via expectimax (E[V0]) — averaging raw values is unbiased,
+    // averaging tanh-squashed values penalises variance and cripples policy.
     evaluate_raw<Traits>(version_, board, ctx, requests, n, tables_,
-                         evs, is_odds_bot);
+                         solver_evs, is_odds_bot);
 
-    // The four normalisation cases here match worker.cc's blending block
-    // exactly (the only difference is we don't subsequently blend with NN evs).
-    // Keep the conditionals in lockstep with worker.cc — if one moves the
-    // other must follow, otherwise distill targets stop matching the form
-    // the student sees during eval-time inference.
+    if (targets == nullptr) return;
+
+    // Now squash the raw evs into the student's target shape. The four
+    // normalisation cases match worker.cc's blending block exactly.
     const bool is_margin_style =
         (version_ != HeuristicVersion::V1 && !is_odds_bot);
 
     for (int i = 0; i < n; ++i) {
+        const double raw = solver_evs[i];
+        double t;
         if (is_odds_bot) {
-            double p = std::max(0.0, std::min(1.0, evs[i]));
-            evs[i] = use_margin_ ? (p * 2.0 - 1.0) : p;
+            double p = std::max(0.0, std::min(1.0, raw));
+            t = use_margin_ ? (p * 2.0 - 1.0) : p;
         } else if (is_margin_style) {
-            double t = std::tanh(evs[i] / margin_scale_);
-            evs[i] = use_margin_ ? t : (t + 1.0) / 2.0;
+            double squashed = std::tanh(raw / margin_scale_);
+            t = use_margin_ ? squashed : (squashed + 1.0) / 2.0;
         } else if (use_margin_) {
             // V1, margin mode: tanh-squash the unbounded raw value.
-            evs[i] = std::tanh(evs[i] / margin_scale_);
+            t = std::tanh(raw / margin_scale_);
         } else {
             // V1, win-prob mode: legacy /1800 clamp from worker.cc.
-            evs[i] = std::max(0.0, std::min(1.0, evs[i] / 1800.0));
+            t = std::max(0.0, std::min(1.0, raw / 1800.0));
         }
+        targets[i] = t;
     }
 }
 

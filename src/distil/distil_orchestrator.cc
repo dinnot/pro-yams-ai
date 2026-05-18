@@ -1,6 +1,8 @@
 #include "distil/distil_orchestrator.h"
 
 #include "engine/game_flow.h"
+#include "engine/scoring.h"            // is_terminal
+#include "heuristic/heuristic_bot.h"   // heuristic_play_turn for staggering
 
 template <typename Traits>
 DistilOrchestratorT<Traits>::DistilOrchestratorT(
@@ -26,6 +28,16 @@ template <typename Traits>
 void DistilOrchestratorT<Traits>::start() {
     games_.clear();
     games_.reserve(static_cast<size_t>(config_.num_games));
+    // Fast-forward each game by a random number of heuristic turns so the
+    // games are spread across the game's natural phase distribution from
+    // step 0, rather than all sitting on turn 0 in lockstep. Without this
+    // the first ~minutes of training feed the network exclusively early-game
+    // states; the network catastrophically forgets endgame value estimation
+    // by the time games actually reach endgame, and loss spikes when the
+    // cohort transitions phase together. Using the heuristic bot to advance
+    // the games (rather than a random policy) keeps the staggered states on
+    // a roughly on-policy trajectory.
+    const auto hv = static_cast<HeuristicVersion>(solver_config_.heuristic_version);
     for (int i = 0; i < config_.num_games; ++i) {
         auto g = std::make_unique<Instance>();
         g->game_id = i;
@@ -33,6 +45,22 @@ void DistilOrchestratorT<Traits>::start() {
             (static_cast<uint64_t>(i + 1) * 0x9E3779B97F4A7C15ULL);
         g->rng = RNG(seed);
         init_game<Traits>(g->state, g->ctx, g->rng);
+
+        const int max_skip = Traits::kTotalCells - 1;
+        const int turns_to_skip = g->rng.uniform_int(0, max_skip);
+        SolverBuffers skip_buffers;
+        for (int t = 0; t < turns_to_skip; ++t) {
+            if (is_terminal<Traits>(g->state.board)) break;
+            heuristic_play_turn<Traits>(g->state, g->ctx, tables_,
+                                        skip_buffers, g->rng, hv);
+        }
+        if (is_terminal<Traits>(g->state.board)) {
+            // Rare but possible if rng.uniform_int returns max_skip and the
+            // game finishes exactly there — re-init to a fresh board so we
+            // don't push a terminal game into the worker queue.
+            init_game<Traits>(g->state, g->ctx, g->rng);
+        }
+
         g->trajectory_length = 0;
         g->phase = GamePhase::kNeedRequests;
         available_queue_.push(g.get());

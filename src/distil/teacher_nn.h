@@ -40,7 +40,8 @@ public:
                   const GameContextT<Traits>& ctx,
                   const AfterstateRequest* requests, int n,
                   const float* tensors,
-                  double* evs) override;
+                  double* targets,
+                  double* solver_evs) override;
 
     bool needs_tensor_input() const override { return true; }
 

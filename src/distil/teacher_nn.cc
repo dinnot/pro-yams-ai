@@ -79,12 +79,25 @@ void NNTeacher<Traits>::evaluate(
     const GameContextT<Traits>& /*ctx*/,
     const AfterstateRequest* /*requests*/, int n,
     const float* tensors,
-    double* evs) {
+    double* targets,
+    double* solver_evs) {
     if (n <= 0) return;
     // InferenceEngine::batch_inference is thread-safe (mutex inside);
     // multiple workers serialise here. Per-call batch ~30..150 — small
     // for GPU throughput; a coordinator-batched variant is a follow-up.
-    inference_->batch_inference(tensors, n, evs);
+    //
+    // For an NN teacher the prediction IS the action value: solver_resolve
+    // selects actions to maximise expected predicted value, which is
+    // self-consistent. So solver_evs and targets get the same numbers.
+    double* dst = targets ? targets : solver_evs;
+    inference_->batch_inference(tensors, n, dst);
+    if (targets && solver_evs && targets != solver_evs) {
+        for (int i = 0; i < n; ++i) solver_evs[i] = targets[i];
+    } else if (!targets && solver_evs) {
+        // dst == solver_evs already.
+    } else if (targets && !solver_evs) {
+        // Caller only wanted training targets; nothing to copy.
+    }
 }
 
 // ---------------------------------------------------------------------------

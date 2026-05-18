@@ -292,7 +292,11 @@
       "Bash(./pro_yams_ai --mode distil --config /tmp/distil_nn_smoke.yaml)",
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/distil/distil_tests --gtest_filter='UpdateEmaTest*:WithinMatchMseTest*:ConvergenceCompositionTest*')",
       "Bash(./pro_yams_ai --mode distil --config /tmp/distil_smoke.yaml --max_steps 2000 --min_steps 0 --convergence_win_rate_delta -1 --convergence_match_mse 0.01 --convergence_patience 1 --eval_interval 100)",
-      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/distil/distil_tests --gtest_filter='DistilResumeTest*')"
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/distil/distil_tests --gtest_filter='DistilResumeTest*')",
+      "Bash(awk -F',' 'NR>1 {print $10}' /home/sorin/pro_yams_ai/logs/distil_v14_2v2/eval_log.csv)",
+      "Bash(tests/model/model_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/distil/distil_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/model_bench --benchmark_filter=BM_TrainStep --benchmark_min_time=0.5s)"
     ]
   }
 }

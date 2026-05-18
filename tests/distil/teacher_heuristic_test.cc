@@ -64,9 +64,10 @@ TEST_F(HeuristicTeacherTest, V2_MarginMode_TanhSquash) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V2, tables,
                                       /*use_margin=*/true, scale);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     /*tensors=*/nullptr, teacher_evs.data());
+                     /*tensors=*/nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     heuristic_evaluate_v2<Yams1v1>(gs.board, ctx, buffers.requests,
@@ -74,9 +75,10 @@ TEST_F(HeuristicTeacherTest, V2_MarginMode_TanhSquash) {
 
     for (int i = 0; i < buffers.request_count; ++i) {
         double expected = std::tanh(raw[i] / scale);
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
-        EXPECT_GE(teacher_evs[i], -1.0);
-        EXPECT_LE(teacher_evs[i],  1.0);
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
+        EXPECT_GE(targets[i], -1.0);
+        EXPECT_LE(targets[i],  1.0);
     }
 }
 
@@ -85,9 +87,10 @@ TEST_F(HeuristicTeacherTest, V2_WinProbMode_RescaledTanh) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V2, tables,
                                       /*use_margin=*/false, scale);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     heuristic_evaluate_v2<Yams1v1>(gs.board, ctx, buffers.requests,
@@ -95,9 +98,10 @@ TEST_F(HeuristicTeacherTest, V2_WinProbMode_RescaledTanh) {
 
     for (int i = 0; i < buffers.request_count; ++i) {
         double expected = (std::tanh(raw[i] / scale) + 1.0) / 2.0;
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
-        EXPECT_GE(teacher_evs[i], 0.0);
-        EXPECT_LE(teacher_evs[i], 1.0);
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
+        EXPECT_GE(targets[i], 0.0);
+        EXPECT_LE(targets[i], 1.0);
     }
 }
 
@@ -105,9 +109,10 @@ TEST_F(HeuristicTeacherTest, V1_WinProbMode_LegacyClampOver1800) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V1, tables,
                                       /*use_margin=*/false);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     heuristic_evaluate<Yams1v1>(gs.board, ctx, buffers.requests,
@@ -115,9 +120,10 @@ TEST_F(HeuristicTeacherTest, V1_WinProbMode_LegacyClampOver1800) {
 
     for (int i = 0; i < buffers.request_count; ++i) {
         double expected = std::max(0.0, std::min(1.0, raw[i] / 1800.0));
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
-        EXPECT_GE(teacher_evs[i], 0.0);
-        EXPECT_LE(teacher_evs[i], 1.0);
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
+        EXPECT_GE(targets[i], 0.0);
+        EXPECT_LE(targets[i], 1.0);
     }
 }
 
@@ -126,9 +132,10 @@ TEST_F(HeuristicTeacherTest, V1_MarginMode_TanhSquash) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V1, tables,
                                       /*use_margin=*/true, scale);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     heuristic_evaluate<Yams1v1>(gs.board, ctx, buffers.requests,
@@ -136,7 +143,8 @@ TEST_F(HeuristicTeacherTest, V1_MarginMode_TanhSquash) {
 
     for (int i = 0; i < buffers.request_count; ++i) {
         double expected = std::tanh(raw[i] / scale);
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
     }
 }
 
@@ -147,9 +155,10 @@ TEST_F(HeuristicTeacherTest, V16_OddsBot_MarginMode_MapsToMinusOneToOne) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V16, tables,
                                       /*use_margin=*/true);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     const ResearchConfig& cfg = get_research_config_for(HeuristicVersion::V16);
@@ -161,9 +170,10 @@ TEST_F(HeuristicTeacherTest, V16_OddsBot_MarginMode_MapsToMinusOneToOne) {
     for (int i = 0; i < buffers.request_count; ++i) {
         double p = std::max(0.0, std::min(1.0, raw[i]));
         double expected = p * 2.0 - 1.0;
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
-        EXPECT_GE(teacher_evs[i], -1.0);
-        EXPECT_LE(teacher_evs[i],  1.0);
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
+        EXPECT_GE(targets[i], -1.0);
+        EXPECT_LE(targets[i],  1.0);
     }
 }
 
@@ -171,9 +181,10 @@ TEST_F(HeuristicTeacherTest, V16_OddsBot_WinProbMode_ClampedProb) {
     HeuristicTeacher<Yams1v1> teacher(HeuristicVersion::V16, tables,
                                       /*use_margin=*/false);
 
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     std::vector<double> raw(buffers.request_count, 0.0);
     const ResearchConfig& cfg = get_research_config_for(HeuristicVersion::V16);
@@ -183,9 +194,10 @@ TEST_F(HeuristicTeacherTest, V16_OddsBot_WinProbMode_ClampedProb) {
 
     for (int i = 0; i < buffers.request_count; ++i) {
         double expected = std::max(0.0, std::min(1.0, raw[i]));
-        EXPECT_NEAR(teacher_evs[i], expected, 1e-12) << "i=" << i;
-        EXPECT_GE(teacher_evs[i], 0.0);
-        EXPECT_LE(teacher_evs[i], 1.0);
+        EXPECT_NEAR(targets[i],    expected, 1e-12) << "i=" << i;
+        EXPECT_NEAR(solver_evs[i], raw[i],   1e-12) << "i=" << i;
+        EXPECT_GE(targets[i], 0.0);
+        EXPECT_LE(targets[i], 1.0);
     }
 }
 
@@ -208,12 +220,13 @@ TEST(HeuristicTeacher2v2Test, V2_MarginMode_RunsAndProducesInRangeOutputs) {
 
     HeuristicTeacher<Yams2v2> teacher(HeuristicVersion::V2, tables,
                                       /*use_margin=*/true);
-    std::vector<double> teacher_evs(buffers.request_count, 0.0);
+    std::vector<double> targets(buffers.request_count, 0.0);
+    std::vector<double> solver_evs(buffers.request_count, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, buffers.request_count,
-                     nullptr, teacher_evs.data());
+                     nullptr, targets.data(), solver_evs.data());
 
     for (int i = 0; i < buffers.request_count; ++i) {
-        EXPECT_GE(teacher_evs[i], -1.0) << "i=" << i;
-        EXPECT_LE(teacher_evs[i],  1.0) << "i=" << i;
+        EXPECT_GE(targets[i], -1.0) << "i=" << i;
+        EXPECT_LE(targets[i],  1.0) << "i=" << i;
     }
 }

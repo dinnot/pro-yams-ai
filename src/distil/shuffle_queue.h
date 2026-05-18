@@ -99,50 +99,103 @@ public:
     ///
     /// Returns 0 only after stop() and full drain. Otherwise returns
     /// batch_size (or fewer only when stop drained a partial tail).
+    ///
+    /// Lock-holding policy: the big per-batch memcpy (batch_size × kTensorSize
+    /// floats — easily 100+ MB for a 16K batch in 2v2) happens OUTSIDE the
+    /// mutex. Under the lock we only claim sample indices and advance
+    /// serve_pos_. This frees the producer threads to keep pushing while
+    /// the trainer is copying. Safe because only this thread (the trainer)
+    /// ever mutates serving_ (via rotate_locked), so the indices and the
+    /// serving_ contents stay valid for the duration of the post-unlock copy.
+    ///
+    /// At chunk boundaries (rare — once per chunk_size samples) we materialize
+    /// the small claim from the outgoing chunk in-lock before rotating, then
+    /// the (large) claim from the new chunk is deferred to post-unlock as
+    /// usual. So worst case the in-lock memcpy is bounded by ONE chunk's tail
+    /// and the bulk always escapes the lock.
     int draw_batch(float* states, double* targets, int batch_size) {
         if (batch_size <= 0) return 0;
         constexpr int kT = Traits::kTensorSize;
 
         int written = 0;
+        int deferred_start = -1;          // output index where deferred range begins
+        std::vector<int> deferred_idx;    // sample indices into serving_ to memcpy later
+        deferred_idx.reserve(static_cast<size_t>(batch_size));
+
+        // Called inside the lock when we need to advance past the current chunk
+        // (rotation, stop drain). Materializes whatever's deferred so the post-
+        // unlock copy only has to handle the most-recent chunk's claim.
+        auto flush_pending = [&]() {
+            if (deferred_start < 0) return;
+            for (size_t i = 0; i < deferred_idx.size(); ++i) {
+                const Sample& src = serving_[static_cast<size_t>(deferred_idx[i])];
+                std::memcpy(states + static_cast<size_t>(deferred_start) * kT +
+                                static_cast<size_t>(i) * kT,
+                            src.state, kT * sizeof(float));
+                targets[deferred_start + static_cast<int>(i)] = src.target;
+            }
+            deferred_idx.clear();
+            deferred_start = -1;
+        };
+
         std::unique_lock<std::mutex> lk(mu_);
         while (written < batch_size) {
-            // 1. Drain whatever's left in serving_.
-            while (serve_pos_ < static_cast<int>(serving_.size()) &&
-                   written < batch_size) {
-                const Sample& src = serving_[
-                    static_cast<size_t>(perm_[static_cast<size_t>(serve_pos_)])];
-                std::memcpy(states + static_cast<size_t>(written) * kT,
-                            src.state, kT * sizeof(float));
-                targets[written] = src.target;
-                ++serve_pos_;
-                ++written;
+            int available = static_cast<int>(serving_.size()) - serve_pos_;
+            if (available > 0) {
+                int take = std::min(available, batch_size - written);
+                // Only the most-recent claim is deferred; flush any prior range.
+                if (deferred_start >= 0) flush_pending();
+                deferred_start = written;
+                for (int i = 0; i < take; ++i) {
+                    deferred_idx.push_back(
+                        perm_[static_cast<size_t>(serve_pos_ + i)]);
+                }
+                serve_pos_ += take;
+                written += take;
+                if (written == batch_size) break;
             }
-            if (written == batch_size) break;
 
-            // 2. serving_ exhausted — try to rotate.
+            // serving_ exhausted — try to rotate.
             const int threshold = first_chunk_
                 ? min_chunk_size_to_start_
                 : chunk_size_;
             if (static_cast<int>(accumulating_.size()) >= threshold) {
+                // Rotation will replace serving_'s contents; resolve deferred first.
+                flush_pending();
                 rotate_locked();
                 continue;
             }
 
-            // 3. Stop fired — drain whatever's left unconditionally.
+            // Stop fired — drain whatever's left unconditionally.
             if (stop_.load(std::memory_order_relaxed)) {
                 if (!accumulating_.empty()) {
+                    flush_pending();
                     rotate_locked();
                     continue;
                 }
                 break;  // truly empty
             }
 
-            // 4. Block until a producer adds more or stop fires.
+            // Block until a producer adds more or stop fires.
             cv_.wait(lk);
         }
         total_drawn_ += written;
         // Drained samples may have freed slots — wake blocked producers.
         if (written > 0) cv_.notify_all();
+        lk.unlock();
+
+        // Post-unlock bulk memcpy. serving_ stays stable: only this thread
+        // can mutate it (via rotate_locked, only called inside draw_batch),
+        // and we won't re-enter draw_batch until the caller returns from us.
+        if (deferred_start >= 0) {
+            for (size_t i = 0; i < deferred_idx.size(); ++i) {
+                const Sample& src = serving_[static_cast<size_t>(deferred_idx[i])];
+                std::memcpy(states + static_cast<size_t>(deferred_start) * kT +
+                                static_cast<size_t>(i) * kT,
+                            src.state, kT * sizeof(float));
+                targets[deferred_start + static_cast<int>(i)] = src.target;
+            }
+        }
         return written;
     }
 
