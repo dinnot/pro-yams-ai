@@ -29,10 +29,10 @@ static DistilConfig make_small_cfg(const std::string& ckpt_dir,
     cfg.self_play.min_games_per_batch = 1;
     cfg.self_play.batch_timeout_ms    = 10;
 
-    cfg.shuffle_chunk_size      = 256;
-    cfg.min_chunk_size_to_start = 64;
     cfg.train_batch_size        = 32;
-    cfg.max_buffered_samples    = 1024;
+    cfg.replay_buffer_capacity  = 1024;
+    cfg.min_samples_to_start    = 64;
+    cfg.samples_per_train       = 1.0;
 
     cfg.checkpoint_interval = 5;            // tight so we save quickly
     cfg.max_checkpoints     = 5;

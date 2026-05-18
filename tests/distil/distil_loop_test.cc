@@ -32,10 +32,11 @@ static DistilConfig make_small_distil_config(const std::string& ckpt_dir,
     cfg.self_play.min_games_per_batch = 1;
     cfg.self_play.batch_timeout_ms    = 10;
 
-    // Small shuffle window so the trainer starts quickly.
-    cfg.shuffle_chunk_size      = 256;
-    cfg.min_chunk_size_to_start = 64;
+    // Small replay buffer so the trainer starts quickly.
     cfg.train_batch_size        = 32;
+    cfg.replay_buffer_capacity  = 1024;
+    cfg.min_samples_to_start    = 64;
+    cfg.samples_per_train       = 1.0;
 
     cfg.checkpoint_interval = 1'000'000;   // effectively disabled
     cfg.max_checkpoints     = 3;

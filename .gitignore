@@ -10,3 +10,8 @@ checkpoints/
 
 # Data files
 *.bin
+
+# AI
+.claude/
+.agents/
+.codex/

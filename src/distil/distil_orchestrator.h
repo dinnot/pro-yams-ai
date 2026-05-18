@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "distil/distil_worker.h"
-#include "distil/shuffle_queue.h"
+#include "distil/replay_buffer.h"
 #include "distil/teacher.h"
 #include "engine/game_traits.h"
 #include "self_play/coordinator.h"   // SelfPlayConfig
@@ -35,7 +35,7 @@ public:
     DistilOrchestratorT(const SelfPlayConfig& sp_config,
                         const PrecomputedTables& tables,
                         Teacher<Traits>& teacher,
-                        ShuffleQueueT<Traits>& shuffle_queue,
+                        DistilReplayBufferT<Traits>& replay_buffer,
                         const SolverConfig& solver_config,
                         double samples_per_games_rate = 1.0,
                         uint64_t base_seed = 0xDEADBEEF12345678ULL);
@@ -56,7 +56,7 @@ private:
     SelfPlayConfig           config_;
     const PrecomputedTables& tables_;
     Teacher<Traits>&         teacher_;
-    ShuffleQueueT<Traits>&   shuffle_queue_;
+    DistilReplayBufferT<Traits>&   replay_buffer_;
     SolverConfig             solver_config_;
     double                   samples_per_games_rate_;
     uint64_t                 base_seed_;

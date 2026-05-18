@@ -1,5 +1,5 @@
 add_executable(distil_tests
-    shuffle_queue_test.cc
+    replay_buffer_test.cc
     teacher_heuristic_test.cc
     teacher_nn_test.cc
     distil_loop_test.cc

@@ -17,10 +17,9 @@ enum class TeacherKind {
 // DistilConfig — all hyperparameters for the distillation training loop.
 //
 // Parallels TrainingConfig in shape but drops everything that doesn't apply
-// to one-pass supervised distillation: no TD/MC mode, no replay buffer, no
-// temperature schedule, no past-opponent rotation, no heuristic blending,
-// no PBRS. Adds teacher selection, the shuffle-queue parameters, and
-// convergence-driven stopping criteria.
+// to supervised distillation: no TD/MC mode, no temperature schedule, no
+// past-opponent rotation, no heuristic blending, no PBRS. Adds teacher
+// selection, the replay-buffer parameters, and convergence-driven stopping.
 // ---------------------------------------------------------------------------
 struct DistilConfig {
     // --- Self-play orchestration ---
@@ -34,17 +33,22 @@ struct DistilConfig {
     // --- Student model architecture (may differ from teacher's) ---
     ModelConfig  student_model;
 
-    // --- Shuffle queue (replaces replay buffer) ---
-    int   shuffle_chunk_size      = 65536;
-    int   min_chunk_size_to_start = 16384;
-    int   train_batch_size        = 1024;
-    // Soft cap on (accumulating + serving_remaining). Workers block on
-    // add_batch when the queue fills, so the teacher (and especially an NN
-    // teacher sharing the GPU with the trainer) stops burning compute on
-    // samples that would never be trained on. The cap is intentionally
-    // generous — a 2M-sample window keeps enough game variance for healthy
-    // shuffling while preventing runaway memory and resource contention.
-    int   max_buffered_samples    = 2'000'000;
+    // --- Replay buffer ---
+    int    train_batch_size       = 1024;
+    // Fixed-capacity ring buffer. Producers block when full; eviction is
+    // driven by draw_batch (FIFO, ⌊batch_size / samples_per_train⌋ per
+    // draw with a fractional remainder accumulator).
+    int    replay_buffer_capacity = 2'000'000;
+    // Minimum fill required before the very first draw — gives the trainer
+    // a decorrelated warm-up batch. Subsequent draws only require
+    // `size >= train_batch_size`.
+    int    min_samples_to_start   = 16384;
+    // Target expected number of training uses per sample before eviction
+    // (must be ≥ 1.0). 1.0 = parity with the old one-pass shuffle queue
+    // (each sample consumed once on average). Larger values amortise
+    // expensive teacher / worker compute across more gradient updates at
+    // the cost of staleness. K=2–4 is a typical sweet spot.
+    double samples_per_train      = 1.0;
 
     // Per-sample keep probability when emitting from the worker into the
     // shuffle queue. Must be in (0, 1]. 1.0 (default) keeps every sample.

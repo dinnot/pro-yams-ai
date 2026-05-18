@@ -139,28 +139,22 @@ static ValidationResult validate_distil(const AppConfig& cfg) {
         r.fail("distil.reference_heuristic_version must be in [1, 17]");
     }
 
-    // Shuffle queue
-    if (dc.shuffle_chunk_size <= 0)
-        r.fail("distil.shuffle_chunk_size must be positive");
-    if (dc.min_chunk_size_to_start <= 0)
-        r.fail("distil.min_chunk_size_to_start must be positive");
-    if (dc.min_chunk_size_to_start > dc.shuffle_chunk_size)
-        r.fail("distil.min_chunk_size_to_start must not exceed shuffle_chunk_size");
+    // Replay buffer
     if (dc.train_batch_size <= 0)
         r.fail("distil.train_batch_size must be positive");
-    if (dc.train_batch_size > dc.min_chunk_size_to_start)
-        r.fail("distil.train_batch_size must not exceed min_chunk_size_to_start");
-    if (dc.max_buffered_samples <= 0)
-        r.fail("distil.max_buffered_samples must be positive");
-    if (dc.max_buffered_samples < dc.min_chunk_size_to_start)
-        r.fail("distil.max_buffered_samples must be >= min_chunk_size_to_start "
-               "(otherwise the queue can never accumulate enough to start training)");
-    // Once the first chunk has been served, the rotation threshold rises to
-    // shuffle_chunk_size; if the cap is below that, accumulating_ can never
-    // reach the threshold again and the trainer deadlocks waiting on rotation.
-    if (dc.max_buffered_samples < dc.shuffle_chunk_size)
-        r.fail("distil.max_buffered_samples must be >= shuffle_chunk_size "
-               "(otherwise rotations stall after the first chunk and the loop deadlocks)");
+    if (dc.replay_buffer_capacity <= 0)
+        r.fail("distil.replay_buffer_capacity must be positive");
+    if (dc.min_samples_to_start <= 0)
+        r.fail("distil.min_samples_to_start must be positive");
+    if (dc.min_samples_to_start < dc.train_batch_size)
+        r.fail("distil.min_samples_to_start must be >= train_batch_size "
+               "(the first draw needs at least one full batch of samples)");
+    if (dc.replay_buffer_capacity < dc.min_samples_to_start)
+        r.fail("distil.replay_buffer_capacity must be >= min_samples_to_start "
+               "(otherwise the buffer can never accumulate enough to start training)");
+    if (!(dc.samples_per_train >= 1.0))
+        r.fail("distil.samples_per_train must be >= 1.0 "
+               "(values < 1 would drop samples without training on them)");
     if (!(dc.samples_per_games_rate > 0.0 && dc.samples_per_games_rate <= 1.0))
         r.fail("distil.samples_per_games_rate must be in (0, 1]");
 

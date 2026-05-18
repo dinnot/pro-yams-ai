@@ -1,6 +1,6 @@
 # Distil library — distillation pipeline for the pro_yams_distil training mode.
 add_library(distil STATIC
-    shuffle_queue.cc
+    replay_buffer.cc
     teacher_heuristic.cc
     teacher_nn.cc
     distil_worker.cc

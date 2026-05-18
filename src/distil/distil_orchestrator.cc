@@ -9,14 +9,14 @@ DistilOrchestratorT<Traits>::DistilOrchestratorT(
     const SelfPlayConfig& sp_config,
     const PrecomputedTables& tables,
     Teacher<Traits>& teacher,
-    ShuffleQueueT<Traits>& shuffle_queue,
+    DistilReplayBufferT<Traits>& replay_buffer,
     const SolverConfig& solver_config,
     double samples_per_games_rate,
     uint64_t base_seed)
     : config_(sp_config),
       tables_(tables),
       teacher_(teacher),
-      shuffle_queue_(shuffle_queue),
+      replay_buffer_(replay_buffer),
       solver_config_(solver_config),
       samples_per_games_rate_(samples_per_games_rate),
       base_seed_(base_seed) {}
@@ -76,7 +76,7 @@ void DistilOrchestratorT<Traits>::start() {
             (static_cast<uint64_t>(w + 1) * 0xC0FFEE1357924680ULL);
         workers_.emplace_back([this, worker_seed]() {
             distil_worker_thread<Traits>(available_queue_, teacher_,
-                                         shuffle_queue_, tables_,
+                                         replay_buffer_, tables_,
                                          solver_config_, worker_seed,
                                          samples_per_games_rate_,
                                          &stats_);

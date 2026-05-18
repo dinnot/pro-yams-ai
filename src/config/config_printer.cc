@@ -58,10 +58,10 @@ void emit_distil_block(YAML::Emitter& out, const DistilConfig& dc) {
     out << YAML::Key << "teacher_checkpoint" << YAML::Value
         << dc.teacher_checkpoint_path;
 
-    out << YAML::Key << "shuffle_chunk_size"      << YAML::Value << dc.shuffle_chunk_size;
-    out << YAML::Key << "min_chunk_size_to_start" << YAML::Value << dc.min_chunk_size_to_start;
     out << YAML::Key << "train_batch_size"        << YAML::Value << dc.train_batch_size;
-    out << YAML::Key << "max_buffered_samples"    << YAML::Value << dc.max_buffered_samples;
+    out << YAML::Key << "replay_buffer_capacity"  << YAML::Value << dc.replay_buffer_capacity;
+    out << YAML::Key << "min_samples_to_start"    << YAML::Value << dc.min_samples_to_start;
+    out << YAML::Key << "samples_per_train"       << YAML::Value << dc.samples_per_train;
     out << YAML::Key << "samples_per_games_rate"  << YAML::Value << dc.samples_per_games_rate;
 
     out << YAML::Key << "checkpoint_interval" << YAML::Value << dc.checkpoint_interval;

@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
-#include "distil/shuffle_queue.h"
+#include "distil/replay_buffer.h"
 #include "distil/teacher.h"
 #include "engine/game_traits.h"
 #include "self_play/game_instance.h"
@@ -34,7 +34,7 @@ struct DistilWorkerStats {
 // Pops a GameInstanceT<Traits> from `available`, runs one solver iteration
 // (one placement or one reroll) driven entirely by the teacher's evaluation,
 // emits one (state, teacher_ev) sample per visited afterstate to the shared
-// ShuffleQueueT, then either pushes the game back to `available` (if the
+// DistilReplayBufferT, then either pushes the game back to `available` (if the
 // turn continued) or recycles it in-place with a fresh seed and a fresh
 // init_game (if the game became terminal).
 //
@@ -47,7 +47,7 @@ struct DistilWorkerStats {
 template <typename Traits>
 void distil_worker_thread(GameQueueT<Traits>& available,
                           Teacher<Traits>& teacher,
-                          ShuffleQueueT<Traits>& shuffle_queue,
+                          DistilReplayBufferT<Traits>& replay_buffer,
                           const PrecomputedTables& tables,
                           const SolverConfig& solver_config,
                           uint64_t worker_seed,

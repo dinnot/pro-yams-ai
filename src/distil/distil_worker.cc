@@ -33,7 +33,7 @@ inline void reset_game_in_place(GameInstanceT<Traits>& game,
 template <typename Traits>
 void distil_worker_thread(GameQueueT<Traits>& available,
                           Teacher<Traits>& teacher,
-                          ShuffleQueueT<Traits>& shuffle_queue,
+                          DistilReplayBufferT<Traits>& replay_buffer,
                           const PrecomputedTables& tables,
                           const SolverConfig& solver_config,
                           uint64_t worker_seed,
@@ -181,7 +181,7 @@ void distil_worker_thread(GameQueueT<Traits>& available,
                     kept = n;
                 }
                 if (kept > 0) {
-                    shuffle_queue.add_batch(sample_scratch.data(), kept);
+                    replay_buffer.add_batch(sample_scratch.data(), kept);
                     if (stats) {
                         stats->samples_emitted.fetch_add(kept, std::memory_order_relaxed);
                     }
@@ -241,7 +241,7 @@ void distil_worker_thread(GameQueueT<Traits>& available,
 // ---------------------------------------------------------------------------
 template void distil_worker_thread<Yams1v1>(GameQueueT<Yams1v1>&,
                                             Teacher<Yams1v1>&,
-                                            ShuffleQueueT<Yams1v1>&,
+                                            DistilReplayBufferT<Yams1v1>&,
                                             const PrecomputedTables&,
                                             const SolverConfig&,
                                             uint64_t,
@@ -249,7 +249,7 @@ template void distil_worker_thread<Yams1v1>(GameQueueT<Yams1v1>&,
                                             DistilWorkerStats*);
 template void distil_worker_thread<Yams2v2>(GameQueueT<Yams2v2>&,
                                             Teacher<Yams2v2>&,
-                                            ShuffleQueueT<Yams2v2>&,
+                                            DistilReplayBufferT<Yams2v2>&,
                                             const PrecomputedTables&,
                                             const SolverConfig&,
                                             uint64_t,

@@ -60,11 +60,11 @@ DistilLoopT<Traits>::DistilLoopT(const DistilConfig& config,
         }
     }
 
-    // --- Shuffle queue ---
-    queue_ = std::make_unique<ShuffleQueueT<Traits>>(
-        config_.shuffle_chunk_size,
-        config_.min_chunk_size_to_start,
-        config_.max_buffered_samples);
+    // --- Replay buffer ---
+    buffer_ = std::make_unique<DistilReplayBufferT<Traits>>(
+        config_.replay_buffer_capacity,
+        config_.min_samples_to_start,
+        config_.samples_per_train);
 
     // --- Solver config (greedy; worker overrides anyway, but keep the
     // normalisation flags consistent for any softmax fall-through). ---
@@ -81,7 +81,7 @@ DistilLoopT<Traits>::DistilLoopT(const DistilConfig& config,
 
     // --- Orchestrator ---
     orchestrator_ = std::make_unique<DistilOrchestratorT<Traits>>(
-        config_.self_play, tables_, *teacher_, *queue_, solver_cfg,
+        config_.self_play, tables_, *teacher_, *buffer_, solver_cfg,
         config_.samples_per_games_rate);
 }
 
@@ -92,7 +92,7 @@ DistilLoopT<Traits>::DistilLoopT(const DistilConfig& config,
 template <typename Traits>
 void DistilLoopT<Traits>::stop() {
     stop_flag_.store(true, std::memory_order_relaxed);
-    if (queue_) queue_->stop();  // Unblock any blocked draw_batch().
+    if (buffer_) buffer_->stop();  // Unblock any blocked draw_batch().
 }
 
 // ---------------------------------------------------------------------------
@@ -106,9 +106,7 @@ TrainingMetrics DistilLoopT<Traits>::metrics() const {
     m.games_played      = orchestrator_
         ? static_cast<int>(orchestrator_->total_games_completed())
         : 0;
-    m.samples_in_buffer = queue_
-        ? (queue_->serving_remaining() + queue_->accumulating_size())
-        : 0;
+    m.samples_in_buffer = buffer_ ? buffer_->size() : 0;
     m.loss              = last_loss_;
     m.temperature       = 0.0;
     m.epsilon           = 0.0;
@@ -280,13 +278,13 @@ void DistilLoopT<Traits>::run() {
             stop_reason_ = StopReason::kStopSignal;
             break;
         }
-        int n = queue_->draw_batch(train_states_.data(),
-                                   train_targets_.data(),
-                                   config_.train_batch_size);
+        int n = buffer_->draw_batch(train_states_.data(),
+                                    train_targets_.data(),
+                                    config_.train_batch_size);
         if (n <= 0) {
             // draw_batch returns 0 only after stop() — distinguish whether
             // the external stop_flag was already set (above) from the
-            // case where the queue was drained for some other reason.
+            // case where the buffer was drained for some other reason.
             stop_reason_ = stop_flag_.load(std::memory_order_relaxed)
                 ? StopReason::kStopSignal
                 : StopReason::kQueueDrained;
@@ -314,9 +312,9 @@ void DistilLoopT<Traits>::run() {
         distil::update_ema(rolling_mse_, last_loss_, /*alpha=*/0.05);
     }
 
-    // Stop the queue FIRST so any producers blocked on the back-pressure cap
+    // Stop the buffer FIRST so any producers blocked on the capacity cap
     // wake up and exit; only then can orchestrator_->stop() join them.
-    queue_->stop();
+    buffer_->stop();
     orchestrator_->stop();
 
     // Always run the final report — gives a headline number with a tighter

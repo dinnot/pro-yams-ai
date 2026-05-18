@@ -16,9 +16,9 @@ distil:
     learning_rate: 0.0001
 
   train_batch_size: 16384
-  shuffle_chunk_size: 262144
-  min_chunk_size_to_start: 16384
-  max_buffered_samples: 2000000
+  replay_buffer_capacity: 2000000
+  min_samples_to_start: 16384
+  samples_per_train: 1.0
 
   max_steps: 500000
   min_steps: 5000

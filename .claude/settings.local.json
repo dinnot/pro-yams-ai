@@ -299,7 +299,17 @@
       "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/model_bench --benchmark_filter=BM_TrainStep --benchmark_min_time=0.5s)",
       "Bash(cmake --build . --target distil_tests -j)",
       "Bash(./tests/distil/distil_tests --gtest_filter=\"ShuffleQueueTest.*\")",
-      "Bash(cmake --build . --target engine -j)"
+      "Bash(cmake --build . --target engine -j)",
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./tests/distil/distil_tests)",
+      "Bash(ps *)",
+      "Bash(kill -9 425256 425258 430276 430278)",
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive /home/sorin/pro_yams_ai/build/tests/distil/distil_tests --gtest_filter=\"ReplayBufferTest.*\")",
+      "Bash(kill -9 456253)",
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive /home/sorin/pro_yams_ai/build/tests/distil/distil_tests)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target pro_yams_ai -j)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target distil_tests -j)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build -j)",
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive /home/sorin/pro_yams_ai/build/tests/config/config_tests)"
     ]
   }
 }

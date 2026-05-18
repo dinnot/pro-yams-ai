@@ -126,7 +126,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
 
 // ---------------------------------------------------------------------------
 // Distil YAML loader. Mirrors load_training_config for the shared fields and
-// adds teacher selection, shuffle-queue and convergence knobs.
+// adds teacher selection, replay-buffer and convergence knobs.
 // ---------------------------------------------------------------------------
 void load_distil_config(const YAML::Node& n, DistilConfig& dc) {
     if (n["teacher_kind"])
@@ -134,10 +134,10 @@ void load_distil_config(const YAML::Node& n, DistilConfig& dc) {
     maybe_assign(n, "teacher_heuristic_version", dc.teacher_heuristic_version);
     maybe_assign(n, "teacher_checkpoint",        dc.teacher_checkpoint_path);
 
-    maybe_assign(n, "shuffle_chunk_size",      dc.shuffle_chunk_size);
-    maybe_assign(n, "min_chunk_size_to_start", dc.min_chunk_size_to_start);
     maybe_assign(n, "train_batch_size",        dc.train_batch_size);
-    maybe_assign(n, "max_buffered_samples",    dc.max_buffered_samples);
+    maybe_assign(n, "replay_buffer_capacity",  dc.replay_buffer_capacity);
+    maybe_assign(n, "min_samples_to_start",    dc.min_samples_to_start);
+    maybe_assign(n, "samples_per_train",       dc.samples_per_train);
     maybe_assign(n, "samples_per_games_rate",  dc.samples_per_games_rate);
 
     maybe_assign(n, "checkpoint_interval",     dc.checkpoint_interval);
@@ -294,8 +294,14 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--samples_per_games_rate" && i + 1 < argc) {
             config.distil.samples_per_games_rate = std::stod(argv[++i]);
         }
-        else if (arg == "--max_buffered_samples" && i + 1 < argc) {
-            config.distil.max_buffered_samples = std::stoi(argv[++i]);
+        else if (arg == "--replay_buffer_capacity" && i + 1 < argc) {
+            config.distil.replay_buffer_capacity = std::stoi(argv[++i]);
+        }
+        else if (arg == "--min_samples_to_start" && i + 1 < argc) {
+            config.distil.min_samples_to_start = std::stoi(argv[++i]);
+        }
+        else if (arg == "--samples_per_train" && i + 1 < argc) {
+            config.distil.samples_per_train = std::stod(argv[++i]);
         }
         else if (arg == "--convergence_match_mse" && i + 1 < argc) {
             config.distil.convergence_match_mse = std::stod(argv[++i]);

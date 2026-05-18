@@ -10,7 +10,7 @@
 #include "distil/convergence.h"
 #include "distil/distil_config.h"
 #include "distil/distil_orchestrator.h"
-#include "distil/shuffle_queue.h"
+#include "distil/replay_buffer.h"
 #include "distil/teacher.h"
 #include "distil/teacher_nn.h"
 #include "engine/game_traits.h"
@@ -28,7 +28,7 @@ enum class DistilStopReason {
     kMaxSteps,      // training_step_ reached config.max_steps
     kConvergence,   // convergence_satisfied() returned true
     kStopSignal,    // stop() was called externally (SIGINT, etc.)
-    kQueueDrained,  // draw_batch returned 0 — queue stopped before max_steps
+    kQueueDrained,  // draw_batch returned 0 — buffer stopped before max_steps
 };
 
 const char* stop_reason_str(DistilStopReason r);
@@ -36,10 +36,10 @@ const char* stop_reason_str(DistilStopReason r);
 // ---------------------------------------------------------------------------
 // DistilLoopT<Traits> — top-level distillation loop.
 //
-// Wires together: student ModelTrainer, Teacher<Traits>, ShuffleQueueT<Traits>,
+// Wires together: student ModelTrainer, Teacher<Traits>, DistilReplayBufferT<Traits>,
 // and DistilOrchestratorT<Traits>. Owns the run loop:
 //
-//   queue.draw_batch → student.train_step → (checkpoint?) → (converged?) → loop
+//   buffer.draw_batch → student.train_step → (checkpoint?) → (converged?) → loop
 //
 // Convergence and final-report logic land in later steps; for now the loop
 // runs to config.max_steps (or until stop() is called from a signal handler).
@@ -114,7 +114,7 @@ private:
     std::unique_ptr<ModelTrainer>                 student_trainer_;
     std::unique_ptr<Teacher<Traits>>              teacher_;
     NNTeacher<Traits>*                            nn_teacher_view_ = nullptr;
-    std::unique_ptr<ShuffleQueueT<Traits>>        queue_;
+    std::unique_ptr<DistilReplayBufferT<Traits>>        buffer_;
     std::unique_ptr<DistilOrchestratorT<Traits>>  orchestrator_;
 
     int  training_step_         = 0;
