@@ -296,7 +296,9 @@
       "Bash(awk -F',' 'NR>1 {print $10}' /home/sorin/pro_yams_ai/logs/distil_v14_2v2/eval_log.csv)",
       "Bash(tests/model/model_tests)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/distil/distil_tests)",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/model_bench --benchmark_filter=BM_TrainStep --benchmark_min_time=0.5s)"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/model_bench --benchmark_filter=BM_TrainStep --benchmark_min_time=0.5s)",
+      "Bash(cmake --build . --target distil_tests -j)",
+      "Bash(./tests/distil/distil_tests --gtest_filter=\"ShuffleQueueTest.*\")"
     ]
   }
 }

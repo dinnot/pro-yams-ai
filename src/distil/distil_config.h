@@ -46,6 +46,15 @@ struct DistilConfig {
     // shuffling while preventing runaway memory and resource contention.
     int   max_buffered_samples    = 2'000'000;
 
+    // Per-sample keep probability when emitting from the worker into the
+    // shuffle queue. Must be in (0, 1]. 1.0 (default) keeps every sample.
+    // 0.3 keeps each sample independently with probability 0.3, trading
+    // sample throughput per turn for game variance — across a fixed wall
+    // budget the trainer sees samples from ~3× more games (and therefore
+    // more board states) when set to 0.3 vs 1.0. The retained fraction is
+    // approximate (binomial), not exact.
+    double samples_per_games_rate = 1.0;
+
     // --- Checkpointing ---
     int   checkpoint_interval = 5000;
     int   max_checkpoints     = 5;

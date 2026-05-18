@@ -37,6 +37,7 @@ void distil_worker_thread(GameQueueT<Traits>& available,
                           const PrecomputedTables& tables,
                           const SolverConfig& solver_config,
                           uint64_t worker_seed,
+                          double samples_per_games_rate,
                           DistilWorkerStats* stats) {
     using GI = GameInstanceT<Traits>;
     using Sample = TrainingSampleT<Traits>;
@@ -46,6 +47,14 @@ void distil_worker_thread(GameQueueT<Traits>& available,
     std::vector<float> tensor_scratch(
         static_cast<size_t>(kMaxAfterstateRequests) * kT);
     std::vector<Sample> sample_scratch(kMaxAfterstateRequests);
+
+    // Dedicated RNG for the keep-rate Bernoulli. Kept independent of
+    // game->rng so subsampling decisions don't perturb gameplay (dice rolls
+    // / placements stay identical to a rate=1.0 run with the same seed).
+    RNG subsample_rng(worker_seed ^ 0xDEADC0FFEEBADF00ULL);
+    // Treat values within float epsilon of 1.0 as "no subsampling" so we
+    // skip the per-sample draw entirely on the default path.
+    const bool subsample_enabled = (samples_per_games_rate < 1.0 - 1e-9);
 
     // Pre-build the greedy solver config once — fields below override any
     // exploration / blending settings the caller may have set.
@@ -63,113 +72,151 @@ void distil_worker_thread(GameQueueT<Traits>& available,
         if (game == nullptr) break;   // shutdown sentinel
 
         // ---------------------------------------------------------------
-        // Per-turn setup.
+        // Per-turn setup. We run a FULL turn inline (request → teacher
+        // eval → emit → resolve-and-reroll loop → placement), instead of
+        // pushing the game back to the queue between rerolls. The board
+        // state is invariant across a turn's rerolls (only the dice
+        // change), so the requests, tensors, teacher evs and DP table can
+        // be computed once and reused across rerolls — solver_resolve
+        // short-circuits its DP rebuild when dp_computed is true.
         // ---------------------------------------------------------------
         game->solver_buffers.dp_computed = false;
         game->solver_buffers.evs_blended = false;
-
-        solver_get_requests<Traits>(game->state, game->ctx, tables,
-                                    game->solver_buffers);
 
         bool became_terminal     = false;
         bool degenerate_terminal = false;  // True iff the "no placement, no
                                            // reroll" fallback ended the game
                                            // — skip get_game_result then.
 
-        // ---------------------------------------------------------------
-        // 0-requests fast paths (mirrors self_play/worker.cc 70..106).
-        // ---------------------------------------------------------------
-        if (game->solver_buffers.request_count == 0) {
-            if (game->state.rolls_left <= 0) {
-                const auto& all = game->ctx.legal_all[game->state.board.current_player];
-                if (all.count > 0) {
-                    perform_placement<Traits>(game->state, game->ctx,
-                                              all.placements[0].column,
-                                              all.placements[0].row, game->rng);
-                    became_terminal = is_terminal<Traits>(game->state.board);
+        solver_get_requests<Traits>(game->state, game->ctx, tables,
+                                    game->solver_buffers);
+
+        // The zero-request edge case may need to reroll and retry several
+        // times before we either find a non-empty request set (and fall
+        // into the normal path) or exhaust our rerolls (and force a
+        // fallback placement). Looping inline avoids the queue ping-pong.
+        bool turn_done = false;
+        while (!turn_done) {
+            if (game->solver_buffers.request_count == 0) {
+                if (game->state.rolls_left <= 0) {
+                    // No legal request set and no rerolls left — force a
+                    // fallback placement at the first legal cell.
+                    const auto& all = game->ctx.legal_all[game->state.board.current_player];
+                    if (all.count > 0) {
+                        perform_placement<Traits>(game->state, game->ctx,
+                                                  all.placements[0].column,
+                                                  all.placements[0].row, game->rng);
+                        became_terminal = is_terminal<Traits>(game->state.board);
+                    } else {
+                        // No legal placement at all — degenerate, score as draw.
+                        game->final_duel_margin = 0;
+                        game->result            = 0.5;
+                        became_terminal         = true;
+                        degenerate_terminal     = true;
+                    }
+                    if (stats) {
+                        stats->turns_processed.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    turn_done = true;
                 } else {
-                    // No legal placement, no rerolls — degenerate, score as draw.
-                    game->final_duel_margin = 0;
-                    game->result            = 0.5;
-                    became_terminal         = true;
-                    degenerate_terminal     = true;
+                    // No requests but rerolls available — reroll all dice
+                    // and recompute requests for the new dice. Board is
+                    // unchanged so dp_computed can stay reset; we never
+                    // called solver_resolve yet anyway.
+                    perform_reroll<Traits>(game->state, 0, game->rng);
+                    solver_get_requests<Traits>(game->state, game->ctx, tables,
+                                                game->solver_buffers);
                 }
             } else {
-                // No requests but rerolls available — reroll everything.
-                perform_reroll<Traits>(game->state, 0, game->rng);
-            }
-        } else {
-            // -----------------------------------------------------------
-            // Normal path: tensors → teacher.evaluate → emit samples → resolve.
-            //
-            // Within a single turn the board state (and hence requests +
-            // tensors + teacher evs) is invariant across rerolls — only the
-            // dice change. So we only emit training samples on the FIRST
-            // roll of the turn (rolls_left == 2). Emitting on every roll
-            // would push 2..3× duplicate samples into the shuffle queue,
-            // destroying SGD batch diversity. Tensors are skipped on
-            // subsequent rolls when the teacher doesn't need them (heuristic).
-            // -----------------------------------------------------------
-            const int n = game->solver_buffers.request_count;
-            assert(n <= kMaxAfterstateRequests);
+                // -------------------------------------------------------
+                // Normal path. Tensors + teacher.evaluate + sample emit
+                // happen exactly ONCE per turn (board is invariant across
+                // rerolls). The reroll loop below reuses the cached evs
+                // and DP, so subsequent rerolls within this turn are just
+                // a DP lookup.
+                // -------------------------------------------------------
+                const int n = game->solver_buffers.request_count;
+                assert(n <= kMaxAfterstateRequests);
 
-            const bool emit_samples = (game->state.rolls_left == 2);
-            const bool need_tensors = emit_samples || teacher.needs_tensor_input();
-
-            if (need_tensors) {
                 generate_tensor_batch<Traits>(
                     game->state.board, game->ctx,
                     game->state.board.current_player,
                     game->solver_buffers.requests, n,
                     tables,
                     tensor_scratch.data());
-            }
 
-            // Compute training targets (squashed) into a scratch array;
-            // solver_resolve consumes the RAW evs written into buffers.evs.
-            // Decoupling avoids the E[tanh(X)] ≠ tanh(E[X]) bias that
-            // averaging squashed margins introduces into expectimax.
-            double targets[kMaxAfterstateRequests];
-            teacher.evaluate(game->state.board, game->ctx,
-                             game->solver_buffers.requests, n,
-                             need_tensors ? tensor_scratch.data() : nullptr,
-                             emit_samples ? targets : nullptr,
-                             game->solver_buffers.evs);
+                // Compute training targets (squashed) into a scratch array;
+                // solver_resolve consumes the RAW evs written into buffers.evs.
+                // Decoupling avoids the E[tanh(X)] ≠ tanh(E[X]) bias that
+                // averaging squashed margins introduces into expectimax.
+                double targets[kMaxAfterstateRequests];
+                teacher.evaluate(game->state.board, game->ctx,
+                                 game->solver_buffers.requests, n,
+                                 tensor_scratch.data(),
+                                 targets,
+                                 game->solver_buffers.evs);
 
-            if (emit_samples) {
-                for (int i = 0; i < n; ++i) {
-                    std::memcpy(sample_scratch[i].state,
-                                tensor_scratch.data() + static_cast<size_t>(i) * kT,
-                                kT * sizeof(float));
-                    sample_scratch[i].target = targets[i];
+                int kept = 0;
+                if (subsample_enabled) {
+                    // Independent Bernoulli per request. Approximate fraction
+                    // (binomial(n, rate)); cheaper than reservoir sampling
+                    // and the user explicitly OK'd inexact retention.
+                    for (int i = 0; i < n; ++i) {
+                        if (subsample_rng.uniform_double() >= samples_per_games_rate) {
+                            continue;
+                        }
+                        std::memcpy(sample_scratch[kept].state,
+                                    tensor_scratch.data() + static_cast<size_t>(i) * kT,
+                                    kT * sizeof(float));
+                        sample_scratch[kept].target = targets[i];
+                        ++kept;
+                    }
+                } else {
+                    for (int i = 0; i < n; ++i) {
+                        std::memcpy(sample_scratch[i].state,
+                                    tensor_scratch.data() + static_cast<size_t>(i) * kT,
+                                    kT * sizeof(float));
+                        sample_scratch[i].target = targets[i];
+                    }
+                    kept = n;
                 }
-                shuffle_queue.add_batch(sample_scratch.data(), n);
-                if (stats) {
-                    stats->samples_emitted.fetch_add(n, std::memory_order_relaxed);
+                if (kept > 0) {
+                    shuffle_queue.add_batch(sample_scratch.data(), kept);
+                    if (stats) {
+                        stats->samples_emitted.fetch_add(kept, std::memory_order_relaxed);
+                    }
                 }
-            }
 
-            // Resolve greedily — teacher's raw evs in buffers.evs drive the
-            // action via expectimax.
-            SolverResult result = solver_resolve<Traits>(
-                game->state, game->ctx, tables, game->solver_buffers,
-                greedy_cfg, game->rng);
+                // Resolve greedily — teacher's raw evs in buffers.evs drive
+                // the action via expectimax. After a reroll, the dice
+                // change but the board (and hence evs) doesn't, so the
+                // next solver_resolve reuses the cached DP via
+                // dp_computed=true (set inside the first solver_resolve
+                // call).
+                while (true) {
+                    SolverResult result = solver_resolve<Traits>(
+                        game->state, game->ctx, tables, game->solver_buffers,
+                        greedy_cfg, game->rng);
 
-            if (result.should_place) {
-                perform_placement<Traits>(game->state, game->ctx,
-                                          result.placement.column,
-                                          result.placement.row, game->rng);
-                if (stats) {
-                    stats->turns_processed.fetch_add(1, std::memory_order_relaxed);
+                    if (result.should_place) {
+                        perform_placement<Traits>(game->state, game->ctx,
+                                                  result.placement.column,
+                                                  result.placement.row, game->rng);
+                        if (stats) {
+                            stats->turns_processed.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        became_terminal = is_terminal<Traits>(game->state.board);
+                        break;
+                    } else {
+                        perform_reroll<Traits>(game->state, result.hold_mask, game->rng);
+                    }
                 }
-                became_terminal = is_terminal<Traits>(game->state.board);
-            } else {
-                perform_reroll<Traits>(game->state, result.hold_mask, game->rng);
+                turn_done = true;
             }
         }
 
         // ---------------------------------------------------------------
-        // Tail: either recycle (terminal) or requeue.
+        // Tail: either recycle (terminal) or requeue for the next turn.
         // ---------------------------------------------------------------
         if (became_terminal) {
             if (!degenerate_terminal) {
@@ -182,11 +229,10 @@ void distil_worker_thread(GameQueueT<Traits>& available,
             }
             uint64_t new_seed = derive_recycle_seed(worker_seed, ++recycle_counter);
             reset_game_in_place<Traits>(*game, new_seed);
-            available.push(game);
         } else {
             game->phase = GamePhase::kNeedRequests;
-            available.push(game);
         }
+        available.push(game);
     }
 }
 
@@ -199,6 +245,7 @@ template void distil_worker_thread<Yams1v1>(GameQueueT<Yams1v1>&,
                                             const PrecomputedTables&,
                                             const SolverConfig&,
                                             uint64_t,
+                                            double,
                                             DistilWorkerStats*);
 template void distil_worker_thread<Yams2v2>(GameQueueT<Yams2v2>&,
                                             Teacher<Yams2v2>&,
@@ -206,4 +253,5 @@ template void distil_worker_thread<Yams2v2>(GameQueueT<Yams2v2>&,
                                             const PrecomputedTables&,
                                             const SolverConfig&,
                                             uint64_t,
+                                            double,
                                             DistilWorkerStats*);

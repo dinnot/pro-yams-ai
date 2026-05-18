@@ -138,6 +138,7 @@ void load_distil_config(const YAML::Node& n, DistilConfig& dc) {
     maybe_assign(n, "min_chunk_size_to_start", dc.min_chunk_size_to_start);
     maybe_assign(n, "train_batch_size",        dc.train_batch_size);
     maybe_assign(n, "max_buffered_samples",    dc.max_buffered_samples);
+    maybe_assign(n, "samples_per_games_rate",  dc.samples_per_games_rate);
 
     maybe_assign(n, "checkpoint_interval",     dc.checkpoint_interval);
     maybe_assign(n, "max_checkpoints",         dc.max_checkpoints);
@@ -289,6 +290,9 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         }
         else if (arg == "--final_eval_games" && i + 1 < argc) {
             config.distil.final_eval_games = std::stoi(argv[++i]);
+        }
+        else if (arg == "--samples_per_games_rate" && i + 1 < argc) {
+            config.distil.samples_per_games_rate = std::stod(argv[++i]);
         }
         else if (arg == "--max_buffered_samples" && i + 1 < argc) {
             config.distil.max_buffered_samples = std::stoi(argv[++i]);

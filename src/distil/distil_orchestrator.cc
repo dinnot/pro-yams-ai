@@ -11,12 +11,14 @@ DistilOrchestratorT<Traits>::DistilOrchestratorT(
     Teacher<Traits>& teacher,
     ShuffleQueueT<Traits>& shuffle_queue,
     const SolverConfig& solver_config,
+    double samples_per_games_rate,
     uint64_t base_seed)
     : config_(sp_config),
       tables_(tables),
       teacher_(teacher),
       shuffle_queue_(shuffle_queue),
       solver_config_(solver_config),
+      samples_per_games_rate_(samples_per_games_rate),
       base_seed_(base_seed) {}
 
 template <typename Traits>
@@ -76,6 +78,7 @@ void DistilOrchestratorT<Traits>::start() {
             distil_worker_thread<Traits>(available_queue_, teacher_,
                                          shuffle_queue_, tables_,
                                          solver_config_, worker_seed,
+                                         samples_per_games_rate_,
                                          &stats_);
         });
     }
@@ -85,8 +88,10 @@ template <typename Traits>
 void DistilOrchestratorT<Traits>::stop() {
     if (workers_.empty()) return;
     // One nullptr per worker — each pops at most one sentinel and exits.
+    // Push to the FRONT so workers see the sentinel immediately rather than
+    // burning teacher inference + solver work on every pending game first.
     for (size_t i = 0; i < workers_.size(); ++i) {
-        available_queue_.push(nullptr);
+        available_queue_.push_front(nullptr);
     }
     for (auto& t : workers_) {
         if (t.joinable()) t.join();

@@ -37,6 +37,7 @@ public:
                         Teacher<Traits>& teacher,
                         ShuffleQueueT<Traits>& shuffle_queue,
                         const SolverConfig& solver_config,
+                        double samples_per_games_rate = 1.0,
                         uint64_t base_seed = 0xDEADBEEF12345678ULL);
     ~DistilOrchestratorT();
 
@@ -57,6 +58,7 @@ private:
     Teacher<Traits>&         teacher_;
     ShuffleQueueT<Traits>&   shuffle_queue_;
     SolverConfig             solver_config_;
+    double                   samples_per_games_rate_;
     uint64_t                 base_seed_;
 
     std::vector<std::unique_ptr<Instance>> games_;

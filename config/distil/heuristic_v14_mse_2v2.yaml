@@ -28,6 +28,8 @@ distil:
   convergence_patience: 3
   convergence_match_mse: -1.0
 
+  samples_per_games_rate: 0.05
+
   eval_interval: 10000
   eval_games: 1000
   final_eval_games: 1000
@@ -38,6 +40,6 @@ distil:
   use_duel_margin_maximization: false
   duel_margin_maximization_scale: 20000.0
 
-  checkpoint_dir: checkpoints/distil_v14_mse_2v2
-  log_dir: logs/distil_v14_mse_2v2
-  log_path: logs/distil_v14_mse_2v2/distil_log.csv
+  checkpoint_dir: checkpoints/distil_v14_mse_2v2_v2
+  log_dir: logs/distil_v14_mse_2v2_v2
+  log_path: logs/distil_v14_mse_2v2_v2/distil_log.csv

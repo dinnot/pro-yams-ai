@@ -161,6 +161,8 @@ static ValidationResult validate_distil(const AppConfig& cfg) {
     if (dc.max_buffered_samples < dc.shuffle_chunk_size)
         r.fail("distil.max_buffered_samples must be >= shuffle_chunk_size "
                "(otherwise rotations stall after the first chunk and the loop deadlocks)");
+    if (!(dc.samples_per_games_rate > 0.0 && dc.samples_per_games_rate <= 1.0))
+        r.fail("distil.samples_per_games_rate must be in (0, 1]");
 
     // Checkpointing
     if (dc.checkpoint_interval <= 0)

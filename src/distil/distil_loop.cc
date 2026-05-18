@@ -81,7 +81,8 @@ DistilLoopT<Traits>::DistilLoopT(const DistilConfig& config,
 
     // --- Orchestrator ---
     orchestrator_ = std::make_unique<DistilOrchestratorT<Traits>>(
-        config_.self_play, tables_, *teacher_, *queue_, solver_cfg);
+        config_.self_play, tables_, *teacher_, *queue_, solver_cfg,
+        config_.samples_per_games_rate);
 }
 
 // ---------------------------------------------------------------------------
