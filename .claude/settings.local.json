@@ -298,7 +298,8 @@
       "Bash(/home/sorin/pro_yams_ai/build/tests/distil/distil_tests)",
       "Bash(/home/sorin/pro_yams_ai/build/tests/benchmarks/model_bench --benchmark_filter=BM_TrainStep --benchmark_min_time=0.5s)",
       "Bash(cmake --build . --target distil_tests -j)",
-      "Bash(./tests/distil/distil_tests --gtest_filter=\"ShuffleQueueTest.*\")"
+      "Bash(./tests/distil/distil_tests --gtest_filter=\"ShuffleQueueTest.*\")",
+      "Bash(cmake --build . --target engine -j)"
     ]
   }
 }

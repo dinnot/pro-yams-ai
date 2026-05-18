@@ -428,8 +428,10 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
     // The margin-now / margin-E totals are now MY-TEAM margins (sum of all
     // canonical pairings, each defined as "my team's player − their player").
     // In 1v1 the single pairing reproduces the previous behaviour bit-for-bit.
-    out[idx++] = std::tanh(static_cast<float>(total_duel_now) / 80000.0f);
-    out[idx++] = std::tanh(static_cast<float>(total_duel_E)   / 100000.0);
+    out[idx++] = std::tanh(static_cast<float>(total_duel_now) /
+                           (80000.0f * Traits::kPlayersPerTeam));
+    out[idx++] = std::tanh(static_cast<float>(total_duel_E)   /
+                           (100000.0 * Traits::kPlayersPerTeam));
 
     // "Locked-in" margin flags: did MY TEAM already secure / lose the game
     // (against the opposing team's max / min potential)? In 1v1 this collapses
