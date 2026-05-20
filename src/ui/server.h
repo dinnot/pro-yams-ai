@@ -76,6 +76,8 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_get_game(req, res); });
         server_.Post(R"(/api/game/(\d+)/step)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_step(req, res); });
+        server_.Post(R"(/api/game/(\d+)/bot_step)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_bot_step(req, res); });
         server_.Post(R"(/api/game/(\d+)/play_all)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_play_all(req, res); });
         server_.Delete(R"(/api/game/(\d+))",
@@ -218,6 +220,16 @@ private:
     void handle_step(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
         sessions_.advance_turn(id);
+        Session copy;
+        if (!sessions_.get_session_copy(id, copy)) {
+            error_response(res, "session not found", 404); return;
+        }
+        json_response(res, game_state_to_json<Traits>(copy));
+    }
+
+    void handle_bot_step(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        sessions_.advance_turn_bot_override(id);
         Session copy;
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;

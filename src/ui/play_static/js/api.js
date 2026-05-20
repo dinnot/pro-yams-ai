@@ -39,6 +39,11 @@ const API = {
         return res.json();
     },
 
+    async botStep(id) {
+        const res = await fetch(`/api/game/${id}/bot_step`, { method: 'POST' });
+        return res.json();
+    },
+
     async getOptions(id) {
         const res = await fetch(`/api/game/${id}/options`);
         return res.json();

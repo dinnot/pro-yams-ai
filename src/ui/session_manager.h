@@ -145,6 +145,40 @@ public:
         return s->history.back();
     }
 
+    /// Advance one turn, forcing the bot to play even if the current player is human.
+    TurnRec advance_turn_bot_override(int session_id) {
+        auto entry = get_entry(session_id);
+        if (!entry) return {};
+        std::lock_guard<std::mutex> lock(entry->mutex);
+        Session* s = entry->session.get();
+        if (!s || s->game_over) return {};
+
+        int player = static_cast<int>(s->state.board.current_player);
+        PlayerType old_pt = s->player_types[player];
+        if (old_pt == PlayerType::kHuman) {
+            s->player_types[player] = PlayerType::kNNSolver;
+        }
+
+        s->waiting_for_human = false;
+        bool terminal = play_one_bot_turn(*s);
+
+        if (old_pt == PlayerType::kHuman) {
+            s->player_types[player] = PlayerType::kHuman;
+        }
+
+        if (terminal) return s->history.back();
+
+        int next_player = static_cast<int>(s->state.board.current_player);
+        if (s->player_types[next_player] == PlayerType::kHuman) {
+            s->waiting_for_human = true;
+            s->current_turn = {};
+            s->current_turn.player = next_player;
+            std::memcpy(s->current_turn.initial_dice, s->state.dice,
+                        sizeof(s->state.dice));
+        }
+        return s->history.back();
+    }
+
     /// Play all remaining bot turns until the game ends or a human turn.
     void play_to_completion(int session_id) {
         auto entry = get_entry(session_id);

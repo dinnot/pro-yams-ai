@@ -212,6 +212,75 @@ const Play = {
         }
     },
 
+    async simulateStep() {
+        if (!this.serverState || this.serverState.game_over) return;
+        if (this.serverState.waiting_for_human) {
+            this.animating = true;
+            const playingSeat = this.serverState.current_player;
+            this.animationPlayer = playingSeat;
+            this.setTurnInfo(this.turnLabelFor(playingSeat), this.turnClassFor(playingSeat));
+            this.renderAll();
+
+            const data = await API.botStep(this.sessionId);
+            if (data.error) {
+                this.setTurnInfo('Error: ' + data.error);
+                this.animating = false;
+                return;
+            }
+
+            const oldLen = this.serverState.history.length;
+            const newTurns = data.history.slice(oldLen);
+            const botTurn = newTurns.find((t) => t.player === playingSeat);
+
+            const newDisplayBoards = cloneBoards(data.boards);
+            if (botTurn) {
+                const colKey = COLUMN_KEYS[botTurn.placement.column];
+                const rowKey = ROW_NAMES[botTurn.placement.row];
+                newDisplayBoards['player' + playingSeat][colKey][rowKey] = -1;
+            }
+            this.displayBoards = newDisplayBoards;
+            this.serverState = data;
+
+            if (botTurn) {
+                await this.animateBotTurn(playingSeat, botTurn);
+            }
+
+            this.nnHeldMask = 0;
+            this.nnRollingFlags = null;
+            this.animating = false;
+            this.renderAll();
+        } else {
+            await this.runNnTurn();
+        }
+    },
+
+    async simulate(turns = 100) {
+        if (!this.sessionId || !this.serverState) {
+            console.warn("No active game session to simulate. Start a game first.");
+            return;
+        }
+        console.log(`Simulating ${turns} turns...`);
+        const origT = Object.assign({}, T);
+        for (const k of Object.keys(T)) {
+            T[k] = 1;
+        }
+        try {
+            let i = 0;
+            while (this.serverState && !this.serverState.game_over && i < turns) {
+                await this.simulateStep();
+                i++;
+                await sleep(5);
+            }
+            if (this.serverState && this.serverState.game_over) {
+                this.renderAll();
+                this.showEndgame();
+            }
+        } finally {
+            Object.assign(T, origT);
+            console.log("Simulation finished.");
+        }
+    },
+
     // -----------------------------------------------------------------
     // NN turn — runs one bot seat through /step. In 2v2 there can be up
     // to three consecutive bot turns before the human plays again.
@@ -1074,15 +1143,105 @@ function renderBreakdownTable2v2(colData, humanTeam, humanTotal) {
             <td class="${cls}">${humanPts === 0 ? '0' : fmtSigned(humanPts)}</td>
           </tr>`;
     }
+    // Calculate player total points
+    let pPts = [0, 0, 0, 0];
+    for (const col of colData) {
+        for (const pairing of col.pairings) {
+            pPts[pairing.t0p] += pairing.duelPts;
+            pPts[pairing.t1p] += -pairing.duelPts;
+        }
+    }
+
+    const p0Pts = pPts[0];
+    const p2Pts = pPts[2];
+    const p1Pts = pPts[1];
+    const p3Pts = pPts[3];
+
+    const p0Cls = p0Pts > 0 ? 'pts-pos' : p0Pts < 0 ? 'pts-neg' : 'pts-zero';
+    const p2Cls = p2Pts > 0 ? 'pts-pos' : p2Pts < 0 ? 'pts-neg' : 'pts-zero';
+    const p1Cls = p1Pts > 0 ? 'pts-pos' : p1Pts < 0 ? 'pts-neg' : 'pts-zero';
+    const p3Cls = p3Pts > 0 ? 'pts-pos' : p3Pts < 0 ? 'pts-neg' : 'pts-zero';
+
+    const isT0 = (humanTeam === 0);
+    const youCell = isT0
+        ? `<div style="font-size:0.75rem; margin-bottom:2px;"><span style="color:var(--p0); font-weight:600;">P0</span>: <strong class="${p0Cls}">${fmtSigned(p0Pts)}</strong></div>
+           <div style="font-size:0.75rem;"><span style="color:var(--p2); font-weight:600;">P2</span>: <strong class="${p2Cls}">${fmtSigned(p2Pts)}</strong></div>`
+        : `<div style="font-size:0.75rem; margin-bottom:2px;"><span style="color:var(--p1); font-weight:600;">P1</span>: <strong class="${p1Cls}">${fmtSigned(p1Pts)}</strong></div>
+           <div style="font-size:0.75rem;"><span style="color:var(--p3); font-weight:600;">P3</span>: <strong class="${p3Cls}">${fmtSigned(p3Pts)}</strong></div>`;
+
+    const nnCell = isT0
+        ? `<div style="font-size:0.75rem; margin-bottom:2px;"><span style="color:var(--p1); font-weight:600;">P1</span>: <strong class="${p1Cls}">${fmtSigned(p1Pts)}</strong></div>
+           <div style="font-size:0.75rem;"><span style="color:var(--p3); font-weight:600;">P3</span>: <strong class="${p3Cls}">${fmtSigned(p3Pts)}</strong></div>`
+        : `<div style="font-size:0.75rem; margin-bottom:2px;"><span style="color:var(--p0); font-weight:600;">P0</span>: <strong class="${p0Cls}">${fmtSigned(p0Pts)}</strong></div>
+           <div style="font-size:0.75rem;"><span style="color:var(--p2); font-weight:600;">P2</span>: <strong class="${p2Cls}">${fmtSigned(p2Pts)}</strong></div>`;
+
     const totCls = humanTotal > 0 ? 'pts-pos' : humanTotal < 0 ? 'pts-neg' : 'pts-zero';
     html += `</tbody>
         <tfoot>
+          <tr>
+            <td style="text-align:right; color: var(--muted); vertical-align:middle;">Player points</td>
+            <td style="text-align:right; vertical-align:middle;">${youCell}</td>
+            <td style="text-align:right; vertical-align:middle;">${nnCell}</td>
+            <td></td>
+          </tr>
           <tr>
             <td colspan="3" style="text-align:right; color: var(--muted);">Team total</td>
             <td class="${totCls}">${fmtSigned(humanTotal)}</td>
           </tr>
         </tfoot>
       </table>`;
+
+    // Append the detailed duel breakdown table below the main one
+    let detailHtml = `
+    <h3 style="margin: 25px 0 10px; text-align: center; color: var(--text); font-size: 0.9rem; font-weight: 600; letter-spacing: 0.5px;">Detailed Duel Breakdown</h3>
+    <table class="score-table" style="margin-bottom: 20px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;">Column</th>
+            <th style="text-align:center;">Duel</th>
+            <th style="text-align:center;">Scores</th>
+            <th style="text-align:center;">Crush</th>
+            <th style="text-align:right;">Points</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    for (const col of colData) {
+        for (let idx = 0; idx < col.pairings.length; idx++) {
+            const pairing = col.pairings[idx];
+            const pA = pairing.t0p;
+            const pB = pairing.t1p;
+            const isT0 = (humanTeam === 0);
+
+            const diff = isT0 ? (pairing.adjA - pairing.adjB) : (pairing.adjB - pairing.adjA);
+            const pts = isT0 ? pairing.duelPts : -pairing.duelPts;
+
+            const ptsCls = pts > 0 ? 'pts-pos' : pts < 0 ? 'pts-neg' : 'pts-zero';
+            const crushCls = pairing.activeCrush > 1 ? 'pts-pos' : '';
+
+            const isLast = (idx === col.pairings.length - 1);
+            const borderBottom = isLast ? 'border-bottom: 2px solid var(--panel-2);' : '';
+            const cellStyleC = `style="${borderBottom} font-size:0.75rem; text-align:center;"`;
+            const cellStylePoints = `style="${borderBottom} font-size:0.75rem; text-align:right; font-weight:700;"`;
+            const crushWeight = pairing.activeCrush > 1 ? 'font-weight:700;' : '';
+            const cellStyleCrush = `style="${borderBottom} font-size:0.75rem; text-align:center; ${crushWeight}"`;
+
+            const rowSpanCell = idx === 0
+                ? `<td rowspan="4" style="vertical-align: middle; border-bottom: 2px solid var(--panel-2); font-weight: 600; font-size:0.75rem; text-align:left;">${COLUMN_NAMES[col.c]}<span class="col-coeff">×${col.coeff}</span></td>`
+                : '';
+
+            detailHtml += `<tr>
+                ${rowSpanCell}
+                <td ${cellStyleC}><span style="color:var(--p${pA}); font-weight:600;">P${pA}</span> vs <span style="color:var(--p${pB}); font-weight:600;">P${pB}</span></td>
+                <td ${cellStyleC}><strong>${pairing.adjA}</strong> vs <strong>${pairing.adjB}</strong> <span style="font-size:0.7rem; color:var(--muted);">(${fmtSigned(diff)})</span></td>
+                <td ${cellStyleCrush} class="${crushCls}">×${pairing.activeCrush}</td>
+                <td ${cellStylePoints} class="${ptsCls}">${pts === 0 ? '0' : fmtSigned(pts)}</td>
+              </tr>`;
+        }
+    }
+    detailHtml += `</tbody></table>`;
+    html += detailHtml;
+
     return html;
 }
 
@@ -1101,4 +1260,5 @@ function remapHoldMask(prevDice, prevMask, newDice) {
     return newMask;
 }
 
+window.simulate = (turns) => Play.simulate(turns);
 document.addEventListener('DOMContentLoaded', () => Play.init());
