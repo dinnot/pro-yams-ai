@@ -14,8 +14,45 @@
   --good:      #4caf50;
   --text:      #e0e0e0;
   --muted:     #9aa3b2;
-  --you:       #4dabf7;
-  --nn:        #e94560;
+  /* Per-player palette — each seat keeps its color throughout the game.
+     Team 0 (P0, P2) gets cool tones; Team 1 (P1, P3) gets warm tones. */
+  --p0:        #4dabf7;   /* blue        */
+  --p1:        #e94560;   /* red         */
+  --p2:        #22b8cf;   /* cyan/teal   */
+  --p3:        #ffa94d;   /* orange      */
+  --you:       var(--p0);
+  --nn:        var(--p1);
+  /* Defaults — overridden by body.cur-pN to reflect current player. */
+  --main-color:    var(--p0);
+  --top-color:     var(--p1);
+  --prev-color:    var(--p3);
+  --team-color:    var(--p2);
+  --next-color:    var(--p1);
+  --current-color: var(--p0);
+}
+
+/* Current-player palette switcher: as the turn rotates, set body.cur-pN
+   and every dependent color (cell-main, dice hold, header, 2v2 top subs)
+   updates without per-element style writes. */
+body.cur-p0 {
+  --main-color: var(--p0); --top-color: var(--p1);
+  --prev-color: var(--p3); --team-color: var(--p2); --next-color: var(--p1);
+  --current-color: var(--p0);
+}
+body.cur-p1 {
+  --main-color: var(--p1); --top-color: var(--p0);
+  --prev-color: var(--p0); --team-color: var(--p3); --next-color: var(--p2);
+  --current-color: var(--p1);
+}
+body.cur-p2 {
+  --main-color: var(--p2); --top-color: var(--p3);
+  --prev-color: var(--p1); --team-color: var(--p0); --next-color: var(--p3);
+  --current-color: var(--p2);
+}
+body.cur-p3 {
+  --main-color: var(--p3); --top-color: var(--p2);
+  --prev-color: var(--p2); --team-color: var(--p1); --next-color: var(--p0);
+  --current-color: var(--p3);
 }
 
 html, body {
@@ -59,6 +96,10 @@ header h1 {
 .turn-info.you  { color: var(--you); }
 .turn-info.nn   { color: var(--nn);  }
 .turn-info.nn::before  { content: "🤖 "; }
+.turn-info.p0  { color: var(--p0); }
+.turn-info.p1  { color: var(--p1); }
+.turn-info.p2  { color: var(--p2); }
+.turn-info.p3  { color: var(--p3); }
 .turn-info.win  { color: var(--good); }
 .turn-info.loss { color: var(--accent); }
 .turn-info.draw { color: var(--accent-2); }
@@ -96,6 +137,13 @@ main {
   font-size: 1.05rem;
   text-align: center;
 }
+.splash-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  width: min(320px, 90vw);
+}
 .btn-play {
   background: var(--accent);
   color: #fff;
@@ -110,20 +158,15 @@ main {
 }
 .btn-play:active { transform: scale(0.96); }
 
-/* ---------- Single combined sheet ---------- */
+/* ---------- Single combined sheet ----------
+   Color variables (--main-color, --top-color, etc.) are owned by body.cur-pN
+   so dice in the footer can reference them too. */
 .sheet {
-  /* CSS custom props swap based on whose turn it is. */
-  --main-color: var(--you);
-  --top-color:  var(--nn);
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-.sheet.turn-nn {
-  --main-color: var(--nn);
-  --top-color:  var(--you);
 }
 
 .board-grid {
@@ -230,46 +273,62 @@ main {
 .bonus-cell .cell-top  { background: transparent; color: var(--top-color);  font-size: 0.5rem; height: 12px; line-height: 12px; }
 .bonus-cell .cell-main { font-size: 0.62rem; color: var(--main-color); font-weight: 600; }
 
-/* ---------- 2v2: four mini sheets in a 2x2 grid ---------- */
-.sheet.sheets-2v2 { overflow: auto; }
-.sheets-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 6px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.mini-sheet {
+/* ---------- 2v2: single combined sheet with a 3-way split top ----------
+   Same flex column as 1v1; we just shrink the legend onto its own row and
+   slice each cell's top into prev/team/next sub-cells. */
+.player-legend {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  background: var(--panel);
-  border-radius: 4px;
-  padding: 4px;
-  border: 1.5px solid transparent;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 4px 0;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
-.mini-sheet.team-0 { border-color: #1d4f6d; }   /* cool/you tone */
-.mini-sheet.team-1 { border-color: #6d3a1d; }   /* warm/nn tone  */
-.mini-sheet.current {
-  box-shadow: 0 0 0 2px var(--accent-2);
-}
-.mini-sheet.is-human { background: #14253a; }
-.mini-sheet-header {
-  font-size: 0.6rem;
-  color: var(--muted);
+.player-legend .legend-item {
+  flex: 1 1 0;
   text-align: center;
-  padding: 1px 0 3px 0;
+  padding: 2px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.mini-sheet .board-grid {
-  font-size: 0.6rem;
-  grid-template-columns: 22px repeat(6, minmax(0, 1fr));
+.player-legend .legend-prev { color: var(--prev-color); }
+.player-legend .legend-team { color: var(--team-color); }
+.player-legend .legend-next { color: var(--next-color); }
+.player-legend .legend-cur  {
+  background: var(--current-color);
+  color: #0d1a30;
+  font-weight: 700;
+}
+/* 3-way split top of each board cell in 2v2. The colors come from
+   body.cur-pN so the same player keeps the same hue across positions. */
+.cell-top-row {
+  flex: 0 0 auto;
+  height: 14px;
+  display: flex;
   gap: 1px;
 }
-.mini-sheet .cell-main { font-size: 0.62rem; }
-.mini-sheet .cell-top  { font-size: 0.46rem; height: 10px; line-height: 10px; }
-.mini-sheet .bonus-cell .cell-main { font-size: 0.5rem; }
+.cell-top-row .top-sub {
+  flex: 1 1 0;
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cell-top-row .top-sub.p-prev { color: var(--prev-color); }
+.cell-top-row .top-sub.p-team { color: var(--team-color); }
+.cell-top-row .top-sub.p-next { color: var(--next-color); }
+.cell-top-row .top-sub.scratched { color: #5a5a5a; }
+.bonus-cell .cell-top-row { height: 12px; }
+.bonus-cell .cell-top-row .top-sub { font-size: 0.46rem; line-height: 12px; }
 
 /* ---------- Footer (dice + reroll) ---------- */
 /* In the natural flex column flow so the sheet above can size against the
@@ -299,13 +358,13 @@ main {
 }
 .die.blank { background: #2a3050; color: transparent; }
 .die.held {
-  background: var(--you);
+  background: var(--current-color);
   color: #fff;
   box-shadow: 0 0 0 3px var(--accent-2), 0 2px 4px rgba(0,0,0,0.4);
   transform: translateY(-3px);
 }
 .die.nn-held {
-  background: var(--nn);
+  background: var(--current-color);
   color: #fff;
   box-shadow: 0 0 0 3px var(--accent-2), 0 2px 4px rgba(0,0,0,0.4);
   transform: translateY(-3px);
@@ -406,4 +465,9 @@ main {
   .cell-top  { font-size: 0.66rem; height: 18px; line-height: 18px; }
   .bonus-cell .cell-top  { font-size: 0.6rem; height: 16px; line-height: 16px; }
   .bonus-cell .cell-main { font-size: 0.78rem; }
+  .cell-top-row { height: 18px; }
+  .cell-top-row .top-sub { font-size: 0.62rem; line-height: 18px; }
+  .bonus-cell .cell-top-row { height: 16px; }
+  .bonus-cell .cell-top-row .top-sub { font-size: 0.58rem; line-height: 16px; }
+  .player-legend { font-size: 0.72rem; }
 }

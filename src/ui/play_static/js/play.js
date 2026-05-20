@@ -1,9 +1,13 @@
 // Pro Yams Play — human vs. NN.
 //
-// 1v1: one combined sheet (you/NN overlay), the human plays seat 0 or 1.
-// 2v2: 2×2 grid of four sheets; the human plays seat 0 (Team 0), the other
-//      three seats default to NN. computeDuel and the endgame breakdown
-//      iterate every cross-team pairing the same way compute_duel<Yams2v2>
+// 1v1: one combined sheet — current player's board as main, opponent's
+//      values stacked at the top of each cell.
+// 2v2: same single-sheet trick, but the top of each cell splits into
+//      three sub-cells — left = player who rolled previously, middle =
+//      current player's teammate, right = player who plays next. The
+//      human controls seats 0 AND 2 (both of Team 0); seats 1 and 3
+//      default to NN. computeDuel and the endgame breakdown iterate
+//      every cross-team pairing the same way compute_duel<Yams2v2>
 //      does in src/engine/duel.cc.
 
 const COLUMN_NAMES = ['Down', 'Free', 'Up', 'Mid', 'Turbo', 'UpDown'];
@@ -46,25 +50,46 @@ const Play = {
     nnHeldMask: 0,
     nnRollingFlags: null,
     holdMask: 0,
-    humanSeat: 0,
+    humanSeats: [0],
+    humanTeam: 0,
     numPlayers: 2,
     variant: '1v1',
+    serverVariant: '1v1',
+    lastMode: null,
     options: null,
     animating: false,
     justPlaced: null,
     hasShownDice: false,
     animationPlayer: null,
 
-    isHuman(p) { return p === this.humanSeat; },
-    isHumanTeam(p) {
-        return areTeammates(p, this.humanSeat, this.numPlayers);
-    },
+    isHuman(p) { return this.humanSeats.indexOf(p) >= 0; },
+    isHumanTeam(p) { return teamOf(p, this.numPlayers) === this.humanTeam; },
 
     init() {
-        document.getElementById('btn-play').addEventListener('click', () => Play.start());
-        document.getElementById('btn-again').addEventListener('click', () => Play.start());
+        document.getElementById('btn-play')
+            .addEventListener('click', () => Play.start('1v1'));
+        document.getElementById('btn-play-team')
+            .addEventListener('click', () => Play.start('2v2-team'));
+        document.getElementById('btn-play-solo')
+            .addEventListener('click', () => Play.start('2v2-solo'));
+        document.getElementById('btn-again')
+            .addEventListener('click', () => Play.start(Play.lastMode || '1v1'));
         document.getElementById('btn-reroll').addEventListener('click', () => Play.humanReroll());
         document.getElementById('header').addEventListener('click', () => Play.toSplash());
+        this.configureSplash();
+    },
+
+    // The server's variant is fixed at launch — probe once and show the
+    // matching set of play buttons.
+    async configureSplash() {
+        let info;
+        try { info = await API.info(); } catch (_) { info = {}; }
+        this.serverVariant = info.game_variant ||
+            (info.num_players === 4 ? '2v2' : '1v1');
+        const is2v2 = this.serverVariant === '2v2';
+        document.getElementById('btn-play').hidden       = is2v2;
+        document.getElementById('btn-play-team').hidden  = !is2v2;
+        document.getElementById('btn-play-solo').hidden  = !is2v2;
     },
 
     toSplash() {
@@ -85,10 +110,11 @@ const Play = {
         document.getElementById('endgame').hidden = true;
         document.getElementById('footer').hidden = true;
         document.getElementById('sheet').hidden = false;
+        document.body.classList.remove('cur-p0', 'cur-p1', 'cur-p2', 'cur-p3');
         this.setTurnInfo('');
     },
 
-    async start() {
+    async start(mode) {
         if (this.sessionId) { API.deleteGame(this.sessionId); this.sessionId = null; }
         this.holdMask = 0;
         this.nnHeldMask = 0;
@@ -99,23 +125,22 @@ const Play = {
         this.hasShownDice = false;
         this.displayDice = [0, 0, 0, 0, 0];
 
-        // Variant selection: opt-in via URL hash (#2v2). Default 1v1.
-        const want2v2 = window.location.hash.indexOf('2v2') >= 0;
-
-        let playerTypes;
-        if (want2v2) {
-            // Human plays seat 0; the other three seats default to NN.
-            this.humanSeat = 0;
-            this.numPlayers = 4;
-            this.variant = '2v2';
-            playerTypes = ['human', 'nn', 'nn', 'nn'];
-        } else {
-            const humanIsP0 = Math.random() < 0.5;
-            this.humanSeat = humanIsP0 ? 0 : 1;
-            this.numPlayers = 2;
-            this.variant = '1v1';
-            playerTypes = humanIsP0 ? ['human', 'nn'] : ['nn', 'human'];
+        // Make sure we know the server's variant — configureSplash() runs
+        // it in init() but if start() is called before that finishes (or
+        // the probe failed), do it now.
+        if (!this.serverVariant) {
+            try {
+                const info = await API.info();
+                this.serverVariant = info.game_variant ||
+                    (info.num_players === 4 ? '2v2' : '1v1');
+            } catch (_) { this.serverVariant = '1v1'; }
         }
+        // Coerce the requested mode to one that the server can host.
+        if (this.serverVariant === '1v1') mode = '1v1';
+        else if (mode === '1v1') mode = '2v2-team';
+        this.lastMode = mode;
+
+        const playerTypes = this.configureSeatsForMode(mode);
         document.body.dataset.variant = this.variant;
 
         document.getElementById('splash').hidden = true;
@@ -135,6 +160,39 @@ const Play = {
 
         this.renderAll();
         await this.driveLoop();
+    },
+
+    // Translate a mode label into seat assignments + the playerTypes
+    // payload to send to the server. Updates state in place and returns
+    // the playerTypes array.
+    configureSeatsForMode(mode) {
+        if (mode === '1v1') {
+            const humanIsP0 = Math.random() < 0.5;
+            this.humanSeats = humanIsP0 ? [0] : [1];
+            this.humanTeam  = humanIsP0 ? 0 : 1;
+            this.numPlayers = 2;
+            this.variant    = '1v1';
+            return humanIsP0 ? ['human', 'nn'] : ['nn', 'human'];
+        }
+        this.numPlayers = 4;
+        this.variant    = '2v2';
+        if (mode === '2v2-team') {
+            // Random Team 0 vs Team 1 — the human controls both teammates.
+            const team = Math.random() < 0.5 ? 0 : 1;
+            this.humanSeats = team === 0 ? [0, 2] : [1, 3];
+            this.humanTeam  = team;
+            return team === 0
+                ? ['human', 'nn', 'human', 'nn']
+                : ['nn', 'human', 'nn', 'human'];
+        }
+        // '2v2-solo': human takes one of the four seats; the other three
+        // (including the human's own teammate) are NN.
+        const seat = Math.floor(Math.random() * 4);
+        this.humanSeats = [seat];
+        this.humanTeam  = seat & 1;
+        const pts = ['nn', 'nn', 'nn', 'nn'];
+        pts[seat] = 'human';
+        return pts;
     },
 
     async driveLoop() {
@@ -254,7 +312,9 @@ const Play = {
     // -----------------------------------------------------------------
     async beginHumanTurn() {
         this.animating = true;
-        this.setTurnInfo('Your turn', 'you');
+        const seat = this.serverState.current_player;
+        this.setTurnInfo(this.turnLabelFor(seat), this.turnClassFor(seat));
+        this.setCurrentPlayerBodyClass(seat);
         this.renderAll();
 
         if (this.hasShownDice) {
@@ -330,11 +390,14 @@ const Play = {
 
         this.animating = true;
 
-        // Optimistic local update for the human's own cell.
+        // Optimistic local update for the just-placed human cell. In 2v2
+        // the active human seat may be P0 or P2 — read it from the server
+        // state rather than assuming a single human seat.
+        const placingSeat = this.serverState.current_player;
         const colKey = COLUMN_KEYS[column];
         const rowKey = ROW_NAMES[row];
-        this.displayBoards['player' + this.humanSeat][colKey][rowKey] = opt.score;
-        this.justPlaced = { player: this.humanSeat, column, row };
+        this.displayBoards['player' + placingSeat][colKey][rowKey] = opt.score;
+        this.justPlaced = { player: placingSeat, column, row };
         this.options = null;
         this.renderAll();
         await sleep(T.afterPlace);
@@ -349,7 +412,7 @@ const Play = {
 
         const oldLen = this.serverState.history.length;
         const newTurns = data.history.slice(oldLen);
-        const botTurns = newTurns.filter((t) => t.player !== this.humanSeat);
+        const botTurns = newTurns.filter((t) => !this.isHuman(t.player));
 
         // Hide every bot's just-placed cell so the animation reveals each one
         // at the right moment.
@@ -401,17 +464,26 @@ const Play = {
     },
 
     turnLabelFor(seat) {
-        if (this.isHuman(seat)) return 'Your turn';
         if (this.numPlayers === 4) {
             const team = teamOf(seat, 4);
-            const role = this.isHumanTeam(seat) ? 'Teammate' : 'NN';
-            return `${role} (P${seat}) — Team ${team}`;
+            if (this.isHuman(seat)) return `Your turn · P${seat} · Team ${team}`;
+            return `NN · P${seat} · Team ${team}`;
         }
-        return 'NN turn';
+        return this.isHuman(seat) ? 'Your turn' : 'NN turn';
     },
     turnClassFor(seat) {
-        if (this.isHuman(seat)) return 'you';
-        return this.isHumanTeam(seat) ? 'you' : 'nn';
+        // In 2v2 use the per-player palette so the header color matches
+        // the cell colors. In 1v1 keep the simple you/nn labels.
+        if (this.numPlayers === 4) return `p${seat}`;
+        return this.isHuman(seat) ? 'you' : 'nn';
+    },
+
+    setCurrentPlayerBodyClass(cur) {
+        const body = document.body;
+        body.classList.remove('cur-p0', 'cur-p1', 'cur-p2', 'cur-p3');
+        if (cur !== null && cur !== undefined) {
+            body.classList.add(`cur-p${cur}`);
+        }
     },
 
     renderTurnInfo() {
@@ -420,9 +492,13 @@ const Play = {
         if (gs.game_over) return;  // showEndgame handles the final label
         const cur = (this.animationPlayer !== null && this.animationPlayer !== undefined)
                     ? this.animationPlayer : gs.current_player;
+        this.setCurrentPlayerBodyClass(cur);
         if (this.isHuman(cur)) {
             const rollNum = 3 - gs.rolls_left + 1;
-            this.setTurnInfo(`Your turn · Roll ${rollNum}/3`, 'you');
+            const base = this.numPlayers === 4
+                ? `Your turn · P${cur} · Roll ${rollNum}/3`
+                : `Your turn · Roll ${rollNum}/3`;
+            this.setTurnInfo(base, this.turnClassFor(cur));
         } else {
             this.setTurnInfo(this.turnLabelFor(cur), this.turnClassFor(cur));
         }
@@ -486,22 +562,26 @@ const Play = {
         const cur = (this.animationPlayer !== null && this.animationPlayer !== undefined)
                     ? this.animationPlayer : gs.current_player;
         const opp = 1 - cur;
-        container.className = 'sheet ' +
-            (this.isHuman(cur) ? 'turn-you' : 'turn-nn');
 
         const isHumanTurn = gs.waiting_for_human && !this.animating;
         const legalPlacements = (isHumanTurn && this.options) ? this.options.placements : null;
         const { legalSet, legalScores } = this.buildLegalLookup(legalPlacements);
 
+        const topBoards = [
+            { board: this.displayBoards['player' + opp], cls: 'p-opp' },
+        ];
         const grid = this.buildBoardGrid(
             this.displayBoards['player' + cur],
-            this.displayBoards['player' + opp],
+            topBoards,
             legalSet, legalScores,
             (c, r) => this.humanPlace(c, r));
         container.appendChild(grid);
     },
 
-    // ---------- 2v2: four independent sheets in a 2x2 grid ----------------
+    // ---------- 2v2: same single-sheet trick, but the top splits into
+    //            three sub-cells: left=prev, middle=teammate, right=next.
+    //            Seat order is P0→P1→P2→P3, so for the current seat:
+    //              prev = (cur-1) mod 4, team = (cur+2) mod 4, next = (cur+1) mod 4
     renderSheets2v2() {
         const container = document.getElementById('sheet');
         container.innerHTML = '';
@@ -509,44 +589,50 @@ const Play = {
         if (!this.displayBoards || !this.serverState) return;
 
         const gs = this.serverState;
+        const cur  = (this.animationPlayer !== null && this.animationPlayer !== undefined)
+                    ? this.animationPlayer : gs.current_player;
+        const prev = (cur + 3) % 4;
+        const team = (cur + 2) % 4;
+        const next = (cur + 1) % 4;
+
         const isHumanTurn = gs.waiting_for_human && !this.animating;
         const legalPlacements = (isHumanTurn && this.options) ? this.options.placements : null;
         const { legalSet, legalScores } = this.buildLegalLookup(legalPlacements);
 
-        const cur = (this.animationPlayer !== null && this.animationPlayer !== undefined)
-                    ? this.animationPlayer : gs.current_player;
+        // Compact legend strip so the player→color mapping is explicit.
+        container.appendChild(this.buildLegend2v2(cur, prev, team, next));
 
-        const wrapper = document.createElement('div');
-        wrapper.className = 'sheets-grid';
-        // Layout order: [P0 P1 / P2 P3] — Team 0 (P0/P2) left, Team 1 (P1/P3) right.
-        const order = [0, 1, 2, 3];
-        for (const seat of order) {
-            const slot = document.createElement('div');
-            slot.className = 'mini-sheet';
-            slot.classList.add(teamOf(seat, 4) === 0 ? 'team-0' : 'team-1');
-            if (seat === cur) slot.classList.add('current');
-            if (this.isHuman(seat)) slot.classList.add('is-human');
+        const topBoards = [
+            { board: this.displayBoards['player' + prev], cls: 'p-prev' },
+            { board: this.displayBoards['player' + team], cls: 'p-team' },
+            { board: this.displayBoards['player' + next], cls: 'p-next' },
+        ];
+        const grid = this.buildBoardGrid(
+            this.displayBoards['player' + cur],
+            topBoards,
+            legalSet, legalScores,
+            (c, r) => this.humanPlace(c, r));
+        container.appendChild(grid);
+    },
 
-            const header = document.createElement('div');
-            header.className = 'mini-sheet-header';
-            const role = this.isHuman(seat) ? 'You'
-                      : (this.isHumanTeam(seat) ? `Teammate` : `NN`);
-            header.textContent = `P${seat} · ${role} · Team ${teamOf(seat, 4)}`;
-            slot.appendChild(header);
-
-            // Only the human's sheet shows legal placements when it's their turn.
-            const ownLegalSet = this.isHuman(seat) && seat === cur ? legalSet : new Set();
-            const ownLegalScores = ownLegalSet.size > 0 ? legalScores : {};
-
-            const grid = this.buildBoardGrid(
-                this.displayBoards['player' + seat],
-                /* topBoard */ null,
-                ownLegalSet, ownLegalScores,
-                (c, r) => this.humanPlace(c, r));
-            slot.appendChild(grid);
-            wrapper.appendChild(slot);
-        }
-        container.appendChild(wrapper);
+    buildLegend2v2(cur, prev, team, next) {
+        const tag = (cls, seat, role) => {
+            const span = document.createElement('span');
+            span.className = `legend-item ${cls}`;
+            const who = this.isHuman(seat) ? 'You' : 'NN';
+            span.textContent = `P${seat} ${role} · ${who}`;
+            return span;
+        };
+        const bar = document.createElement('div');
+        bar.className = 'player-legend';
+        bar.appendChild(tag('legend-prev', prev, '◀ prev'));
+        bar.appendChild(tag('legend-team', team, '▲ team'));
+        bar.appendChild(tag('legend-next', next, 'next ▶'));
+        const cur1 = document.createElement('span');
+        cur1.className = `legend-item legend-cur p${cur}`;
+        cur1.textContent = `P${cur} ${this.isHuman(cur) ? 'YOU' : 'NN'}`;
+        bar.appendChild(cur1);
+        return bar;
     },
 
     buildLegalLookup(legalPlacements) {
@@ -562,9 +648,13 @@ const Play = {
     },
 
     // ---------- Board grid construction (shared 1v1/2v2) -----------------
-    buildBoardGrid(mainBoard, topBoard, legalSet, legalScores, onPlace) {
+    // topBoards: array of { board, cls } describing each top sub-cell.
+    //   1v1: 1 entry (opp).
+    //   2v2: 3 entries (prev, teammate, next), rendered as a 3-way split.
+    buildBoardGrid(mainBoard, topBoards, legalSet, legalScores, onPlace) {
         const grid = document.createElement('div');
         grid.className = 'board-grid';
+        if (topBoards && topBoards.length > 1) grid.classList.add('multi-top');
 
         const corner = document.createElement('div');
         corner.className = 'row-label';
@@ -594,19 +684,8 @@ const Play = {
                 const colKey = COLUMN_KEYS[c];
                 const rowKey = ROW_NAMES[r];
                 const mainVal = mainBoard?.[colKey]?.[rowKey];
-                const topVal  = topBoard?.[colKey]?.[rowKey];
 
-                const topEl = document.createElement('div');
-                topEl.className = 'cell-top';
-                if (!topBoard || topVal === undefined || topVal === -1) {
-                    topEl.textContent = '';
-                } else if (topVal === 0) {
-                    topEl.textContent = '0';
-                    topEl.classList.add('scratched');
-                } else {
-                    topEl.textContent = topVal;
-                }
-                cell.appendChild(topEl);
+                cell.appendChild(this.buildCellTop(topBoards, colKey, rowKey));
 
                 const mainEl = document.createElement('div');
                 mainEl.className = 'cell-main';
@@ -646,16 +725,9 @@ const Play = {
                     bonusCell.className = 'bonus-cell';
                     const colKey = COLUMN_KEYS[c];
 
-                    const { sum: mSum, allFilled: mFilled } = upperColumnSum(mainBoard, colKey);
-                    const topEl = document.createElement('div');
-                    topEl.className = 'cell-top';
-                    if (topBoard) {
-                        const { sum: tSum, allFilled: tFilled } = upperColumnSum(topBoard, colKey);
-                        topEl.textContent = tFilled ? `${tSum}/${upperBonus(tSum)}`
-                                                   : (tSum > 0 ? String(tSum) : '');
-                    }
-                    bonusCell.appendChild(topEl);
+                    bonusCell.appendChild(this.buildBonusTop(topBoards, colKey));
 
+                    const { sum: mSum, allFilled: mFilled } = upperColumnSum(mainBoard, colKey);
                     const mainEl = document.createElement('div');
                     mainEl.className = 'cell-main';
                     mainEl.textContent = mFilled ? `${mSum}/${upperBonus(mSum)}`
@@ -669,14 +741,74 @@ const Play = {
         return grid;
     },
 
+    // Build the top sub-region of a regular score cell — either a single
+    // `.cell-top` (1v1) or a `.cell-top-row` of three `.top-sub` siblings (2v2).
+    buildCellTop(topBoards, colKey, rowKey) {
+        const fillValue = (el, v) => {
+            if (v === undefined || v === -1) {
+                el.textContent = '';
+            } else if (v === 0) {
+                el.textContent = '0';
+                el.classList.add('scratched');
+            } else {
+                el.textContent = v;
+            }
+        };
+        if (!topBoards || topBoards.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'cell-top';
+            return empty;
+        }
+        if (topBoards.length === 1) {
+            const topEl = document.createElement('div');
+            topEl.className = `cell-top ${topBoards[0].cls || ''}`;
+            fillValue(topEl, topBoards[0].board?.[colKey]?.[rowKey]);
+            return topEl;
+        }
+        const row = document.createElement('div');
+        row.className = 'cell-top-row';
+        for (const tb of topBoards) {
+            const sub = document.createElement('div');
+            sub.className = `top-sub ${tb.cls || ''}`;
+            fillValue(sub, tb.board?.[colKey]?.[rowKey]);
+            row.appendChild(sub);
+        }
+        return row;
+    },
+
+    buildBonusTop(topBoards, colKey) {
+        const fillBonus = (el, board) => {
+            const { sum, allFilled } = upperColumnSum(board, colKey);
+            el.textContent = allFilled ? `${sum}/${upperBonus(sum)}`
+                                       : (sum > 0 ? String(sum) : '');
+        };
+        if (!topBoards || topBoards.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'cell-top';
+            return empty;
+        }
+        if (topBoards.length === 1) {
+            const topEl = document.createElement('div');
+            topEl.className = `cell-top ${topBoards[0].cls || ''}`;
+            fillBonus(topEl, topBoards[0].board);
+            return topEl;
+        }
+        const row = document.createElement('div');
+        row.className = 'cell-top-row';
+        for (const tb of topBoards) {
+            const sub = document.createElement('div');
+            sub.className = `top-sub ${tb.cls || ''}`;
+            fillBonus(sub, tb.board);
+            row.appendChild(sub);
+        }
+        return row;
+    },
+
     flashCell(player, column, row) {
-        // The 1v1 combined sheet has one cell per (col,row); the cell flashes
-        // regardless of whose value is going in. The 2v2 layout has separate
-        // sheets, so we target the per-seat cell when available.
-        const perSeat = document.querySelector(
-            `.mini-sheet[data-seat="${player}"] [data-cell="c${column}-r${row}"]`);
-        const target = perSeat || document.querySelector(
-            `[data-cell="c${column}-r${row}"]`);
+        // Both variants use a single combined sheet; the cell flashes
+        // regardless of whose value is going in (the current player's
+        // board is in main, so the just-targeted cell is always main).
+        const target = document.querySelector(`[data-cell="c${column}-r${row}"]`);
         if (!target) return;
         target.classList.add('target-flash');
         setTimeout(() => target.classList.remove('target-flash'), T.placeFlash);
@@ -686,7 +818,7 @@ const Play = {
         const gs = this.serverState;
         if (!gs || !gs.game_over) return;
         const r = gs.result;
-        const humanTeam = teamOf(this.humanSeat, this.numPlayers);
+        const humanTeam = this.humanTeam;
         let cls, text;
         if (r === 0.5) { cls = 'draw'; text = 'Draw!'; }
         else {
@@ -915,16 +1047,30 @@ function renderBreakdownTable2v2(colData, humanTeam, humanTotal) {
         </thead>
         <tbody>`;
     for (const col of colData) {
-        const t0Adj = col.players[0].adjusted + col.players[2].adjusted;
-        const t1Adj = col.players[1].adjusted + col.players[3].adjusted;
+        const p0 = col.players[0].adjusted;
+        const p2 = col.players[2].adjusted;
+        const p1 = col.players[1].adjusted;
+        const p3 = col.players[3].adjusted;
+
+        const t0Adj = p0 + p2;
+        const t1Adj = p1 + p3;
+
         const youAdj = humanTeam === 0 ? t0Adj : t1Adj;
         const nnAdj  = humanTeam === 0 ? t1Adj : t0Adj;
+
+        const youSub = humanTeam === 0
+            ? `<div style="font-size:0.65rem; color:var(--muted); margin-top:2px;"><span style="color:var(--p0)">P0</span>:${p0} <span style="color:var(--p2)">P2</span>:${p2}</div>`
+            : `<div style="font-size:0.65rem; color:var(--muted); margin-top:2px;"><span style="color:var(--p1)">P1</span>:${p1} <span style="color:var(--p3)">P3</span>:${p3}</div>`;
+        const nnSub = humanTeam === 0
+            ? `<div style="font-size:0.65rem; color:var(--muted); margin-top:2px;"><span style="color:var(--p1)">P1</span>:${p1} <span style="color:var(--p3)">P3</span>:${p3}</div>`
+            : `<div style="font-size:0.65rem; color:var(--muted); margin-top:2px;"><span style="color:var(--p0)">P0</span>:${p0} <span style="color:var(--p2)">P2</span>:${p2}</div>`;
+
         const humanPts = humanTeam === 0 ? col.duelPts : -col.duelPts;
         const cls = humanPts > 0 ? 'pts-pos' : humanPts < 0 ? 'pts-neg' : 'pts-zero';
         html += `<tr>
             <td>${COLUMN_NAMES[col.c]}<span class="col-coeff">×${col.coeff}</span></td>
-            <td>${youAdj}</td>
-            <td>${nnAdj}</td>
+            <td><strong>${youAdj}</strong>${youSub}</td>
+            <td><strong>${nnAdj}</strong>${nnSub}</td>
             <td class="${cls}">${humanPts === 0 ? '0' : fmtSigned(humanPts)}</td>
           </tr>`;
     }

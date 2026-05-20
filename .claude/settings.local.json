@@ -309,7 +309,15 @@
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target pro_yams_ai -j)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target distil_tests -j)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build -j)",
-      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive /home/sorin/pro_yams_ai/build/tests/config/config_tests)"
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive /home/sorin/pro_yams_ai/build/tests/config/config_tests)",
+      "Bash(node --check /home/sorin/pro_yams_ai/src/ui/play_static/js/play.js)",
+      "Bash(awk '{o+=gsub\\(/\\\\{/,\"&\"\\); c+=gsub\\(/\\\\}/,\"&\"\\)} END{print \"open=\" o \" close=\" c}' /home/sorin/pro_yams_ai/src/ui/play_static/css/style.css)",
+      "Bash(/home/sorin/pro_yams_ai/build/src/ui/pro_yams_play --checkpoint /home/sorin/pro_yams_ai/checkpoints/distil_v16_mse_2v2/checkpoint_step_170000.model --variant 2v2 --port 8090 --static_dir /home/sorin/pro_yams_ai/src/ui/play_static)",
+      "Bash(echo \"PID=$!\")",
+      "Bash(curl -s http://localhost:8091/js/play.js)",
+      "Bash(curl -s http://localhost:8091/api/info)",
+      "Bash(node --check /home/sorin/pro_yams_ai/src/ui/play_static/js/api.js)",
+      "Bash(curl -s http://localhost:8091/)"
     ]
   }
 }

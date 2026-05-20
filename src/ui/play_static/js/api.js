@@ -1,10 +1,18 @@
 // REST API client for the Pro Yams Play frontend.
 
 const API = {
+    // The server's variant is fixed at launch (1v1 or 2v2). Probe it
+    // before creating a game so the client sends the correct number of
+    // player_types — otherwise missing seats default to heuristic.
+    async info() {
+        const res = await fetch('/api/info');
+        return res.json();
+    },
+
     // playerTypes is an array of strings (one per seat: 'human', 'nn',
     // 'heuristic_v2', etc.) The server reads player0..playerN-1 keys and
-    // defaults missing seats to heuristic — so the array length tells the
-    // server the variant implicitly (2 entries → 1v1, 4 entries → 2v2).
+    // defaults missing seats to heuristic — so the array length must
+    // match the server's variant (2 entries → 1v1, 4 entries → 2v2).
     async newGame(playerTypes) {
         const body = {
             seed: Math.floor(Math.random() * 1000000),
