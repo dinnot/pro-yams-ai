@@ -13,3 +13,14 @@
 // ---------------------------------------------------------------------------
 void log_evaluation(const std::string& log_dir, int training_step,
                      const EvalResult& result);
+
+// ---------------------------------------------------------------------------
+// log_lr_backoff — record a learning-rate back-off event.
+//
+// Appends one row to log_dir/lr_backoff_log.csv (header written on first call)
+// and echoes a one-line summary to stdout so it's visible in the training log.
+//
+// Columns: timestamp,step,old_lr,new_lr,best_win_rate
+// ---------------------------------------------------------------------------
+void log_lr_backoff(const std::string& log_dir, int training_step,
+                    double old_lr, double new_lr, double best_win_rate);

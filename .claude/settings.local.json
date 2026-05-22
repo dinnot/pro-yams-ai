@@ -324,7 +324,12 @@
       "Bash(cmake --build . --target ui_server -j 12)",
       "Bash(grep -rln \"TournamentManager\\\\|tournament\" src/ui)",
       "Bash(grep -rn \"add_executable\\\\|add_library\" src/ui/CMakeLists.txt)",
-      "Bash(cmake --build . --target pro_yams_ui -j 12)"
+      "Bash(cmake --build . --target pro_yams_ui -j 12)",
+      "Bash(cmake --build . --target model_tests --parallel 8)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/model/model_tests --gtest_filter='TrainerTest.LearningRate*')",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/model/model_tests --gtest_filter='TrainerTest.*')",
+      "Bash(./pro_yams_ai --mode config)",
+      "Bash(./build/pro_yams_ai --mode config --config /tmp/lrtest.yaml)"
     ]
   }
 }

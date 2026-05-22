@@ -331,3 +331,55 @@ TEST(TrainerTest, Checkpoint_ContinuedTraining) {
 
     fs::remove_all(tmpdir);
 }
+
+// ---------------------------------------------------------------------------
+// Learning-rate accessor/mutator (drives the training loop's LR back-off).
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, LearningRate_GetSet) {
+    ModelConfig cfg;
+    cfg.hidden_layers = 2;
+    cfg.hidden_width  = 64;
+    cfg.learning_rate = 0.002;
+
+    ModelTrainer trainer(cfg, cpu_device());
+    EXPECT_NEAR(trainer.learning_rate(), 0.002, 1e-12);
+
+    trainer.set_learning_rate(0.001);
+    EXPECT_NEAR(trainer.learning_rate(), 0.001, 1e-12);
+
+    // Halving (the back-off factor's typical effect) is reflected immediately.
+    trainer.set_learning_rate(trainer.learning_rate() * 0.5);
+    EXPECT_NEAR(trainer.learning_rate(), 0.0005, 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+// A backed-off learning rate survives a checkpoint round-trip: the loaded
+// trainer must report the reduced LR, not the original config value, so the
+// loop's back-off math stays consistent across a resume.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, LearningRate_PersistsAcrossCheckpoint) {
+    namespace fs = std::filesystem;
+    const std::string tmpdir = "/tmp/pro_yams_lr_ckpt_test";
+    fs::create_directories(tmpdir);
+    const std::string ckpt = tmpdir + "/lr";
+
+    ModelConfig cfg;
+    cfg.hidden_layers = 2;
+    cfg.hidden_width  = 64;
+    cfg.learning_rate = 0.001;
+
+    ModelTrainer trainer(cfg, cpu_device());
+    std::vector<float>  states(32 * kTensorSize, 0.1f);
+    std::vector<double> targets(32, 0.5);
+    trainer.train_step(states.data(), targets.data(), 32);
+    trainer.set_learning_rate(0.00025);  // simulate a back-off
+    trainer.save_checkpoint(ckpt, 5, 1.0, 0.0);
+
+    ModelTrainer trainer2(cfg, cpu_device());
+    int s; double t, e;
+    trainer2.load_checkpoint(ckpt, s, t, e);
+    EXPECT_NEAR(trainer2.learning_rate(), 0.00025, 1e-9)
+        << "Backed-off LR was not restored from the optimizer checkpoint";
+
+    fs::remove_all(tmpdir);
+}

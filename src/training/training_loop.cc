@@ -525,6 +525,41 @@ void TrainingLoopT<Traits>::maybe_evaluate() {
     log_evaluation(config_.log_dir, training_step_, eval);
 
     last_eval_win_rate_ = eval.nn_win_rate();
+
+    maybe_backoff_learning_rate(last_eval_win_rate_);
+}
+
+// ---------------------------------------------------------------------------
+// maybe_backoff_learning_rate — ReduceLROnPlateau on the eval NN win rate.
+//
+// A new best win rate resets the non-improvement streak. Otherwise the streak
+// grows; once it reaches kLrBackoffPatience consecutive non-improving evals the
+// Adam learning rate is multiplied by lr_backoff_factor (clamped at
+// lr_backoff_min_lr) and the streak resets. Once the LR floor is hit further
+// reductions are skipped, so the counter is left reset to avoid log spam.
+// ---------------------------------------------------------------------------
+template <typename Traits>
+void TrainingLoopT<Traits>::maybe_backoff_learning_rate(double win_rate) {
+    if (!config_.lr_backoff_enabled) return;
+
+    if (win_rate > lr_backoff_best_win_rate_) {
+        lr_backoff_best_win_rate_ = win_rate;
+        lr_backoff_no_improve_    = 0;
+        return;
+    }
+
+    if (++lr_backoff_no_improve_ < kLrBackoffPatience) return;
+    lr_backoff_no_improve_ = 0;  // reset streak after a back-off attempt
+
+    const double current_lr = trainer_->learning_rate();
+    if (current_lr <= config_.lr_backoff_min_lr) return;  // already at floor
+
+    const double new_lr = std::max(config_.lr_backoff_min_lr,
+                                   current_lr * config_.lr_backoff_factor);
+    trainer_->set_learning_rate(new_lr);
+
+    log_lr_backoff(config_.log_dir, training_step_, current_lr, new_lr,
+                   lr_backoff_best_win_rate_);
 }
 
 // ---------------------------------------------------------------------------

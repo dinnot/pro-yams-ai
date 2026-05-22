@@ -94,12 +94,21 @@ public:
     /// Total number of train_step() calls made so far.
     int training_step_count() const { return training_step_; }
 
+    /// Current Adam learning rate (shared across all parameter groups).
+    double learning_rate() const { return learning_rate_; }
+
+    /// Overwrite the Adam learning rate on every parameter group. Used by the
+    /// training loop's learning-rate back-off. Adam's per-parameter moment
+    /// estimates are preserved — only the step size changes.
+    void set_learning_rate(double lr);
+
 private:
     std::shared_ptr<ProYamsNet>        model_;
     std::unique_ptr<torch::optim::Adam> optimizer_;
     torch::Device                       device_;
     ModelConfig                         config_;
     int                                 training_step_ = 0;
+    double                              learning_rate_ = 0.0;  // set in ctor
 
     // High-priority CUDA stream reserved for training so train kernels are
     // scheduled ahead of inference batches that share the GPU. Inference

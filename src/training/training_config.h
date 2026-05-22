@@ -6,6 +6,10 @@
 #include "self_play/coordinator.h"    // SelfPlayConfig
 #include "self_play/training_data.h"  // TDMode
 
+// Consecutive non-improving evals required before a learning-rate back-off
+// fires (see lr_backoff_* in TrainingConfig).
+constexpr int kLrBackoffPatience = 3;
+
 // ---------------------------------------------------------------------------
 // TrainingConfig — all hyperparameters for the training loop.
 // ---------------------------------------------------------------------------
@@ -62,6 +66,17 @@ struct TrainingConfig {
     // --- Evaluation ---
     int eval_interval = 1000;   // Training steps between evaluation runs
     int eval_games    = 200;    // Games per evaluation run
+
+    // --- Learning-rate back-off (ReduceLROnPlateau-style) ---
+    // When enabled, the trainer watches the eval NN win rate. After
+    // kLrBackoffPatience (3) consecutive evals that fail to beat the best win
+    // rate seen so far, the Adam learning rate is multiplied by
+    // lr_backoff_factor and the non-improvement counter resets. A new best win
+    // rate also resets the counter. The LR is never reduced below
+    // lr_backoff_min_lr.
+    bool   lr_backoff_enabled = false;
+    double lr_backoff_factor  = 0.5;     // Must be in (0, 1].
+    double lr_backoff_min_lr  = 1e-6;    // Floor below which back-off stops.
 
     // --- Potential-Based Reward Shaping (PBRS) ---
     bool   use_pbrs          = false;

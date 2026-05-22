@@ -29,6 +29,7 @@ ModelTrainer::ModelTrainer(const ModelConfig& config, torch::Device device)
         model_->parameters(),
         torch::optim::AdamOptions(config.learning_rate)
     );
+    learning_rate_ = config.learning_rate;
 
     if (device_.is_cuda()) {
         train_stream_ = c10::cuda::getStreamFromPool(
@@ -162,6 +163,13 @@ double ModelTrainer::train_step(const float* states, const double* targets,
     has_pending_loss_    = true;
 
     return last_finalized_loss_;
+}
+
+void ModelTrainer::set_learning_rate(double lr) {
+    for (auto& group : optimizer_->param_groups()) {
+        static_cast<torch::optim::AdamOptions&>(group.options()).lr(lr);
+    }
+    learning_rate_ = lr;
 }
 
 double ModelTrainer::wait_until_step_complete() {
@@ -338,6 +346,13 @@ void ModelTrainer::load_checkpoint(const std::string& path,
     // --- Load optimizer state (best-effort; skip if incompatible) ---
     try {
         torch::load(*optimizer_, path + ".optimizer");
+        // The serialised optimizer may carry a learning rate that drifted from
+        // config.learning_rate (e.g. after LR back-off). Resync the tracked
+        // value so learning_rate() / set_learning_rate() stay consistent.
+        if (!optimizer_->param_groups().empty()) {
+            learning_rate_ = static_cast<torch::optim::AdamOptions&>(
+                optimizer_->param_groups().front().options()).lr();
+        }
     } catch (const std::exception& e) {
         std::cerr << "Warning: could not load optimizer state (" << e.what()
                   << ") — optimizer will start fresh.\n";

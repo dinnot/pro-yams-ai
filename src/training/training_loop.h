@@ -65,6 +65,7 @@ private:
     void maybe_swap_model();
     void maybe_checkpoint();
     void maybe_evaluate();
+    void maybe_backoff_learning_rate(double win_rate);
 
     void refresh_opponent_model();
 
@@ -100,6 +101,10 @@ private:
     double pending_train_steps_ = 0.0;
 
     double last_eval_win_rate_ = 0.0;
+
+    // --- Learning-rate back-off state (see config.lr_backoff_*) ---
+    double lr_backoff_best_win_rate_  = -1.0;  // best eval win rate seen so far
+    int    lr_backoff_no_improve_     = 0;     // consecutive non-improving evals
 
     static constexpr int kMaxCollectBatch = 512;
     Instance* collect_buf_[kMaxCollectBatch];

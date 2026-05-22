@@ -129,6 +129,9 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "initial_epsilon"      << YAML::Value << tc.initial_epsilon;
     out << YAML::Key << "eval_interval"        << YAML::Value << tc.eval_interval;
     out << YAML::Key << "eval_games"           << YAML::Value << tc.eval_games;
+    out << YAML::Key << "lr_backoff_enabled"   << YAML::Value << tc.lr_backoff_enabled;
+    out << YAML::Key << "lr_backoff_factor"    << YAML::Value << tc.lr_backoff_factor;
+    out << YAML::Key << "lr_backoff_min_lr"    << YAML::Value << tc.lr_backoff_min_lr;
     out << YAML::Key << "checkpoint_dir"       << YAML::Value << tc.checkpoint_dir;
     out << YAML::Key << "log_dir"              << YAML::Value << tc.log_dir;
     out << YAML::Key << "log_path"             << YAML::Value << tc.log_path;

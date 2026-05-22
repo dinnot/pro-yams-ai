@@ -106,6 +106,15 @@ static ValidationResult validate_training(const AppConfig& cfg) {
     if (tc.eval_games <= 0)
         r.fail("training.eval_games must be positive");
 
+    // Learning-rate back-off
+    if (tc.lr_backoff_factor <= 0.0 || tc.lr_backoff_factor > 1.0)
+        r.fail("training.lr_backoff_factor must be in (0, 1]");
+    if (tc.lr_backoff_min_lr <= 0.0)
+        r.fail("training.lr_backoff_min_lr must be positive");
+    if (tc.lr_backoff_enabled && tc.eval_interval <= 0)
+        r.fail("training.lr_backoff_enabled requires eval_interval > 0 "
+               "(back-off is driven by eval win rate)");
+
     validate_self_play_common(sp, r, "training.self_play.");
     validate_model_common(m, r, "training.model.");
     return r;

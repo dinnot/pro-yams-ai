@@ -22,6 +22,10 @@ training:
   eval_interval: 10000
   eval_games: 2000
 
+  lr_backoff_enabled: false
+  lr_backoff_factor: 0.5
+  lr_backoff_min_lr: 0.000001
+
   checkpoint_dir: checkpoints/mlp-256/selfplay4
   log_dir: ./logs/mlp-256/selfplay4
   log_path: ./logs/mlp-256/selfplay4/training_log.csv
