@@ -204,6 +204,7 @@ TrainingMetrics TrainingLoopT<Traits>::metrics() const {
     m.games_played      = games_played_;
     m.samples_in_buffer = buffer_->size();
     m.loss              = last_loss_;
+    m.learning_rate     = trainer_ ? trainer_->learning_rate() : 0.0;
     m.temperature       = temperature_;
     m.epsilon           = epsilon_;
 

@@ -8,6 +8,7 @@ struct TrainingMetrics {
     int    games_played           = 0;
     int    samples_in_buffer      = 0;
     double loss                   = 0.0;
+    double learning_rate          = 0.0;
     double temperature            = 1.0;
     double epsilon                = 0.0;
     double games_per_second       = 0.0;

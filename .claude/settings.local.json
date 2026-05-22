@@ -329,7 +329,9 @@
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/model/model_tests --gtest_filter='TrainerTest.LearningRate*')",
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/model/model_tests --gtest_filter='TrainerTest.*')",
       "Bash(./pro_yams_ai --mode config)",
-      "Bash(./build/pro_yams_ai --mode config --config /tmp/lrtest.yaml)"
+      "Bash(./build/pro_yams_ai --mode config --config /tmp/lrtest.yaml)",
+      "Bash(cmake --build . --target training_tests --parallel 8)",
+      "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/training/training_tests --gtest_filter='LoggingTest.*')"
     ]
   }
 }

@@ -108,6 +108,7 @@ TrainingMetrics DistilLoopT<Traits>::metrics() const {
         : 0;
     m.samples_in_buffer = buffer_ ? buffer_->size() : 0;
     m.loss              = last_loss_;
+    m.learning_rate     = student_trainer_ ? student_trainer_->learning_rate() : 0.0;
     m.temperature       = 0.0;
     m.epsilon           = 0.0;
     auto now = std::chrono::steady_clock::now();
