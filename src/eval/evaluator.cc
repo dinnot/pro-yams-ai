@@ -1,7 +1,10 @@
 #include "eval/evaluator.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <thread>
+#include <vector>
 
 #include "engine/duel.h"
 #include "engine/game_flow.h"
@@ -144,50 +147,94 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
 }
 
 // ---------------------------------------------------------------------------
+// Parallel game-loop helper
+//
+// Plays games i ∈ [0, num_games) across up to `num_threads` worker threads
+// (capped to num_games). `play_one(i, partial, margin_sum)` plays game i and
+// folds its outcome into the thread-local `partial` EvalResult and the
+// thread-local running `margin_sum`. Each game owns its own RNG/buffers and
+// only the shared model (read-only during eval-mode inference) and const
+// tables are touched concurrently, so no synchronisation is needed inside
+// play_one. Per-game seeds are fixed by game index, so the merged result is
+// identical regardless of num_threads.
+// ---------------------------------------------------------------------------
+namespace {
+template <typename PlayOne>
+EvalResult run_games_parallel(int num_games, int num_threads, PlayOne&& play_one) {
+    EvalResult total{};
+    total.total_games = num_games;
+    if (num_games <= 0) return total;
+
+    const int nthreads = std::clamp(num_threads, 1, num_games);
+
+    std::vector<EvalResult> partials(nthreads);
+    std::vector<double>     margins(nthreads, 0.0);
+    std::vector<std::thread> pool;
+    pool.reserve(nthreads);
+
+    for (int t = 0; t < nthreads; ++t) {
+        pool.emplace_back([&, t]() {
+            for (int i = t; i < num_games; i += nthreads) {
+                play_one(i, partials[t], margins[t]);
+            }
+        });
+    }
+    for (auto& th : pool) th.join();
+
+    double margin_sum = 0.0;
+    for (int t = 0; t < nthreads; ++t) {
+        const EvalResult& p = partials[t];
+        total.nn_wins        += p.nn_wins;
+        total.heuristic_wins += p.heuristic_wins;
+        total.draws          += p.draws;
+        total.nn_wins_as_p0  += p.nn_wins_as_p0;
+        total.nn_wins_as_p1  += p.nn_wins_as_p1;
+        total.games_as_p0    += p.games_as_p0;
+        total.games_as_p1    += p.games_as_p1;
+        margin_sum           += margins[t];
+    }
+    total.avg_duel_margin = margin_sum / num_games;
+    return total;
+}
+}  // namespace
+
+// ---------------------------------------------------------------------------
 // run_evaluation<Traits>
 // ---------------------------------------------------------------------------
 
 template <typename Traits>
 EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
                            const PrecomputedTables& tables,
-                           int num_games, uint64_t base_seed) {
-    EvalResult result{};
-    result.total_games = num_games;
-
+                           int num_games, uint64_t base_seed,
+                           int num_threads) {
     model.eval();
 
-    double margin_sum = 0.0;
+    return run_games_parallel(num_games, num_threads,
+        [&](int i, EvalResult& res, double& margin_sum) {
+            RNG rng(base_seed + static_cast<uint64_t>(i));
+            // nn_player alternates: i even → NN anchors seat 0 (Team 0 in 2v2);
+            // i odd → NN anchors seat 1 (Team 1 in 2v2).
+            int nn_player = i % 2;
 
-    for (int i = 0; i < num_games; ++i) {
-        RNG rng(base_seed + static_cast<uint64_t>(i));
-        // nn_player alternates: i even → NN anchors seat 0 (Team 0 in 2v2);
-        // i odd → NN anchors seat 1 (Team 1 in 2v2).
-        int nn_player = i % 2;
+            if (nn_player == 0) res.games_as_p0++;
+            else                res.games_as_p1++;
 
-        if (nn_player == 0) result.games_as_p0++;
-        else                result.games_as_p1++;
+            int duel_margin = 0;
+            double outcome = play_eval_game<Traits>(model, device, tables,
+                                                    nn_player, rng, duel_margin);
 
-        int duel_margin = 0;
-        double outcome = play_eval_game<Traits>(model, device, tables,
-                                                nn_player, rng, duel_margin);
+            margin_sum += duel_margin;
 
-        margin_sum += duel_margin;
-
-        if (outcome == 1.0) {
-            result.nn_wins++;
-            if (nn_player == 0) result.nn_wins_as_p0++;
-            else                result.nn_wins_as_p1++;
-        } else if (outcome == 0.0) {
-            result.heuristic_wins++;
-        } else {
-            result.draws++;
-        }
-    }
-
-    result.avg_duel_margin = num_games > 0
-        ? margin_sum / num_games : 0.0;
-
-    return result;
+            if (outcome == 1.0) {
+                res.nn_wins++;
+                if (nn_player == 0) res.nn_wins_as_p0++;
+                else                res.nn_wins_as_p1++;
+            } else if (outcome == 0.0) {
+                res.heuristic_wins++;
+            } else {
+                res.draws++;
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -240,39 +287,35 @@ template <typename Traits>
 EvalResult run_evaluation_vs(ProYamsNet& model, torch::Device device,
                               const PrecomputedTables& tables,
                               HeuristicVersion heuristic_version,
-                              int num_games, uint64_t base_seed) {
-    EvalResult result{};
-    result.total_games = num_games;
-
+                              int num_games, uint64_t base_seed,
+                              int num_threads) {
     model.eval();
 
-    double margin_sum = 0.0;
-    for (int i = 0; i < num_games; ++i) {
-        RNG rng(base_seed + static_cast<uint64_t>(i));
-        int nn_player = i % 2;
+    return run_games_parallel(num_games, num_threads,
+        [&](int i, EvalResult& res, double& margin_sum) {
+            RNG rng(base_seed + static_cast<uint64_t>(i));
+            int nn_player = i % 2;
 
-        if (nn_player == 0) result.games_as_p0++;
-        else                result.games_as_p1++;
+            if (nn_player == 0) res.games_as_p0++;
+            else                res.games_as_p1++;
 
-        int duel_margin = 0;
-        double outcome = play_eval_game_with_version<Traits>(
-            model, device, tables, nn_player, heuristic_version, rng, duel_margin);
+            int duel_margin = 0;
+            double outcome = play_eval_game_with_version<Traits>(
+                model, device, tables, nn_player, heuristic_version, rng,
+                duel_margin);
 
-        margin_sum += duel_margin;
+            margin_sum += duel_margin;
 
-        if (outcome == 1.0) {
-            result.nn_wins++;
-            if (nn_player == 0) result.nn_wins_as_p0++;
-            else                result.nn_wins_as_p1++;
-        } else if (outcome == 0.0) {
-            result.heuristic_wins++;
-        } else {
-            result.draws++;
-        }
-    }
-
-    result.avg_duel_margin = num_games > 0 ? margin_sum / num_games : 0.0;
-    return result;
+            if (outcome == 1.0) {
+                res.nn_wins++;
+                if (nn_player == 0) res.nn_wins_as_p0++;
+                else                res.nn_wins_as_p1++;
+            } else if (outcome == 0.0) {
+                res.heuristic_wins++;
+            } else {
+                res.draws++;
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -283,48 +326,43 @@ template <typename Traits>
 EvalResult run_heuristic_vs_heuristic(const PrecomputedTables& tables,
                                        HeuristicVersion candidate_version,
                                        HeuristicVersion reference_version,
-                                       int num_games, uint64_t base_seed) {
-    EvalResult result{};
-    result.total_games = num_games;
+                                       int num_games, uint64_t base_seed,
+                                       int num_threads) {
+    return run_games_parallel(num_games, num_threads,
+        [&](int i, EvalResult& res, double& margin_sum) {
+            RNG rng(base_seed + static_cast<uint64_t>(i));
+            int candidate_player = i % 2;
+            if (candidate_player == 0) res.games_as_p0++;
+            else                       res.games_as_p1++;
 
-    double margin_sum = 0.0;
-    for (int i = 0; i < num_games; ++i) {
-        RNG rng(base_seed + static_cast<uint64_t>(i));
-        int candidate_player = i % 2;
-        if (candidate_player == 0) result.games_as_p0++;
-        else                       result.games_as_p1++;
+            GameStateT<Traits>   state;
+            GameContextT<Traits> ctx;
+            SolverBuffers buffers{};
+            init_game<Traits>(state, ctx, rng);
 
-        GameStateT<Traits>   state;
-        GameContextT<Traits> ctx;
-        SolverBuffers buffers{};
-        init_game<Traits>(state, ctx, rng);
+            while (!is_terminal<Traits>(state.board)) {
+                int p = static_cast<int>(state.board.current_player);
+                const bool is_candidate_seat =
+                    Traits::are_teammates(p, candidate_player);
+                HeuristicVersion hv = is_candidate_seat
+                    ? candidate_version : reference_version;
+                heuristic_play_turn<Traits>(state, ctx, tables, buffers, rng, hv);
+            }
 
-        while (!is_terminal<Traits>(state.board)) {
-            int p = static_cast<int>(state.board.current_player);
-            const bool is_candidate_seat =
-                Traits::are_teammates(p, candidate_player);
-            HeuristicVersion hv = is_candidate_seat
-                ? candidate_version : reference_version;
-            heuristic_play_turn<Traits>(state, ctx, tables, buffers, rng, hv);
-        }
+            int duel = compute_duel<Traits>(state.board, ctx);
+            if (!Traits::are_teammates(candidate_player, 0)) duel = -duel;
+            margin_sum += duel;
 
-        int duel = compute_duel<Traits>(state.board, ctx);
-        if (!Traits::are_teammates(candidate_player, 0)) duel = -duel;
-        margin_sum += duel;
-
-        if (duel > 0) {
-            result.nn_wins++;
-            if (candidate_player == 0) result.nn_wins_as_p0++;
-            else                       result.nn_wins_as_p1++;
-        } else if (duel < 0) {
-            result.heuristic_wins++;
-        } else {
-            result.draws++;
-        }
-    }
-
-    result.avg_duel_margin = num_games > 0 ? margin_sum / num_games : 0.0;
-    return result;
+            if (duel > 0) {
+                res.nn_wins++;
+                if (candidate_player == 0) res.nn_wins_as_p0++;
+                else                       res.nn_wins_as_p1++;
+            } else if (duel < 0) {
+                res.heuristic_wins++;
+            } else {
+                res.draws++;
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -350,20 +388,24 @@ template double play_eval_game<Yams1v1>(ProYamsNet&, torch::Device,
 template double play_eval_game<Yams2v2>(ProYamsNet&, torch::Device,
                                         const PrecomputedTables&, int, RNG&, int&);
 template EvalResult run_evaluation<Yams1v1>(ProYamsNet&, torch::Device,
-                                            const PrecomputedTables&, int, uint64_t);
+                                            const PrecomputedTables&, int,
+                                            uint64_t, int);
 template EvalResult run_evaluation<Yams2v2>(ProYamsNet&, torch::Device,
-                                            const PrecomputedTables&, int, uint64_t);
+                                            const PrecomputedTables&, int,
+                                            uint64_t, int);
 template EvalResult run_evaluation_vs<Yams1v1>(ProYamsNet&, torch::Device,
                                                const PrecomputedTables&,
-                                               HeuristicVersion, int, uint64_t);
+                                               HeuristicVersion, int, uint64_t,
+                                               int);
 template EvalResult run_evaluation_vs<Yams2v2>(ProYamsNet&, torch::Device,
                                                const PrecomputedTables&,
-                                               HeuristicVersion, int, uint64_t);
+                                               HeuristicVersion, int, uint64_t,
+                                               int);
 template EvalResult run_heuristic_vs_heuristic<Yams1v1>(const PrecomputedTables&,
                                                         HeuristicVersion,
                                                         HeuristicVersion,
-                                                        int, uint64_t);
+                                                        int, uint64_t, int);
 template EvalResult run_heuristic_vs_heuristic<Yams2v2>(const PrecomputedTables&,
                                                         HeuristicVersion,
                                                         HeuristicVersion,
-                                                        int, uint64_t);
+                                                        int, uint64_t, int);

@@ -89,18 +89,24 @@ double play_eval_game(ProYamsNet& model, torch::Device device,
                        int nn_player, RNG& rng,
                        int& out_duel_margin);
 
+// Default number of games played concurrently by the parallel eval helpers.
+inline constexpr int kDefaultEvalThreads = 16;
+
 // ---------------------------------------------------------------------------
 // run_evaluation — play num_games between NN and heuristic bot.
 //
-// Games alternate which player (1v1) or team (2v2) the NN controls. Runs
-// synchronously on the calling thread. The model is set to eval mode.
+// Games alternate which player (1v1) or team (2v2) the NN controls. The model
+// is set to eval mode. Games are independent and run concurrently across
+// `num_threads` worker threads (capped to num_games); per-game seeds are fixed
+// by game index, so results are identical regardless of thread count.
 // The heuristic opponent's version is randomised per game via
 // random_heuristic_version().
 // ---------------------------------------------------------------------------
 template <typename Traits>
 EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
                            const PrecomputedTables& tables,
-                           int num_games, uint64_t base_seed);
+                           int num_games, uint64_t base_seed,
+                           int num_threads = kDefaultEvalThreads);
 
 // ---------------------------------------------------------------------------
 // run_evaluation_vs<Traits> — NN versus one specific heuristic version.
@@ -117,7 +123,8 @@ template <typename Traits>
 EvalResult run_evaluation_vs(ProYamsNet& model, torch::Device device,
                               const PrecomputedTables& tables,
                               HeuristicVersion heuristic_version,
-                              int num_games, uint64_t base_seed);
+                              int num_games, uint64_t base_seed,
+                              int num_threads = kDefaultEvalThreads);
 
 // ---------------------------------------------------------------------------
 // run_heuristic_vs_heuristic<Traits> — two heuristic bots play against each
@@ -135,14 +142,17 @@ template <typename Traits>
 EvalResult run_heuristic_vs_heuristic(const PrecomputedTables& tables,
                                        HeuristicVersion candidate_version,
                                        HeuristicVersion reference_version,
-                                       int num_games, uint64_t base_seed);
+                                       int num_games, uint64_t base_seed,
+                                       int num_threads = kDefaultEvalThreads);
 
 // 1v1 convenience overloads (existing 1v1-only call sites can keep working
 // without sprinkling <Yams1v1> everywhere).
 inline EvalResult run_evaluation(ProYamsNet& model, torch::Device device,
                                   const PrecomputedTables& tables,
-                                  int num_games, uint64_t base_seed) {
-    return run_evaluation<Yams1v1>(model, device, tables, num_games, base_seed);
+                                  int num_games, uint64_t base_seed,
+                                  int num_threads = kDefaultEvalThreads) {
+    return run_evaluation<Yams1v1>(model, device, tables, num_games, base_seed,
+                                    num_threads);
 }
 
 inline double play_eval_game(ProYamsNet& model, torch::Device device,

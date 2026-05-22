@@ -238,60 +238,82 @@ void TournamentManagerT<Traits>::run_tournament(
         if (state_.error.empty()) state_.error = msg;
     };
 
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) {
-            for (int g = 0; g < games_per_matchup; ++g) {
-                if (stop_flag_.load()) goto done;
+    // Flatten every (i, j, game) into an independent task. Each game owns its
+    // own state/buffers/RNG and reads only the shared (eval-mode) models and
+    // const tables, so games run concurrently with no per-game locking. The
+    // seed is derived from (i, j, g) alone, so results don't depend on which
+    // worker runs which game or in what order.
+    struct GameTask { int i, j, g; };
+    std::vector<GameTask> tasks;
+    tasks.reserve(static_cast<size_t>(n) * n * games_per_matchup);
+    for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j)
+            for (int g = 0; g < games_per_matchup; ++g)
+                tasks.push_back({i, j, g});
 
-                // a_player alternates: in 1v1, who's P0; in 2v2, which team
-                // A anchors (0 = Team 0 = seats {0,2}; 1 = Team 1 = seats {1,3}).
-                const int a_player = g % 2;
-                const uint64_t seed = static_cast<uint64_t>(i) * 1'000'003ull +
-                                      static_cast<uint64_t>(j) * 31ull +
-                                      static_cast<uint64_t>(g);
+    std::atomic<size_t> next_task{0};
+    std::atomic<bool>   abort{false};  // set on error to halt remaining workers
 
-                int duel_a = 0;
-                try {
-                    play_one_game(participants[i], participants[j],
-                                  a_player, seed, duel_a);
-                } catch (const std::exception& e) {
-                    record_error(std::string("game error (") +
-                                 participants[i].id + " vs " +
-                                 participants[j].id + "): " + e.what());
-                    goto done;
-                } catch (...) {
-                    record_error(std::string("game error (") +
-                                 participants[i].id + " vs " +
-                                 participants[j].id + "): unknown exception");
-                    goto done;
-                }
+    auto worker = [&]() {
+        size_t idx;
+        while ((idx = next_task.fetch_add(1)) < tasks.size()) {
+            if (stop_flag_.load() || abort.load()) return;
 
-                {
-                    std::lock_guard<std::mutex> guard(mutex_);
-                    auto& AB = state_.grid[participants[i].id][participants[j].id];
-                    auto& BA = state_.grid[participants[j].id][participants[i].id];
+            const GameTask& tk = tasks[idx];
+            // a_player alternates: in 1v1, who's P0; in 2v2, which team A
+            // anchors (0 = Team 0 = seats {0,2}; 1 = Team 1 = seats {1,3}).
+            const int a_player = tk.g % 2;
+            const uint64_t seed = static_cast<uint64_t>(tk.i) * 1'000'003ull +
+                                  static_cast<uint64_t>(tk.j) * 31ull +
+                                  static_cast<uint64_t>(tk.g);
 
-                    AB.games++; BA.games++;
-                    AB.sum_margin_a += duel_a;
-                    BA.sum_margin_a += -duel_a;
-
-                    if (duel_a > 0) {
-                        AB.wins_a++;
-                        BA.wins_b++;
-                    } else if (duel_a < 0) {
-                        AB.wins_b++;
-                        BA.wins_a++;
-                    } else {
-                        AB.draws++;
-                        BA.draws++;
-                    }
-                    state_.games_completed++;
-                }
+            int duel_a = 0;
+            try {
+                play_one_game(participants[tk.i], participants[tk.j],
+                              a_player, seed, duel_a);
+            } catch (const std::exception& e) {
+                record_error(std::string("game error (") +
+                             participants[tk.i].id + " vs " +
+                             participants[tk.j].id + "): " + e.what());
+                abort.store(true);
+                return;
+            } catch (...) {
+                record_error(std::string("game error (") +
+                             participants[tk.i].id + " vs " +
+                             participants[tk.j].id + "): unknown exception");
+                abort.store(true);
+                return;
             }
-        }
-    }
 
-done:
+            std::lock_guard<std::mutex> guard(mutex_);
+            auto& AB = state_.grid[participants[tk.i].id][participants[tk.j].id];
+            auto& BA = state_.grid[participants[tk.j].id][participants[tk.i].id];
+
+            AB.games++; BA.games++;
+            AB.sum_margin_a += duel_a;
+            BA.sum_margin_a += -duel_a;
+
+            if (duel_a > 0) {
+                AB.wins_a++;
+                BA.wins_b++;
+            } else if (duel_a < 0) {
+                AB.wins_b++;
+                BA.wins_a++;
+            } else {
+                AB.draws++;
+                BA.draws++;
+            }
+            state_.games_completed++;
+        }
+    };
+
+    const int nthreads = std::max<int>(1,
+        std::min<int>(kDefaultEvalThreads, static_cast<int>(tasks.size())));
+    std::vector<std::thread> pool;
+    pool.reserve(nthreads);
+    for (int t = 0; t < nthreads; ++t) pool.emplace_back(worker);
+    for (auto& th : pool) th.join();
+
     std::lock_guard<std::mutex> g(mutex_);
     state_.is_running = false;
 }

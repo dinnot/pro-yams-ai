@@ -317,7 +317,14 @@
       "Bash(curl -s http://localhost:8091/js/play.js)",
       "Bash(curl -s http://localhost:8091/api/info)",
       "Bash(node --check /home/sorin/pro_yams_ai/src/ui/play_static/js/api.js)",
-      "Bash(curl -s http://localhost:8091/)"
+      "Bash(curl -s http://localhost:8091/)",
+      "Bash(cmake --build . --target eval_tests -j 8)",
+      "Bash(env MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive ./build/tests/eval/eval_tests)",
+      "Bash(cmake --build . --target pro_yams_ai distil_tests -j 12)",
+      "Bash(cmake --build . --target ui_server -j 12)",
+      "Bash(grep -rln \"TournamentManager\\\\|tournament\" src/ui)",
+      "Bash(grep -rn \"add_executable\\\\|add_library\" src/ui/CMakeLists.txt)",
+      "Bash(cmake --build . --target pro_yams_ui -j 12)"
     ]
   }
 }
