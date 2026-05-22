@@ -20,7 +20,7 @@ training:
   initial_epsilon: 0
 
   eval_interval: 10000
-  eval_games: 2000
+  eval_games: 5000
 
   lr_backoff_enabled: true
   lr_backoff_factor: 0.5

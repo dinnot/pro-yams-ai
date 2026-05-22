@@ -147,8 +147,9 @@ private:
 // ---------------------------------------------------------------------------
 // save_managed_checkpoint — save a checkpoint and prune old ones.
 //
-// Checkpoints are named: checkpoint_step_{step}.model / .optimizer
-// Old checkpoints beyond max_checkpoints are deleted.
+// Checkpoints are named: checkpoint_step_{step}.model / .optimizer / .buffer
+// For steps beyond max_checkpoints, the .optimizer and .buffer files are
+// pruned; the .model file is always kept to preserve the weight history.
 // ---------------------------------------------------------------------------
 void save_managed_checkpoint(ModelTrainer& trainer, const std::string& dir,
                               int step, double temperature, double epsilon,

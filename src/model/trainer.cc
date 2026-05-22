@@ -448,13 +448,14 @@ void save_managed_checkpoint(ModelTrainer& trainer, const std::string& dir,
         }
     }
 
-    // Sort ascending and delete oldest if over limit
+    // Sort ascending and, for steps beyond the limit, prune the heavyweight
+    // optimizer/buffer files while keeping the .model itself permanently.
     std::sort(steps.begin(), steps.end());
     while (static_cast<int>(steps.size()) > max_checkpoints) {
         int old_step = steps.front();
         steps.erase(steps.begin());
         std::string old_stem = dir + "/checkpoint_step_" + std::to_string(old_step);
-        fs::remove(old_stem + ".model");
         fs::remove(old_stem + ".optimizer");
+        fs::remove(old_stem + ".buffer");
     }
 }

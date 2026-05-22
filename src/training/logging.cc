@@ -68,12 +68,13 @@ void prune_old_checkpoints(const std::string& dir, int max_keep) {
 
     std::sort(steps.begin(), steps.end());
 
-    // Delete oldest steps beyond max_keep.
+    // For steps beyond max_keep, prune the heavyweight buffer/optimizer files
+    // but keep the .model itself permanently so the full checkpoint history of
+    // weights is preserved.
     while (static_cast<int>(steps.size()) > max_keep) {
         int old_step = steps.front();
         steps.erase(steps.begin());
         std::string stem = dir + "/checkpoint_step_" + std::to_string(old_step);
-        fs::remove(stem + ".model");
         fs::remove(stem + ".optimizer");
         fs::remove(stem + ".buffer");
     }

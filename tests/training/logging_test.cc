@@ -108,19 +108,29 @@ TEST(LoggingTest, PruneOldCheckpoints_RemovesOldest) {
 
     prune_old_checkpoints(dir, 3);
 
-    // Steps 100, 200 should be deleted; 300, 400, 500 should remain.
+    // Steps 100, 200: optimizer/buffer pruned, but .model kept permanently.
     for (int s : {100, 200}) {
-        EXPECT_FALSE(std::filesystem::exists(
+        EXPECT_TRUE(std::filesystem::exists(
             dir + "/checkpoint_step_" + std::to_string(s) + ".model"))
-            << "Step " << s << " .model should be pruned";
+            << "Step " << s << " .model should be kept";
+        EXPECT_FALSE(std::filesystem::exists(
+            dir + "/checkpoint_step_" + std::to_string(s) + ".optimizer"))
+            << "Step " << s << " .optimizer should be pruned";
         EXPECT_FALSE(std::filesystem::exists(
             dir + "/checkpoint_step_" + std::to_string(s) + ".buffer"))
             << "Step " << s << " .buffer should be pruned";
     }
+    // Steps 300, 400, 500: full checkpoint (model + optimizer + buffer) kept.
     for (int s : {300, 400, 500}) {
         EXPECT_TRUE(std::filesystem::exists(
             dir + "/checkpoint_step_" + std::to_string(s) + ".model"))
             << "Step " << s << " .model should be kept";
+        EXPECT_TRUE(std::filesystem::exists(
+            dir + "/checkpoint_step_" + std::to_string(s) + ".optimizer"))
+            << "Step " << s << " .optimizer should be kept";
+        EXPECT_TRUE(std::filesystem::exists(
+            dir + "/checkpoint_step_" + std::to_string(s) + ".buffer"))
+            << "Step " << s << " .buffer should be kept";
     }
 
     std::filesystem::remove_all(dir);
