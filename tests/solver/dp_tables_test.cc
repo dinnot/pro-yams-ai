@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 
+#include "solver/dp_eval.h"
 #include "solver/dp_tables.h"
 #include "solver/dp_tables_internal.h"
 
@@ -219,4 +220,59 @@ TEST(UpperBonusTest, Tiers) {
     EXPECT_EQ(upper_bonus(90), 200);
     EXPECT_EQ(upper_bonus(100), 500);
     EXPECT_EQ(upper_bonus(105), 500);
+}
+
+// ===========================================================================
+// Suite 5: SnapGmaxTest — Golden Rule threshold must round DOWN to the
+// largest representable Sc bucket <= gmax (no_min when none qualifies).
+//
+// The Sc value is the minimum a roll must beat to place in an open cell. The
+// representable buckets per row are coarse, so a real threshold that falls
+// between buckets must snap to the bucket *below* it: a threshold the column
+// already clears (e.g. "beat a 5" on the 5s row, whose smallest non-zero
+// score is itself 5) becomes no_min, rather than being inflated up to the
+// next bucket (the old behaviour, which turned "beat 5" into "need 20").
+// ===========================================================================
+
+// Bucket sets mirror the per-row constraint values in dp_eval.cc. Index 0 is
+// the "filled" sentinel (-1), index 1 is no_min (0), the rest are ascending.
+namespace {
+constexpr int8_t kSnap5s[] = {-1, 0, 20, 25};
+constexpr int8_t kSnap4s[] = {-1, 0, 16, 20};
+constexpr int8_t kSnap3s[] = {-1, 0, 12, 15};
+constexpr int8_t kSnap6s[] = {-1, 0, 24, 30};
+}  // namespace
+
+TEST(SnapGmaxTest, FivesRoundDown) {
+    // No constraint, or any threshold the row trivially clears, -> no_min.
+    EXPECT_EQ(snap_gmax(0,  kSnap5s, 4), 0);
+    EXPECT_EQ(snap_gmax(5,  kSnap5s, 4), 0);
+    EXPECT_EQ(snap_gmax(10, kSnap5s, 4), 0);
+    EXPECT_EQ(snap_gmax(15, kSnap5s, 4), 0);
+    // Only a genuine 20/25 threshold should impose a real minimum.
+    EXPECT_EQ(snap_gmax(20, kSnap5s, 4), 20);
+    EXPECT_EQ(snap_gmax(25, kSnap5s, 4), 25);
+}
+
+TEST(SnapGmaxTest, OtherUpperRowsRoundDown) {
+    // 4s: {0,16,20}
+    EXPECT_EQ(snap_gmax(4,  kSnap4s, 4), 0);
+    EXPECT_EQ(snap_gmax(12, kSnap4s, 4), 0);
+    EXPECT_EQ(snap_gmax(16, kSnap4s, 4), 16);
+    EXPECT_EQ(snap_gmax(20, kSnap4s, 4), 20);
+    // 3s: {0,12,15}
+    EXPECT_EQ(snap_gmax(9,  kSnap3s, 4), 0);
+    EXPECT_EQ(snap_gmax(12, kSnap3s, 4), 12);
+    EXPECT_EQ(snap_gmax(15, kSnap3s, 4), 15);
+    // 6s: {0,24,30}
+    EXPECT_EQ(snap_gmax(18, kSnap6s, 4), 0);
+    EXPECT_EQ(snap_gmax(24, kSnap6s, 4), 24);
+    EXPECT_EQ(snap_gmax(30, kSnap6s, 4), 30);
+}
+
+TEST(SnapGmaxTest, BetweenBucketsRoundsToLower) {
+    // A threshold strictly between two buckets snaps to the lower one.
+    EXPECT_EQ(snap_gmax(22, kSnap5s, 4), 20);
+    // Above the top bucket clamps to the top bucket.
+    EXPECT_EQ(snap_gmax(99, kSnap5s, 4), 25);
 }

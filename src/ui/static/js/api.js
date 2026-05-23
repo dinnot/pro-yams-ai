@@ -11,13 +11,16 @@ const API = {
     // Game management. playerTypes: array of strings (one per seat). The
     // server reads player0..playerN-1 from the body and uses array length
     // to determine seat count.
-    async newGame(playerTypes, seed, debugMode = false) {
+    async newGame(playerTypes, seed, debugMode = false, position = null) {
         const body = { debug_mode: debugMode };
         for (let i = 0; i < playerTypes.length; i++) {
             body['player' + i] = playerTypes[i];
         }
         if (seed !== undefined && seed !== null && seed !== '') body.seed = Number(seed);
         else body.seed = Math.floor(Math.random() * 1000000);
+        // When a starting position is supplied the server seeds the board from
+        // it (rebuilding context) instead of dealing a fresh empty board.
+        if (position) body.position = position;
         const res = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

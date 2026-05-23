@@ -383,9 +383,14 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
             const int crush_my_E  = crush_multiplier(my_eR,  opp_eR);
             const int crush_opp_E = crush_multiplier(opp_eR, my_eR);
             const int active_crush_E = std::max(crush_my_E, crush_opp_E);
-            const double margin_E =
-                static_cast<double>(pc[t0_ci][col].e_raw - pc[t1_ci][col].e_raw)
-              * coeff * active_crush_E;
+            // Fold the expected clean-column bonus into the margin, weighted by
+            // P_clean (T_min tier, grp_F[4]) so the EV side anticipates an
+            // impending clean completion instead of stepping into it only when
+            // is_clean flips. Mirrors the now-margin's clean handling above.
+            const double margin_E = expected_duel_margin(
+                pc[t0_ci][col].e_raw, pc[t1_ci][col].e_raw,
+                pc[t0_ci][col].grp_F[4], pc[t1_ci][col].grp_F[4],
+                coeff, active_crush_E);
             out[idx++] = std::tanh(static_cast<float>(margin_E / 15000.0));
             total_duel_E += margin_E;
 

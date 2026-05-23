@@ -33,6 +33,23 @@ constexpr int kMaxScorePerRow[kNumRows] = {
     50, 54, 50, 75, 100      // FH, K, STR, U8, Y (rows 8-12)
 };
 
+/// Expected per-pairing-column duel margin in raw points (pre-tanh), used for
+/// the Group B.2 margin_E feature. Mirrors the "now" margin but weights the
+/// clean-column bonus by the *probability* of completing a clean column
+/// (P_clean) instead of the binary current-state is_clean — so the EV side
+/// trends smoothly toward the clean-completed value instead of stepping into
+/// it only once the column is actually clean. The bonus (200 normally, 100
+/// under crush) is added AFTER the crush multiplier, exactly as the now-margin
+/// does, because crush thresholds are evaluated on raw (pre-bonus) score.
+inline double expected_duel_margin(double e_raw_me, double e_raw_opp,
+                                   float p_clean_me, float p_clean_opp,
+                                   int coeff, int active_crush) {
+    const int clean_bonus = (active_crush > 1) ? 100 : 200;
+    const double me_adj  = e_raw_me  + static_cast<double>(p_clean_me)  * clean_bonus;
+    const double opp_adj = e_raw_opp + static_cast<double>(p_clean_opp) * clean_bonus;
+    return (me_adj - opp_adj) * coeff * active_crush;
+}
+
 // ---------------------------------------------------------------------------
 // Main tensor generation function.
 //

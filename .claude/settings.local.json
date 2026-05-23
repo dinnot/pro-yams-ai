@@ -332,7 +332,26 @@
       "Bash(./build/pro_yams_ai --mode config --config /tmp/lrtest.yaml)",
       "Bash(cmake --build . --target training_tests --parallel 8)",
       "Bash(MKL_THREADING_LAYER=SEQUENTIAL OMP_NUM_THREADS=1 ./tests/training/training_tests --gtest_filter='LoggingTest.*')",
-      "Bash(xargs -I{} {} --gtest_filter='*Prune*')"
+      "Bash(xargs -I{} {} --gtest_filter='*Prune*')",
+      "Bash(cmake --build . --target pro_yams_ui -j4)",
+      "Bash(./build/src/ui/pro_yams_ui --port 8095 --static_dir ./src/ui/static --variant 1v1)",
+      "Bash(curl -s http://localhost:8095/api/info)",
+      "Bash(curl -s -X POST http://localhost:8095/api/game/new -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://localhost:8095/api/game/new -H 'Content-Type: application/json' -d '{\"player0\":\"human\",\"player1\":\"nn\",\"position\":{\"variant\":\"2v2\",\"coefficients\":[8,10,12,14,16,18],\"current_player\":0,\"boards\":{}}}')",
+      "Bash(node *)",
+      "Bash(curl -s -X POST http://localhost:8095/api/game/new -H 'Content-Type: application/json' -d @/tmp/pos_payload.json)",
+      "Bash(cmake --build . --target ui_tests -j4)",
+      "Read(//home/sorin/**)",
+      "Bash(OMP_NUM_THREADS=1 ./tests/solver/solver_tests --gtest_filter='SnapGmaxTest.*')",
+      "Bash(OMP_NUM_THREADS=1 ./tests/solver/solver_tests)",
+      "Bash(g++ -std=c++17 -O2 -fopenmp -I../src ../tests/solver/snap_gmax_verify_tmp.cc -o /tmp/snap_verify tests/solver/CMakeFiles/../../../lib/libsolver.a)",
+      "Bash(find . -name 'libsolver.a')",
+      "Bash(g++ -std=c++17 -O2 -fopenmp -I../src ../tests/solver/snap_gmax_verify_tmp.cc ./src/solver/libsolver.a ./src/engine/libengine.a -o /tmp/snap_verify)",
+      "Bash(OMP_NUM_THREADS=4 /tmp/snap_verify)",
+      "Bash(cmake --build . --target tensor_tests -j)",
+      "Bash(OMP_NUM_THREADS=2 ./tests/engine/tensor_tests)",
+      "Bash(sed -n '349,412p' src/engine/tensor.cc)",
+      "Bash(sed -n '1,80p' tests/engine/tensor_test.cc)"
     ]
   }
 }

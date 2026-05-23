@@ -187,6 +187,35 @@ select, input[type="text"] {
   user-select: none;
 }
 .debug-toggle:hover { color: #e94560; }
+.copy-board {
+  font-size: 0.75rem;
+  color: #888;
+  cursor: pointer;
+  margin-left: 4px;
+  user-select: none;
+}
+.copy-board:hover { color: #4caf50; }
+
+/* Load-position controls */
+.position-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.position-input {
+  flex: 1;
+  min-width: 240px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #ddd;
+  padding: 5px 8px;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.position-error { color: #ef9a9a; font-size: 0.8rem; }
 
 /* Debug label in controls */
 .debug-label {

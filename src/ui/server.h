@@ -174,6 +174,67 @@ private:
         return PlayerType::kHeuristic;
     }
 
+    // Parse a starting board position (the structured "position" object the
+    // frontend sends) into a BoardStateT. Fills cells, coefficients and
+    // current_player; cells_filled is recomputed by the session manager. On
+    // any malformed/out-of-range input, returns false and sets `err`.
+    static bool parse_position(const nlohmann::json& pos,
+                               BoardStateT<Traits>& board, std::string& err) {
+        const std::string my_variant = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
+        const std::string variant = pos.value("variant", my_variant);
+        if (variant != my_variant) {
+            err = "position variant " + variant + " does not match server " + my_variant;
+            return false;
+        }
+
+        if (!pos.contains("coefficients") || !pos["coefficients"].is_array() ||
+            pos["coefficients"].size() != kNumColumns) {
+            err = "position: coefficients must be an array of 6";
+            return false;
+        }
+        for (int c = 0; c < kNumColumns; ++c)
+            board.coefficients[c] = static_cast<int8_t>(pos["coefficients"][c].get<int>());
+
+        int cp = pos.value("current_player", 0);
+        if (cp < 0 || cp >= Traits::kNumPlayers) {
+            err = "position: current_player out of range";
+            return false;
+        }
+        board.current_player = static_cast<int8_t>(cp);
+        board.cells_filled = 0;  // recomputed in create_session_from_board
+
+        if (!pos.contains("boards") || !pos["boards"].is_object()) {
+            err = "position: missing boards";
+            return false;
+        }
+        const auto& boards = pos["boards"];
+        for (int p = 0; p < Traits::kNumPlayers; ++p) {
+            const std::string pkey = "player" + std::to_string(p);
+            if (!boards.contains(pkey)) {
+                err = "position: missing " + pkey;
+                return false;
+            }
+            const auto& pboard = boards[pkey];
+            for (int c = 0; c < kNumColumns; ++c) {
+                const auto col_it = pboard.find(column_name(c));
+                for (int r = 0; r < kNumRows; ++r) {
+                    int v = kCellEmpty;
+                    if (col_it != pboard.end()) {
+                        const auto cell_it = col_it->find(row_name(r));
+                        if (cell_it != col_it->end() && cell_it->is_number())
+                            v = cell_it->get<int>();
+                    }
+                    if (v != kCellEmpty && (v < 0 || v > 100)) {
+                        err = "position: cell value out of range";
+                        return false;
+                    }
+                    board.cells[p][c][r] = static_cast<int8_t>(v);
+                }
+            }
+        }
+        return true;
+    }
+
     // ---- Handlers ----
     // GET /api/info — static server metadata. The variant is fixed at launch,
     // so the frontend can use this on page load to decide which player-type
@@ -200,7 +261,19 @@ private:
         uint64_t seed       = body.value("seed",        static_cast<uint64_t>(42));
         bool     debug_mode = body.value("debug_mode",  false);
 
-        int id = sessions_.create_session(pts, Traits::kNumPlayers, seed, debug_mode);
+        int id;
+        if (body.contains("position") && body["position"].is_object()) {
+            BoardStateT<Traits> board;
+            std::string err;
+            if (!parse_position(body["position"], board, err)) {
+                error_response(res, err);
+                return;
+            }
+            id = sessions_.create_session_from_board(pts, Traits::kNumPlayers,
+                                                     board, seed, debug_mode);
+        } else {
+            id = sessions_.create_session(pts, Traits::kNumPlayers, seed, debug_mode);
+        }
 
         Session copy;
         sessions_.get_session_copy(id, copy);

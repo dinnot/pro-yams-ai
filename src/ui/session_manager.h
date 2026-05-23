@@ -12,6 +12,7 @@
 
 #include <torch/torch.h>
 
+#include "engine/context_rebuild.h"
 #include "engine/game_context.h"
 #include "engine/game_flow.h"
 #include "engine/game_traits.h"
@@ -87,6 +88,65 @@ public:
             s.current_turn.player = 0;
             std::memcpy(s.current_turn.initial_dice, s.state.dice,
                         sizeof(s.state.dice));
+        }
+
+        sessions_[id] = std::move(entry);
+        return id;
+    }
+
+    /// Create a session seeded from an explicit board position instead of a
+    /// fresh deal. `board` must carry cells, coefficients and current_player;
+    /// cells_filled is recomputed and the context is rebuilt by scanning the
+    /// cells. Fresh dice are rolled for the player on move (unless the position
+    /// is already terminal, in which case the game opens as game_over).
+    int create_session_from_board(const PlayerType* player_types,
+                                  int player_type_count,
+                                  const BoardStateT<Traits>& board,
+                                  uint64_t seed, bool debug_mode = false) {
+        assert(player_type_count == Traits::kNumPlayers);
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        int id = next_session_id_++;
+        auto entry = std::make_shared<Entry>();
+        entry->session = std::make_unique<Session>();
+
+        Session& s = *entry->session;
+        s.session_id = id;
+        for (int i = 0; i < Traits::kNumPlayers; ++i)
+            s.player_types[i] = player_types[i];
+        s.rng = RNG(seed);
+        s.tensor_buffer.resize(
+            static_cast<size_t>(kMaxAfterstateRequests) * Traits::kTensorSize, 0.0f);
+
+        s.state.board = board;
+        // Recompute cells_filled authoritatively so terminal detection is sound
+        // regardless of what the caller supplied.
+        uint16_t filled = 0;
+        for (int p = 0; p < Traits::kNumPlayers; ++p)
+            for (int c = 0; c < kNumColumns; ++c)
+                for (int r = 0; r < kNumRows; ++r)
+                    if (s.state.board.cells[p][c][r] != kCellEmpty) ++filled;
+        s.state.board.cells_filled = filled;
+
+        rebuild_context_from_board<Traits>(s.state.board, s.ctx);
+
+        s.game_over         = false;
+        s.result            = 0.0;
+        s.waiting_for_human = false;
+        s.debug_mode        = debug_mode;
+
+        if (is_terminal<Traits>(s.state.board)) {
+            s.game_over = true;
+            int duel = get_game_result<Traits>(s.state, s.ctx);
+            s.result = (duel > 0) ? 1.0 : (duel < 0) ? 0.0 : 0.5;
+        } else {
+            start_turn<Traits>(s.state, s.rng);
+            int cp = static_cast<int>(s.state.board.current_player);
+            if (s.player_types[cp] == PlayerType::kHuman) {
+                s.waiting_for_human = true;
+                s.current_turn.player = cp;
+                std::memcpy(s.current_turn.initial_dice, s.state.dice,
+                            sizeof(s.state.dice));
+            }
         }
 
         sessions_[id] = std::move(entry);

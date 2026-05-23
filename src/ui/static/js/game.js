@@ -5,6 +5,9 @@ const Game = {
     state: null,
     options: null,
     holdMask: 0,
+    // Boards the current session was loaded from (PY1 position), or null for a
+    // fresh game. copy-position replays history on top of this.
+    basePosition: null,
     autoPlayTimer: null,
     legalCollapsed: true,
     serverNumPlayers: 2,
@@ -12,6 +15,7 @@ const Game = {
 
     async init() {
         document.getElementById('btn-new-game').addEventListener('click', () => Game.newGame());
+        document.getElementById('btn-load-position').addEventListener('click', () => Game.loadPosition());
         document.getElementById('btn-step').addEventListener('click', () => Game.step());
         document.getElementById('btn-play-all').addEventListener('click', () => Game.playAll());
         document.getElementById('btn-reroll').addEventListener('click', () => Game.reroll());
@@ -76,16 +80,9 @@ const Game = {
 
     async newGame() {
         Game.stopAutoPlay();
+        Game.basePosition = null;
         const debugMode = document.getElementById('chk-debug').checked;
-        // Collect player types for every seat the server expects. The P2/P3
-        // dropdowns exist in the DOM either way but are .hidden in 1v1; for
-        // 1v1 only the first two values are sent.
-        const playerTypes = [];
-        for (let p = 0; p < Game.serverNumPlayers; p++) {
-            const sel = document.getElementById(`sel-p${p}`);
-            playerTypes.push(sel ? sel.value : 'heuristic_v2');
-        }
-        const data = await API.newGame(playerTypes, undefined, debugMode);
+        const data = await API.newGame(Game.collectPlayerTypes(), undefined, debugMode);
         Game.sessionId = data.session_id;
         Game.state = data.game_state;
         Game.holdMask = 0;
@@ -100,6 +97,71 @@ const Game = {
         if (!Game.state.waiting_for_human && !Game.state.game_over) {
             // Leave it for user to click Step or Play All.
         }
+    },
+
+    // Player types for every seat the server expects (P2/P3 dropdowns exist
+    // but are .hidden in 1v1). Shared by newGame() and loadPosition().
+    collectPlayerTypes() {
+        const playerTypes = [];
+        for (let p = 0; p < Game.serverNumPlayers; p++) {
+            const sel = document.getElementById(`sel-p${p}`);
+            playerTypes.push(sel ? sel.value : 'heuristic_v2');
+        }
+        return playerTypes;
+    },
+
+    // Copy the board position after history turn `index` to the clipboard as a
+    // PY1 notation string. `el` is the clicked icon, flashed ✓ on success.
+    async copyPositionAt(index, el) {
+        const gs = Game.state;
+        if (!gs || !gs.history || !gs.history[index]) return;
+        const variant = gs.game_variant ||
+            ((gs.num_players === 4) ? '2v2' : '1v1');
+        const pos = Position.fromHistory(gs.history, gs.coefficients, variant,
+                                         index, Game.basePosition);
+        const ok = await Position.copyToClipboard(Position.encode(pos));
+        if (el) {
+            const prev = el.textContent;
+            el.textContent = ok ? '✓' : '✗';
+            setTimeout(() => { el.textContent = prev; }, 900);
+        }
+    },
+
+    // Start a new game from a pasted PY1 position string. Reuses the current
+    // player-type selectors and debug toggle; dice are rolled fresh for the
+    // player on move.
+    async loadPosition() {
+        const input = document.getElementById('position-input');
+        const errEl = document.getElementById('position-error');
+        const raw = (input.value || '').trim();
+        const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? '' : 'none'; } };
+        showErr('');
+        if (!raw) { showErr('Paste a position string first.'); return; }
+
+        let pos;
+        try { pos = Position.decode(raw); }
+        catch (e) { showErr('Invalid position: ' + e.message); return; }
+
+        if (pos.variant !== Game.serverVariant) {
+            showErr(`Position is ${pos.variant} but this server runs ${Game.serverVariant}.`);
+            return;
+        }
+
+        Game.stopAutoPlay();
+        const debugMode = document.getElementById('chk-debug').checked;
+        const data = await API.newGame(Game.collectPlayerTypes(), undefined, debugMode, pos);
+        if (data.error) { showErr(data.error); return; }
+        // Remember the loaded board so copy-position can replay history on top
+        // of it rather than starting from an empty board.
+        Game.basePosition = pos.boards;
+        Game.sessionId = data.session_id;
+        Game.state = data.game_state;
+        Game.holdMask = 0;
+        Game.updateUI();
+
+        document.getElementById('btn-step').disabled = false;
+        document.getElementById('btn-play-all').disabled = false;
+        document.getElementById('btn-show-tensor').disabled = false;
     },
 
     async step() {
@@ -599,7 +661,15 @@ const Game = {
 
             entry.innerHTML =
                 `<span class="${pClass}">P${turn.player}</span> ${chain}` +
+                ' <span class="copy-board" title="Copy the board position after this turn">⧉</span>' +
                 (hasDebug ? ' <span class="debug-toggle" title="Show bot evaluations">▶</span>' : '');
+
+            // Copy the board position as it stood right after this turn, so it
+            // can be pasted into "Load Position" to branch from here.
+            entry.querySelector('.copy-board').addEventListener('click', (e) => {
+                e.stopPropagation();
+                Game.copyPositionAt(i, e.target);
+            });
 
             // --- Debug panel (collapsed by default) ---
             let debugPanel = null;

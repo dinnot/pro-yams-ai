@@ -24,11 +24,20 @@ constexpr int8_t kValsY[]   = {-1, 0, 80, 85, 90, 95, 100};
 }  // namespace
 
 int8_t snap_gmax(int gmax, const int8_t* vals, int count) {
+    // Round the Golden Rule threshold DOWN to the largest representable Sc
+    // bucket <= gmax (no_min when none qualifies). The buckets are coarse, so
+    // a threshold the row already clears (e.g. "beat a 5" on the 5s row, whose
+    // smallest non-zero score is itself 5) must become no_min rather than be
+    // inflated up to the next bucket. vals[] is {-1(filled), 0(no_min), ...}
+    // ascending, so we scan the real buckets (index >= 2) and keep the last
+    // one that does not exceed gmax.
     if (gmax <= 0) return 0;
+    int8_t best = 0;  // no_min
     for (int i = 2; i < count; ++i) {
-        if (vals[i] >= gmax) return vals[i];
+        if (vals[i] <= gmax) best = vals[i];
+        else break;
     }
-    return vals[count - 1];
+    return best;
 }
 
 Variant get_variant(int col) {

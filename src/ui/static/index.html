@@ -118,6 +118,14 @@
       <button id="btn-show-tensor" disabled title="Show neural network input tensor for the current board">Show Tensor</button>
     </div>
 
+    <!-- Load from a pasted board position (copied from a turn-history row). -->
+    <div class="position-controls">
+      <input type="text" id="position-input" class="position-input"
+             placeholder="Paste a board position (PY1;…) to start from it" />
+      <button id="btn-load-position" title="Start a new game from the pasted board position">Load Position</button>
+      <span id="position-error" class="position-error" style="display:none"></span>
+    </div>
+
     <div id="game-status" class="status-bar"></div>
 
     <div class="game-layout">
@@ -277,6 +285,7 @@
 </main>
 
 <script src="js/api.js"></script>
+<script src="js/position.js"></script>
 <script src="js/board.js"></script>
 <script src="js/debug.js"></script>
 <script src="js/tensor.js"></script>

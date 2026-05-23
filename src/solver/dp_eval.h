@@ -13,8 +13,10 @@
 // All helpers are pure functions of (board, ctx, dp_tables); no state.
 // ---------------------------------------------------------------------------
 
-// Snap a Golden Rule maximum (gmax) to the nearest legal Sc constraint value
-// at-or-above gmax.  Returns 0 if there is no constraint.
+// Snap a Golden Rule maximum (gmax) DOWN to the largest legal Sc constraint
+// value at-or-below gmax. Returns 0 (no_min) if there is no constraint or if
+// gmax falls below the smallest representable bucket. Rounding down avoids
+// inflating a threshold the row already clears into a stricter one.
 int8_t snap_gmax(int gmax, const int8_t* vals, int count);
 
 // Map a column index to the DP variant used by the tables.
