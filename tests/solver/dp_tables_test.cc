@@ -7,6 +7,12 @@
 #include "solver/dp_tables.h"
 #include "solver/dp_tables_internal.h"
 
+#include "engine/board_init.h"
+#include "engine/board_state.h"
+#include "engine/constants.h"
+#include "engine/game_context.h"
+#include "engine/rng.h"
+
 // ===========================================================================
 // Suite 1: DPEncoderTest — encoder/decoder round-trip + clamping
 // ===========================================================================
@@ -199,10 +205,46 @@ TEST(MutualDestructionTest, SS_Score_Above_30_Forces_LS_Scratch) {
     EXPECT_EQ(next_ls, 31);
 }
 
-TEST(MutualDestructionTest, LS_Place_Does_Not_Update_SS) {
+TEST(MutualDestructionTest, LS_Place_Leaves_SS_Band_Open) {
+    // LS=25 placed, SS no_min: a legal SS band [20,24] still remains, so SS
+    // keeps its (unrepresentable) soft cap as no_min — not forced.
     int8_t next_ss, next_ls;
     apply_middle_destruction(1, 25, 0, 0, next_ss, next_ls);
-    EXPECT_EQ(next_ss, 0);   // SS untouched
+    EXPECT_EQ(next_ss, 0);   // band [20,24] still legal
+    EXPECT_EQ(next_ls, -1);
+}
+
+TEST(MutualDestructionTest, LS_Place_20_Forces_SS_Scratch) {
+    // LS=20 placed: SS must be < 20, but SS's natural floor is 20 → no legal
+    // SS sum remains → forced scratch (31). Exercises the floor=20 edge.
+    int8_t next_ss, next_ls;
+    apply_middle_destruction(1, 20, 0, 0, next_ss, next_ls);
+    EXPECT_EQ(next_ss, 31);
+    EXPECT_EQ(next_ls, -1);
+}
+
+TEST(MutualDestructionTest, LS_Place_Forces_SS_Scratch_When_Floor_Meets_LS) {
+    // SS already needs >= 25 (golden); LS=25 placed → SS must be < 25 too →
+    // empty interval → forced scratch.
+    int8_t next_ss, next_ls;
+    apply_middle_destruction(1, 25, /*prev_ss=*/25, /*prev_ls=*/0, next_ss, next_ls);
+    EXPECT_EQ(next_ss, 31);
+    EXPECT_EQ(next_ls, -1);
+}
+
+TEST(MutualDestructionTest, LS_Place_21_Leaves_SS_20_Legal) {
+    // LS=21 placed, SS no_min: SS=20 is still in [20,21) → not forced.
+    int8_t next_ss, next_ls;
+    apply_middle_destruction(1, 21, 0, 0, next_ss, next_ls);
+    EXPECT_EQ(next_ss, 0);   // SS=20 remains legal
+    EXPECT_EQ(next_ls, -1);
+}
+
+TEST(MutualDestructionTest, LS_Place_Does_Not_Touch_Filled_SS) {
+    // SS already filled (-1): LS placement must leave it filled.
+    int8_t next_ss, next_ls;
+    apply_middle_destruction(1, 22, /*prev_ss=*/-1, /*prev_ls=*/0, next_ss, next_ls);
+    EXPECT_EQ(next_ss, -1);
     EXPECT_EQ(next_ls, -1);
 }
 
@@ -275,4 +317,88 @@ TEST(SnapGmaxTest, BetweenBucketsRoundsToLower) {
     EXPECT_EQ(snap_gmax(22, kSnap5s, 4), 20);
     // Above the top bucket clamps to the top bucket.
     EXPECT_EQ(snap_gmax(99, kSnap5s, 4), 25);
+}
+
+// ===========================================================================
+// Suite 6: BuildScMiddleTest — the SS/LS middle thresholds produced by
+// build_Sc must honour the cross-row Golden Rule constraints:
+//   * LS must beat the highest SS recorded by anyone (LS > max_SS).
+//   * SS must stay strictly below this player's filled LS (SS < LS), which
+//     becomes a forced scratch (31) once no legal SS sum remains.
+// ===========================================================================
+namespace {
+
+// Fresh 1v1 board+context with all middle cells empty and no golden maxima.
+void make_clean_middle(BoardState& board, GameContext& ctx) {
+    RNG rng(7);
+    init_board(board, rng);
+    init_context(ctx, board);
+}
+
+// Run build_Sc for player 0 / column and return the two middle thresholds.
+void middle_sc(const BoardState& board, const GameContext& ctx, int col,
+               int8_t& ss, int8_t& ls) {
+    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int EU, EM, EL;
+    build_Sc(0, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+    ss = Sc_M[0];
+    ls = Sc_M[1];
+}
+
+}  // namespace
+
+TEST(BuildScMiddleTest, LS_Threshold_Beats_Opponent_SS) {
+    // Opponent recorded SS=25 (global golden_max[SS]=25). Our LS is still open
+    // and must beat it: min threshold = 26 (bug #1 regression guard).
+    BoardState board; GameContext ctx; make_clean_middle(board, ctx);
+    const int col = kColFree;
+    ctx.golden_max[col][kRowSS] = 25;
+    int8_t ss, ls; middle_sc(board, ctx, col, ss, ls);
+    EXPECT_EQ(ls, 26);
+}
+
+TEST(BuildScMiddleTest, LS_Threshold_Uses_Max_Of_LS_And_SS_Gmax) {
+    // golden_max[LS]=28 dominates max_ss+1=26 → threshold stays 28.
+    BoardState board; GameContext ctx; make_clean_middle(board, ctx);
+    const int col = kColFree;
+    ctx.golden_max[col][kRowSS] = 25;
+    ctx.golden_max[col][kRowLS] = 28;
+    int8_t ss, ls; middle_sc(board, ctx, col, ss, ls);
+    EXPECT_EQ(ls, 28);
+}
+
+TEST(BuildScMiddleTest, SS_Forced_Scratch_Under_Filled_LS_And_Equal_Golden) {
+    // We placed LS=25; opponent then placed SS=25 (golden_max[SS]=25). Our SS
+    // must be >= 25 (golden) and < 25 (our LS) → impossible → forced scratch.
+    BoardState board; GameContext ctx; make_clean_middle(board, ctx);
+    const int col = kColFree;
+    board.cells[0][col][kRowLS] = 25;
+    ctx.golden_max[col][kRowLS] = 25;
+    ctx.golden_max[col][kRowSS] = 25;
+    int8_t ss, ls; middle_sc(board, ctx, col, ss, ls);
+    EXPECT_EQ(ss, 31);   // forced scratch
+    EXPECT_EQ(ls, -1);   // LS filled
+}
+
+TEST(BuildScMiddleTest, SS_Forced_Scratch_Under_Filled_LS_20_Floor) {
+    // LS=20 filled, no SS golden: SS must be < 20 but its natural floor is 20
+    // → forced scratch (the floor=20 edge).
+    BoardState board; GameContext ctx; make_clean_middle(board, ctx);
+    const int col = kColFree;
+    board.cells[0][col][kRowLS] = 20;
+    ctx.golden_max[col][kRowLS] = 20;
+    int8_t ss, ls; middle_sc(board, ctx, col, ss, ls);
+    EXPECT_EQ(ss, 31);
+}
+
+TEST(BuildScMiddleTest, SS_Band_Open_Under_Filled_LS) {
+    // LS=25 filled, no SS golden: SS band [20,24] still legal → NOT forced.
+    // (The min-threshold state can't encode the < 25 cap, so it stays no_min.)
+    BoardState board; GameContext ctx; make_clean_middle(board, ctx);
+    const int col = kColFree;
+    board.cells[0][col][kRowLS] = 25;
+    ctx.golden_max[col][kRowLS] = 25;
+    int8_t ss, ls; middle_sc(board, ctx, col, ss, ls);
+    EXPECT_EQ(ss, 0);    // no_min (band still open)
+    EXPECT_EQ(ls, -1);
 }

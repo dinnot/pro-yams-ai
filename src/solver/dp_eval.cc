@@ -72,12 +72,27 @@ void build_Sc(int p, int col, const BoardStateT<Traits>& board,
     } else {
         Sc_M[0] = snap_gmax(ctx.golden_max[col][kRowSS], kValsMid, 13);
         if (ctx.ls_scratched[p][col]) Sc_M[0] = 31;
+        // SS must stay strictly below a filled LS (scoring.cc:67-69). With SS's
+        // natural floor of 20, no legal SS sum remains once the effective lower
+        // bound reaches the filled LS value → forced scratch. (A still-open
+        // band below LS is not representable in this min-threshold state, so SS
+        // EV is mildly overestimated there.)
+        int8_t ls_val = board.cells[p][col][kRowLS];
+        if (ls_val != kCellEmpty && ls_val > 0) {
+            int ss_floor = std::max(20, static_cast<int>(ctx.golden_max[col][kRowSS]));
+            if (ss_floor >= ls_val) Sc_M[0] = 31;
+        }
         ++EM;
     }
     if (board.cells[p][col][kRowLS] != kCellEmpty) {
         Sc_M[1] = -1;
     } else {
-        Sc_M[1] = snap_gmax(ctx.golden_max[col][kRowLS], kValsMid, 13);
+        // LS must beat both the existing LS gmax and the existing SS gmax
+        // (scoring.cc:77-80): LS > max_SS ⇒ min threshold = max_ss + 1.
+        int min_ls = ctx.golden_max[col][kRowLS];
+        int max_ss = ctx.golden_max[col][kRowSS];
+        if (max_ss > 0 && max_ss + 1 > min_ls) min_ls = max_ss + 1;
+        Sc_M[1] = snap_gmax(min_ls, kValsMid, 13);
         if (ctx.ss_scratched[p][col]) Sc_M[1] = 31;
         ++EM;
     }

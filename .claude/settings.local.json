@@ -351,7 +351,12 @@
       "Bash(cmake --build . --target tensor_tests -j)",
       "Bash(OMP_NUM_THREADS=2 ./tests/engine/tensor_tests)",
       "Bash(sed -n '349,412p' src/engine/tensor.cc)",
-      "Bash(sed -n '1,80p' tests/engine/tensor_test.cc)"
+      "Bash(sed -n '1,80p' tests/engine/tensor_test.cc)",
+      "Bash(cmake --build . --target dp_tables_test scoring_test tensor_test)",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target solver_tests engine_tests)",
+      "Bash(/home/sorin/pro_yams_ai/build/bin/solver_tests --gtest_filter='MutualDestructionTest.*:BuildScMiddleTest.*:SnapGmaxTest.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/solver/solver_tests --gtest_filter='MutualDestructionTest.*:BuildScMiddleTest.*:SnapGmaxTest.*')",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='TensorTest.SS_*')"
     ]
   }
 }

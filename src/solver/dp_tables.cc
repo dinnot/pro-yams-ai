@@ -353,7 +353,7 @@ float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T) 
 namespace {
 
 constexpr uint32_t kCacheMagic   = 0x59414D44;  // "DMAY"
-constexpr uint32_t kCacheVersion = 3;           // v3: E[X^2] for variance
+constexpr uint32_t kCacheVersion = 4;           // v4: SS forced-scratch under filled LS (middle DP)
 
 struct CacheHeader {
     uint32_t magic;

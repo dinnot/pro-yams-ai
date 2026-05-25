@@ -208,9 +208,16 @@ static void compute_pc_data(const BoardStateT<Traits>& board,
         int golden_min = ctx.golden_max[col][row];
         if (golden_min == 0) golden_min = 1;
         if (row == kRowSS) {
+            // SS must stay strictly below a filled LS (scoring.cc:67-69). With
+            // SS's natural floor of 20, no legal SS sum remains once the
+            // effective lower bound reaches the filled LS value → forced
+            // scratch. (A still-open band below LS is not modelled here; p_one
+            // then mildly overestimates, matching the DP's min-threshold
+            // limitation.)
             int8_t ls_val = board.cells[p][col][kRowLS];
-            if (ls_val != kCellEmpty && ls_val > 0 && golden_min >= ls_val) {
-                d.p_one[row] = 0.0f; continue;
+            if (ls_val != kCellEmpty && ls_val > 0) {
+                int ss_floor = std::max(20, static_cast<int>(ctx.golden_max[col][kRowSS]));
+                if (ss_floor >= ls_val) { d.p_one[row] = 0.0f; continue; }
             }
         }
         if (row == kRowLS) {
