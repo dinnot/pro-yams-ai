@@ -356,7 +356,23 @@
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target solver_tests engine_tests)",
       "Bash(/home/sorin/pro_yams_ai/build/bin/solver_tests --gtest_filter='MutualDestructionTest.*:BuildScMiddleTest.*:SnapGmaxTest.*')",
       "Bash(/home/sorin/pro_yams_ai/build/tests/solver/solver_tests --gtest_filter='MutualDestructionTest.*:BuildScMiddleTest.*:SnapGmaxTest.*')",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='TensorTest.SS_*')"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter='TensorTest.SS_*')",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target solver_tests)",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.*')",
+      "Bash(OMP_NUM_THREADS=1 build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.FilledLsCapsSsEv_Monotonic')",
+      "Bash(OMP_NUM_THREADS=1 OMP_WAIT_POLICY=passive build/tests/solver/solver_tests)",
+      "Bash(OMP_NUM_THREADS=1 build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.*')",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(pkill -9 -f solver_tests)",
+      "Bash(time build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.*')",
+      "Bash(g++ -std=c++17 -O2 -I src /tmp/dbg.cc -o /tmp/dbg build/src/solver/libsolver.a build/src/engine/libengine.a -fopenmp)",
+      "Bash(/tmp/dbg)",
+      "Bash(timeout 200 build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.FilledLsCapsSsEv_Monotonic:MiddleDPTest.SsForcedScratchUnderFilledLsEqualGolden_ZeroEv')",
+      "Bash(timeout 200 build/tests/solver/solver_tests --gtest_filter='MiddleDPTest.*')",
+      "Bash(ctest --output-on-failure --timeout 1200)",
+      "Bash(echo \"CTEST_EXIT=$?\")",
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build --target dp_tables_monotonicity_test)",
+      "Bash(echo \"launched PID $!\")"
     ]
   }
 }

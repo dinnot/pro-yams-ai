@@ -27,7 +27,7 @@ Variant get_variant(int col);
 template <typename Traits>
 void build_Sc(int p, int col, const BoardStateT<Traits>& board,
               const GameContextT<Traits>& ctx,
-              int8_t Sc_U[6], int8_t Sc_M[2], int8_t Sc_L[5],
+              int8_t Sc_U[6], int8_t Sc_M[3], int8_t Sc_L[5],
               int& EU, int& EM, int& EL);
 
 // Apportion T turns across upper/middle/lower DP queries proportional to

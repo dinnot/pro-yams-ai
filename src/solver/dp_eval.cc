@@ -52,7 +52,7 @@ Variant get_variant(int col) {
 template <typename Traits>
 void build_Sc(int p, int col, const BoardStateT<Traits>& board,
               const GameContextT<Traits>& ctx,
-              int8_t Sc_U[6], int8_t Sc_M[2], int8_t Sc_L[5],
+              int8_t Sc_U[6], int8_t Sc_M[3], int8_t Sc_L[5],
               int& EU, int& EM, int& EL) {
     EU = 0; EM = 0; EL = 0;
 
@@ -67,20 +67,19 @@ void build_Sc(int p, int col, const BoardStateT<Traits>& board,
         }
     }
 
+    Sc_M[2] = 0;  // SS upper-bound cap; set from a filled LS below
     if (board.cells[p][col][kRowSS] != kCellEmpty) {
         Sc_M[0] = -1;
     } else {
         Sc_M[0] = snap_gmax(ctx.golden_max[col][kRowSS], kValsMid, 13);
         if (ctx.ls_scratched[p][col]) Sc_M[0] = 31;
-        // SS must stay strictly below a filled LS (scoring.cc:67-69). With SS's
-        // natural floor of 20, no legal SS sum remains once the effective lower
-        // bound reaches the filled LS value → forced scratch. (A still-open
-        // band below LS is not representable in this min-threshold state, so SS
-        // EV is mildly overestimated there.)
+        // A filled LS bounds SS strictly from above (SS < LS, scoring.cc:67-69):
+        // LS <= 20 makes SS impossible (its natural floor is 20); LS in 21..29
+        // is a binding cap; LS >= 30 is non-binding (SS raw maxes at 29).
         int8_t ls_val = board.cells[p][col][kRowLS];
         if (ls_val != kCellEmpty && ls_val > 0) {
-            int ss_floor = std::max(20, static_cast<int>(ctx.golden_max[col][kRowSS]));
-            if (ss_floor >= ls_val) Sc_M[0] = 31;
+            if (ls_val <= 20)      Sc_M[0] = 31;
+            else if (ls_val <= 29) Sc_M[2] = ls_val;
         }
         ++EM;
     }
@@ -127,7 +126,7 @@ float get_E_raw(int p, int col, int T, const BoardStateT<Traits>& board,
                 const GameContextT<Traits>& ctx, const DPTables& dp) {
     if (dp.dp_t1.empty()) return 0.0f;
 
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int8_t Sc_U[6], Sc_M[3], Sc_L[5];
     int EU, EM, EL;
     build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     int TU, TM, TL;
@@ -152,7 +151,7 @@ float get_P_clean(int p, int col, int T, const BoardStateT<Traits>& board,
     if (dp.dp_t1.empty()) return 0.0f;
     if (ctx.lower_has_scratch[p][col]) return 0.0f;
 
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int8_t Sc_U[6], Sc_M[3], Sc_L[5];
     int EU, EM, EL;
     build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     int TU, TM, TL;
@@ -177,7 +176,7 @@ float get_E_raw_var(int p, int col, int T, const BoardStateT<Traits>& board,
                     const GameContextT<Traits>& ctx, const DPTables& dp) {
     if (dp.dp_t1.empty()) return 0.0f;
 
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int8_t Sc_U[6], Sc_M[3], Sc_L[5];
     int EU, EM, EL;
     build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
 
@@ -206,11 +205,11 @@ float get_E_raw_var(int p, int col, int T, const BoardStateT<Traits>& board,
 
 template void build_Sc<Yams1v1>(int, int, const BoardStateT<Yams1v1>&,
                                 const GameContextT<Yams1v1>&,
-                                int8_t[6], int8_t[2], int8_t[5],
+                                int8_t[6], int8_t[3], int8_t[5],
                                 int&, int&, int&);
 template void build_Sc<Yams2v2>(int, int, const BoardStateT<Yams2v2>&,
                                 const GameContextT<Yams2v2>&,
-                                int8_t[6], int8_t[2], int8_t[5],
+                                int8_t[6], int8_t[3], int8_t[5],
                                 int&, int&, int&);
 template float get_E_raw<Yams1v1>(int, int, int, const BoardStateT<Yams1v1>&,
                                   const GameContextT<Yams1v1>&, const DPTables&);

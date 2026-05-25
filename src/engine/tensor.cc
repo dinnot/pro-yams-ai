@@ -235,7 +235,7 @@ static void compute_pc_data(const BoardStateT<Traits>& board,
         d.p_one[row] = p_one;
     }
 
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int8_t Sc_U[6], Sc_M[3], Sc_L[5];
     int EU, EM, EL;
     build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     d.empty_in_col = EU + EM + EL;

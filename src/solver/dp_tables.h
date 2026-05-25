@@ -111,7 +111,7 @@ private:
 constexpr int kDPNumTurns        = 79;     // T = 0..78
 constexpr int kDPNumVariants     = 5;
 constexpr int kDPUpperStates     = 6400;
-constexpr int kDPMiddleStates    = 169;    // 13×13 (incl. 31 = forced scratch)
+constexpr int kDPMiddleStates    = 1690;   // 13(ss_min)×13(ls_min)×10(ss_cap)
 constexpr int kDPLowerStates     = 17640;
 constexpr int kDPUpperRMax       = 100;
 constexpr int kDPUpperSumMax     = 105;
@@ -165,16 +165,21 @@ struct DPTables {
 // Encoders / Decoders
 // Invalid (un-mapped) values in Sc clamp to index 1 (== a "0" constraint).
 //
-// Middle Sc convention: SS / LS each take values in
-//   {-1 (filled), 0 (no constraint), 21..30 (golden threshold),
-//    31 (forced scratch — mutual destruction)}.
+// Middle Sc convention: a 3-slot state {ss_min, ls_min, ss_cap}.
+//   Sc[0] ss_min, Sc[1] ls_min each take values in
+//     {-1 (filled), 0 (no constraint), 21..30 (golden threshold),
+//      31 (forced scratch — mutual destruction)}.
+//   Sc[2] ss_cap is the strict upper bound imposed on SS by an already-filled
+//     LS (SS must be < LS): 0 (no binding cap, i.e. LS open / LS >= 30) or
+//     21..29 (SS < this value). A filled LS <= 20 makes SS impossible and is
+//     expressed via Sc[0]=31 instead, so the cap range starts at 21.
 // At runtime, callers must pass Sc[LS]=31 if ctx.ss_scratched is true and
 // LS is still empty (and likewise Sc[SS]=31 if ctx.ls_scratched is true).
 // =========================================================================
 int  encode_upper (const int8_t Sc[6]);
 void decode_upper (int id, int8_t Sc[6]);
-int  encode_middle(int8_t ss, int8_t ls);
-void decode_middle(int id, int8_t Sc[2]);
+int  encode_middle(int8_t ss, int8_t ls, int8_t ss_cap);
+void decode_middle(int id, int8_t Sc[3]);
 int  encode_lower (const int8_t Sc[5]);
 void decode_lower (int id, int8_t Sc[5]);
 
@@ -198,9 +203,9 @@ void init_dp_tables(DPTables& dp,
 float get_upper_prob (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int R);
 float get_upper_ev   (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
 float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
-float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
-float get_middle_ev  (const DPTables& dp, Variant v, const int8_t Sc[2], int T);
-float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
+float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[3], int T);
+float get_middle_ev  (const DPTables& dp, Variant v, const int8_t Sc[3], int T);
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[3], int T);
 float get_lower_prob (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 float get_lower_ev   (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T);

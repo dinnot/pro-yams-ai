@@ -212,13 +212,23 @@ void decode_upper(int id, int8_t Sc[6]) {
     Sc[5] = kVals6s[id % 4];
 }
 
-int encode_middle(int8_t ss, int8_t ls) {
-    return enc_mid(ss) + 13 * enc_mid(ls);
+// SS upper-bound cap encoding: 0 = no binding cap; 21..29 = SS must be < cap.
+// (A filled LS <= 20 → SS impossible → expressed via ss_min=31, not the cap;
+//  a filled LS >= 30 → non-binding since SS raw maxes at 29 → cap 0.)
+inline int enc_cap(int8_t cap) {
+    if (cap >= 21 && cap <= 29) return cap - 20;  // 21->1 .. 29->9
+    return 0;                                     // 0 / 20 / >=30 → no cap
+}
+constexpr int8_t kCapVals[] = {0, 21, 22, 23, 24, 25, 26, 27, 28, 29};  // 10
+
+int encode_middle(int8_t ss, int8_t ls, int8_t ss_cap) {
+    return enc_mid(ss) + 13 * enc_mid(ls) + 169 * enc_cap(ss_cap);
 }
 
-void decode_middle(int id, int8_t Sc[2]) {
-    Sc[0] = kValsMid[id % 13];
-    Sc[1] = kValsMid[id / 13];
+void decode_middle(int id, int8_t Sc[3]) {
+    Sc[0] = kValsMid[id % 13]; id /= 13;
+    Sc[1] = kValsMid[id % 13]; id /= 13;
+    Sc[2] = kCapVals[id % 10];
 }
 
 int encode_lower(const int8_t Sc[5]) {
@@ -304,14 +314,14 @@ float get_upper_ev(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int
     return dp.dp_t4[dp_idx_t4(t, static_cast<int>(v), sc, s)];
 }
 
-float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].prob_no_scratch;
 }
 
-float get_middle_ev(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_ev(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].expected_pts;
 }
@@ -335,8 +345,8 @@ float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, 
     return dp.dp_t5[dp_idx_t4(t, static_cast<int>(v), sc, s)];
 }
 
-float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].expected_pts_sq;
 }
