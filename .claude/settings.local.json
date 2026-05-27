@@ -372,7 +372,8 @@
       "Bash(ctest --output-on-failure --timeout 1200)",
       "Bash(echo \"CTEST_EXIT=$?\")",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target dp_tables_monotonicity_test)",
-      "Bash(echo \"launched PID $!\")"
+      "Bash(echo \"launched PID $!\")",
+      "Bash(DP_TABLES_CACHE=/home/sorin/pro_yams_ai/cache/dp_tables/dp_verify_tmp.bin /tmp/chk)"
     ]
   }
 }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -241,10 +242,12 @@ void init_precomputed_tables(PrecomputedTables& tables) {
     // Step 5: probability tables (mini-solver DP, depends on transitions + score tables)
     build_probability_tables(tables);
 
-    // Step 6: DP tables (V2.1) — auto-load from cache when present.
-    // If no cache is found, leave dp_tables empty; DP-dependent tensor
-    // features will fall back to safe defaults (0).
-    {
+    // Step 6: DP tables (V2.1). Load from cache when present; otherwise compute
+    // the tables once and persist them so the next process loads instantly.
+    // (Set PRO_YAMS_NO_DP=1 to skip this entirely and leave dp_tables empty —
+    // DP-dependent tensor features then fall back to safe defaults of 0. Useful
+    // for fast unit tests that do not exercise DP features.)
+    if (const char* skip = std::getenv("PRO_YAMS_NO_DP"); !(skip && skip[0] && skip[0] != '0')) {
         std::vector<std::string> candidates;
         if (const char* env = std::getenv("DP_TABLES_CACHE"); env && env[0]) {
             candidates.emplace_back(env);
@@ -252,12 +255,27 @@ void init_precomputed_tables(PrecomputedTables& tables) {
         candidates.emplace_back("cache/dp_tables/dp_v1.bin");
         candidates.emplace_back("../cache/dp_tables/dp_v1.bin");
         candidates.emplace_back("/home/sorin/pro_yams_ai/cache/dp_tables/dp_v1.bin");
+
+        std::string existing;
         for (const auto& path : candidates) {
             std::error_code ec;
-            if (std::filesystem::exists(path, ec)) {
-                init_dp_tables(tables.dp_tables, tables, path);
-                break;
-            }
+            if (std::filesystem::exists(path, ec)) { existing = path; break; }
+        }
+
+        if (!existing.empty()) {
+            // Loads if valid; init_dp_tables recomputes + re-saves on a stale
+            // (version / size mismatch) cache.
+            init_dp_tables(tables.dp_tables, tables, existing);
+        } else {
+            // No cache anywhere → compute now and save to the preferred path so
+            // subsequent processes load it instantly. This is a one-time cost
+            // (~1-2 min, ~3.4 GB on disk).
+            const std::string& target = candidates.front();
+            std::fprintf(stderr,
+                "[pro_yams] DP cache not found; computing tables and saving to "
+                "'%s' (one-time, ~1-2 min)...\n", target.c_str());
+            init_dp_tables(tables.dp_tables, tables, target);
+            std::fprintf(stderr, "[pro_yams] DP cache written.\n");
         }
     }
 }

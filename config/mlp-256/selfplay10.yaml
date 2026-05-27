@@ -1,0 +1,61 @@
+num_steps: 500000
+
+training:
+  replay_capacity: 1000000
+  min_buffer_size: 100000
+  train_batch_size: 8192
+  train_steps_per_collect: 0.041
+  model_swap_interval: 100
+  checkpoint_interval: 25000
+  max_checkpoints: 10
+
+  td_mode: tdlambda
+  td_lambda: 0.95
+
+  initial_temperature: 0.001
+  min_temperature: 0.001
+  temperature_decay: 1.0
+  temperature_decay_start_step: 0
+  temperature_decay_start_value: 0.001
+  initial_epsilon: 0
+
+  eval_interval: 25000
+  eval_games: 10000
+
+  lr_backoff_enabled: true
+  lr_backoff_factor: 0.7
+  lr_backoff_min_lr: 0.0000001
+
+  checkpoint_dir: checkpoints/mlp-256/selfplay10
+  log_dir: ./logs/mlp-256/selfplay10
+  log_path: ./logs/mlp-256/selfplay10/training_log.csv
+  debug_mode: false
+
+  initial_heuristic_weight: 0
+  heuristic_decay_steps: 0
+  logs_on_start: true
+
+  use_duel_margin_maximization: false
+  duel_margin_maximization_scale: 2000
+  use_pbrs: false
+  pbrs_upper_reward: 0.1
+  pbrs_clean_reward: 0.2
+
+  past_opponent_probability: 0.2
+
+  self_play:
+    max_inference_batch: 4096
+    min_games_per_batch: 2
+    batch_timeout_ms: 5
+    num_workers: 24
+    num_games: 2048
+    num_coordinators: 3
+
+  model:
+    input_size: 986
+    hidden_layers: 3
+    hidden_width: 256
+    learning_rate: 0.00045
+    output_activation: sigmoid
+    loss_function: bce
+    architecture: mlp
