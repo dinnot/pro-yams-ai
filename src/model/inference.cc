@@ -1,7 +1,7 @@
 #include "model/inference.h"
 
 #include <cassert>
-#include "engine/tensor.h"  // kTensorSize
+#include "model/pro_yams_net.h"
 
 // ---------------------------------------------------------------------------
 // InferenceEngine
@@ -12,17 +12,20 @@ InferenceEngine::InferenceEngine(std::shared_ptr<ProYamsNet> model,
     : model_(std::move(model)), device_(device) {
     model_->to(device_);
     model_->eval();
+    input_size_ = model_->config().input_size;
 }
 
 void InferenceEngine::batch_inference(const float* input, int batch_size,
                                        double* output) {
     assert(batch_size > 0);
 
-    // Wrap raw float array as a CPU tensor (zero-copy)
+    // Wrap raw float array as a CPU tensor (zero-copy). The model's
+    // configured input_size (set at construction) drives the shape so a 2v2
+    // engine with kTensorSize=2126 works alongside a 1v1 engine with 986.
     auto options = torch::TensorOptions().dtype(torch::kFloat32);
     auto input_tensor = torch::from_blob(
         const_cast<float*>(input),
-        {batch_size, kTensorSize},
+        {batch_size, input_size_},
         options
     );
 

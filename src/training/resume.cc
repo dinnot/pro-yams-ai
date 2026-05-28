@@ -43,18 +43,11 @@ std::string find_latest_checkpoint_stem(const std::string& dir) {
 // resume_from_checkpoint
 // ---------------------------------------------------------------------------
 
-bool resume_from_checkpoint(TrainingLoop& loop, const std::string& dir) {
+template <typename Traits>
+bool resume_from_checkpoint(TrainingLoopT<Traits>& loop, const std::string& dir) {
     std::string stem = find_latest_checkpoint_stem(dir);
     if (stem.empty()) return false;
 
-    // Full resume requires the optimizer state and the replay buffer to
-    // exist alongside the model. Without the optimizer, Adam's moving
-    // averages reset to zero and the first update is an unscaled gradient
-    // step that can rip a converged network out of its local minimum.
-    // Without the replay buffer, the run refills ~1M samples against the
-    // just-loaded network before training resumes, distorting the on-policy
-    // distribution. Both have been observed to cause severe regression.
-    // Refuse to proceed and tell the user how to opt out explicitly.
     namespace fs = std::filesystem;
     if (!fs::exists(stem + ".optimizer")) {
         throw std::runtime_error(
@@ -72,7 +65,6 @@ bool resume_from_checkpoint(TrainingLoop& loop, const std::string& dir) {
             "instead if you intend to start a fresh buffer from these weights.");
     }
 
-    // Restore model + optimizer + scalar state.
     int    step        = 0;
     double temperature = 1.0;
     double epsilon     = 0.0;
@@ -90,22 +82,27 @@ bool resume_from_checkpoint(TrainingLoop& loop, const std::string& dir) {
 // init_from_checkpoint
 // ---------------------------------------------------------------------------
 
-bool init_from_checkpoint(TrainingLoop& loop, const std::string& path) {
+template <typename Traits>
+bool init_from_checkpoint(TrainingLoopT<Traits>& loop, const std::string& path) {
     namespace fs = std::filesystem;
 
     std::string stem;
     if (fs::is_directory(path)) {
-        // Directory — find the latest checkpoint inside it.
         stem = find_latest_checkpoint_stem(path);
         if (stem.empty()) return false;
     } else {
-        // Assume it's a file stem (e.g. "checkpoints/checkpoint_step_5000").
-        // Verify the .model file exists.
         if (!fs::exists(path + ".model")) return false;
         stem = path;
     }
 
-    // Load only the model weights — no optimizer state, no step/temp/epsilon.
     loop.trainer().load_weights(stem);
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// ---------------------------------------------------------------------------
+template bool resume_from_checkpoint<Yams1v1>(TrainingLoopT<Yams1v1>&, const std::string&);
+template bool resume_from_checkpoint<Yams2v2>(TrainingLoopT<Yams2v2>&, const std::string&);
+template bool init_from_checkpoint<Yams1v1>(TrainingLoopT<Yams1v1>&, const std::string&);
+template bool init_from_checkpoint<Yams2v2>(TrainingLoopT<Yams2v2>&, const std::string&);

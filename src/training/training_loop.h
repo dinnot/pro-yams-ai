@@ -4,7 +4,9 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "engine/game_traits.h"
 #include "engine/rng.h"
 #include "model/inference.h"
 #include "model/trainer.h"
@@ -16,22 +18,29 @@
 #include "training/training_config.h"
 
 // ---------------------------------------------------------------------------
-// TrainingLoop — orchestrates self-play data generation and gradient steps.
+// TrainingLoopT<Traits> — orchestrates self-play data generation and gradient
+// steps.
 //
 // Thread model: run() is called from the main thread.  Internally it owns a
-// SelfPlayOrchestrator (N worker threads + 1 coordinator thread) and drives
+// SelfPlayOrchestratorT (N worker threads + 1 coordinator thread) and drives
 // the training pipeline:
 //
 //   collect completed games → extract samples → fill replay buffer
 //   → sample mini-batch → ModelTrainer::train_step()
 //   → periodically swap inference model and save checkpoints
 // ---------------------------------------------------------------------------
-class TrainingLoop {
+template <typename Traits>
+class TrainingLoopT {
 public:
-    TrainingLoop(const TrainingConfig& config,
-                 const PrecomputedTables& tables,
-                 torch::Device training_device,
-                 torch::Device inference_device);
+    using Instance = GameInstanceT<Traits>;
+    using Sample   = TrainingSampleT<Traits>;
+    using Buffer   = ReplayBufferT<Traits>;
+    using Orchestr = SelfPlayOrchestratorT<Traits>;
+
+    TrainingLoopT(const TrainingConfig& config,
+                  const PrecomputedTables& tables,
+                  torch::Device training_device,
+                  torch::Device inference_device);
 
     /// Run until `num_steps` training steps have been completed (or stop() is
     /// called).  Blocks until done.
@@ -45,21 +54,19 @@ public:
 
     // --- Accessors for resume_from_checkpoint ---
     ModelTrainer&  trainer()        { return *trainer_; }
-    ReplayBuffer&  replay_buffer()  { return *buffer_;  }
+    Buffer&        replay_buffer()  { return *buffer_;  }
     void set_training_step(int step)    { training_step_ = step; }
     void set_temperature(double t)      { temperature_   = t;    }
     void set_epsilon(double e)          { epsilon_       = e;    }
 
 private:
-    // Returns the number of games collected.
-    int collect_completed_games();
+    int  collect_completed_games();
     void do_training_step();
     void maybe_swap_model();
     void maybe_checkpoint();
     void maybe_evaluate();
+    void maybe_backoff_learning_rate(double win_rate);
 
-    // Pick a random checkpoint from disk and load its weights into the
-    // opponent inference engine. No-op if no checkpoints exist yet.
     void refresh_opponent_model();
 
     TrainingConfig            config_;
@@ -67,14 +74,14 @@ private:
     torch::Device             train_device_;
     torch::Device             infer_device_;
 
-    std::unique_ptr<ReplayBuffer>           buffer_;
+    std::unique_ptr<Buffer>                 buffer_;
     std::unique_ptr<ModelTrainer>           trainer_;
     std::shared_ptr<InferenceEngine>        inference_;
-    std::shared_ptr<InferenceEngine>        opponent_inference_;  // null when feature disabled
-    std::unique_ptr<ModelTrainer>           opponent_loader_;     // owns the past-opponent model + lets us load weights
-    bool                                    opponent_ready_ = false;  // true once a checkpoint has been loaded into opponent_inference_
+    std::shared_ptr<InferenceEngine>        opponent_inference_;
+    std::unique_ptr<ModelTrainer>           opponent_loader_;
+    bool                                    opponent_ready_ = false;
     RNG                                     opponent_rng_{0xA5A5A5A5C3C3C3C3ULL};
-    std::unique_ptr<SelfPlayOrchestrator>   orchestrator_;
+    std::unique_ptr<Orchestr>               orchestrator_;
 
     SolverConfig  solver_config_;
     double        temperature_     = 1.0;
@@ -84,7 +91,7 @@ private:
     int           games_played_    = 0;
     long          total_samples_trained_ = 0;
     double        last_loss_       = 0.0;
-    
+
     std::chrono::steady_clock::time_point start_time_;
 
     RNG           sample_rng_;
@@ -95,6 +102,17 @@ private:
 
     double last_eval_win_rate_ = 0.0;
 
+    // --- Learning-rate back-off state (see config.lr_backoff_*) ---
+    double lr_backoff_best_win_rate_  = -1.0;  // best eval win rate seen so far
+    int    lr_backoff_no_improve_     = 0;     // consecutive non-improving evals
+
     static constexpr int kMaxCollectBatch = 512;
-    GameInstance* collect_buf_[kMaxCollectBatch];
+    Instance* collect_buf_[kMaxCollectBatch];
+
+    std::vector<float>  train_states_;
+    std::vector<double> train_targets_;
 };
+
+// Backward-compat aliases.
+using TrainingLoop    = TrainingLoopT<Yams1v1>;
+using TrainingLoop2v2 = TrainingLoopT<Yams2v2>;

@@ -36,6 +36,13 @@ public:
     /// @return Win probability tensor of shape [batch_size, 1], values in (0,1)
     torch::Tensor forward(torch::Tensor x);
 
+    /// Pre-activation forward — same hidden stack, but without the final
+    /// sigmoid/tanh. Used by the trainer to feed raw logits to numerically
+    /// stable loss functions (e.g. binary_cross_entropy_with_logits).
+    /// Output values are unbounded (raw logits); apply sigmoid/tanh
+    /// externally if you need probabilities.
+    torch::Tensor forward_logits(torch::Tensor x);
+
     /// Access the configuration used to build this model.
     const ModelConfig& config() const { return config_; }
 

@@ -24,4 +24,5 @@ document.addEventListener('DOMContentLoaded', () => {
     Dashboard.init();
     Comparison.init();
     Tournament.init();
+    Games.init();
 });

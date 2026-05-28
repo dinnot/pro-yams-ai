@@ -5,6 +5,7 @@
 
 #include <torch/torch.h>
 
+#include "engine/game_traits.h"
 #include "eval/tournament.h"
 #include "model/model_config.h"
 #include "model/pro_yams_net.h"
@@ -13,12 +14,44 @@
 #include "ui/server.h"
 #include "ui/session_manager.h"
 
+namespace {
+
+template <typename Traits>
+int run_server_variant(int port, const std::string& static_dir,
+                       const std::string& log_dir,
+                       const std::string& checkpoints_dir,
+                       const std::string& games_dir,
+                       const PrecomputedTables& tables,
+                       ProYamsNet* model, torch::Device device) {
+    SessionManagerT<Traits> sessions(tables, model, device);
+    TournamentManagerT<Traits> tournament(tables, device);
+    // No recorder in the admin UI — it only reads the games directory written
+    // by the play servers.
+    UIServerT<Traits> server(port, static_dir, sessions, log_dir,
+                              checkpoints_dir, &tournament,
+                              /*recorder=*/nullptr, games_dir);
+
+    const char* tag = (Traits::kNumPlayers == 4) ? "(2v2)" : "";
+    std::cout << "Pro Yams UI " << tag << " running at http://localhost:" << port << "\n";
+    std::cout << "Frontend:        " << static_dir      << "\n";
+    std::cout << "Log dir:         " << log_dir         << "\n";
+    std::cout << "Checkpoints dir: " << checkpoints_dir << "\n";
+    std::cout << "Games dir:       " << games_dir       << "\n";
+    std::cout << "Press Ctrl+C to stop.\n";
+    server.start();
+    return 0;
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
     std::string checkpoint_path;
     std::string log_dir         = ".";
     std::string static_dir      = "./static";
-    std::string checkpoints_dir;   // empty = derive default below
+    std::string checkpoints_dir;
+    std::string games_dir       = "./recorded_games";
     int         port            = 8080;
+    std::string variant         = "1v1";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -26,18 +59,16 @@ int main(int argc, char* argv[]) {
         else if (arg == "--log_dir"         && i + 1 < argc) log_dir         = argv[++i];
         else if (arg == "--static_dir"      && i + 1 < argc) static_dir      = argv[++i];
         else if (arg == "--checkpoints_dir" && i + 1 < argc) checkpoints_dir = argv[++i];
+        else if (arg == "--games_dir"       && i + 1 < argc) games_dir       = argv[++i];
         else if (arg == "--port"            && i + 1 < argc) port            = std::stoi(argv[++i]);
+        else if (arg == "--variant"         && i + 1 < argc) variant         = argv[++i];
+        else if (arg == "--game_variant"    && i + 1 < argc) variant         = argv[++i];
     }
 
-    // Default the tournament checkpoints directory to the parent of the
-    // loaded checkpoint, so users who pass --checkpoint also get a sensible
-    // dropdown without having to set --checkpoints_dir explicitly.
     if (checkpoints_dir.empty()) {
         if (!checkpoint_path.empty()) {
             std::filesystem::path p(checkpoint_path);
             std::filesystem::path parent = p.parent_path();
-            // If the checkpoint sits inside a "...checkpoints/<run>/..." tree,
-            // prefer the "checkpoints" root so all runs show up.
             std::filesystem::path candidate = parent.parent_path();
             if (!candidate.empty() && candidate.filename() == "checkpoints") {
                 checkpoints_dir = candidate.string();
@@ -49,15 +80,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Limit PyTorch threading for a UI process (not training).
     torch::set_num_threads(1);
 
-    // Build precomputed tables (takes ~350ms).
     std::cout << "Building solver tables...\n";
     PrecomputedTables tables;
     init_precomputed_tables(tables);
 
-    // Load NN model if checkpoint provided.
     torch::Device device = get_device();
     std::shared_ptr<ProYamsNet> model;
 
@@ -79,21 +107,12 @@ int main(int argc, char* argv[]) {
         std::cout << "No checkpoint — NN bot unavailable (heuristic-only mode).\n";
     }
 
-    // Create session manager.
-    SessionManager sessions(tables, model.get(), device);
-
-    // Tournament manager — runs games asynchronously off the HTTP thread.
-    TournamentManager tournament(tables, device);
-
-    // Start HTTP server.
-    UIServer server(port, static_dir, sessions, log_dir, checkpoints_dir,
-                    &tournament);
-    std::cout << "Pro Yams UI running at http://localhost:" << port << "\n";
-    std::cout << "Frontend:        " << static_dir      << "\n";
-    std::cout << "Log dir:         " << log_dir         << "\n";
-    std::cout << "Checkpoints dir: " << checkpoints_dir << "\n";
-    std::cout << "Press Ctrl+C to stop.\n";
-    server.start();  // Blocks until stopped.
-
-    return 0;
+    if (variant == "2v2") {
+        return run_server_variant<Yams2v2>(port, static_dir, log_dir,
+                                            checkpoints_dir, games_dir, tables,
+                                            model.get(), device);
+    }
+    return run_server_variant<Yams1v1>(port, static_dir, log_dir,
+                                        checkpoints_dir, games_dir, tables,
+                                        model.get(), device);
 }

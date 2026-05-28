@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -7,6 +8,8 @@
 
 #include "engine/game_context.h"
 #include "engine/game_flow.h"
+#include "engine/game_traits.h"
+#include "model/model_config.h"
 #include "ui/game_session.h"
 
 // ---------------------------------------------------------------------------
@@ -26,11 +29,16 @@ inline const char* row_name(int row) {
 
 // ---------------------------------------------------------------------------
 // Serialize the full game state of a session to JSON.
+//
+// The output includes a top-level "game_variant" field ("1v1" or "2v2") and
+// a "num_players" count so the frontend can switch layouts. Player boards
+// are emitted as player0..playerN-1, where N = Traits::kNumPlayers.
 // ---------------------------------------------------------------------------
-nlohmann::json game_state_to_json(const GameSession& session);
+template <typename Traits>
+nlohmann::json game_state_to_json(const GameSessionT<Traits>& session);
 
 // ---------------------------------------------------------------------------
-// Serialize placement options to JSON.
+// Serialize placement options to JSON. Variant-agnostic.
 // ---------------------------------------------------------------------------
 nlohmann::json options_to_json(
     const std::vector<std::pair<Placement, int>>& options,

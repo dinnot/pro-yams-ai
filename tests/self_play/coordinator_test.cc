@@ -88,10 +88,10 @@ TEST_P(CoordinatorActivationTest, BatchAssembly_DistributesEVs) {
     auto g1 = make_fake_game(bm, 20, 1);
     auto g2 = make_fake_game(bm, 15, 2);
 
-    std::thread ct(coordinator_thread,
+    std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 3 &&
@@ -141,10 +141,10 @@ TEST(CoordinatorTest, BatchOverflow_FlowsToMultipleBatches) {
     auto g0 = make_fake_game(bm, 30, 0);
     auto g1 = make_fake_game(bm, 30, 1);
 
-    std::thread ct(coordinator_thread,
+    std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     // Wait for BOTH games to flow through.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -175,10 +175,10 @@ TEST(CoordinatorTest, Timeout_ProcessesBelowMinBatch) {
 
     auto g = make_fake_game(bm, 8, 0);
 
-    std::thread ct(coordinator_thread,
+    std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (available.size() < 1 &&
@@ -211,10 +211,10 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     BatchManager bm(10, 1000, false, 1); // Timeout is 1ms
     std::atomic<bool> shutdown{false};
 
-    std::thread ct(coordinator_thread,
+    std::thread ct(coordinator_thread<Yams1v1>,
                    std::ref(bm), std::ref(available),
                    std::ref(*engine), std::ref(cfg),
-                   std::ref(shutdown), 0);
+                   std::ref(shutdown), 0, nullptr);
 
     // Pump 1001 games through to trigger the % 1000 reporting.
     // Each game will be a tiny batch.
@@ -250,4 +250,3 @@ TEST(CoordinatorTest, StatsLogging_RespectsDebugSettings) {
     // Clean up
     std::filesystem::remove(cfg.debug_log_path);
 }
-

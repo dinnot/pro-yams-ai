@@ -6,19 +6,22 @@
 #include <limits>
 
 #include "engine/game_flow.h"
+#include "engine/game_traits.h"
 #include "engine/scoring.h"
 
 // ---------------------------------------------------------------------------
 // solver_get_requests
 // ---------------------------------------------------------------------------
 
-void solver_get_requests(const GameState& state, const GameContext& ctx,
+template <typename Traits>
+void solver_get_requests(const GameStateT<Traits>& state,
+                         const GameContextT<Traits>& ctx,
                          const PrecomputedTables& tables, SolverBuffers& buffers) {
     int p = state.board.current_player;
     buffers.request_count = 0;
     buffers.num_legal_cells = 0;
 
-    const LegalPlacementCache& legal = get_legal_placements(state, ctx);
+    const LegalPlacementCache& legal = get_legal_placements<Traits>(state, ctx);
 
     for (int i = 0; i < legal.count; ++i) {
         int col = legal.placements[i].column;
@@ -122,7 +125,9 @@ int softmax_sample(const double* values, int count, double temperature, RNG& rng
 // solver_resolve
 // ---------------------------------------------------------------------------
 
-SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
+template <typename Traits>
+SolverResult solver_resolve(const GameStateT<Traits>& state,
+                            const GameContextT<Traits>& ctx,
                             const PrecomputedTables& tables, SolverBuffers& buffers,
                             const SolverConfig& config, RNG& rng) {
     const int p = state.board.current_player;
@@ -441,3 +446,22 @@ SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
 
     return result;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template void solver_get_requests<Yams1v1>(const GameStateT<Yams1v1>&,
+                                           const GameContextT<Yams1v1>&,
+                                           const PrecomputedTables&, SolverBuffers&);
+template void solver_get_requests<Yams2v2>(const GameStateT<Yams2v2>&,
+                                           const GameContextT<Yams2v2>&,
+                                           const PrecomputedTables&, SolverBuffers&);
+template SolverResult solver_resolve<Yams1v1>(const GameStateT<Yams1v1>&,
+                                              const GameContextT<Yams1v1>&,
+                                              const PrecomputedTables&, SolverBuffers&,
+                                              const SolverConfig&, RNG&);
+template SolverResult solver_resolve<Yams2v2>(const GameStateT<Yams2v2>&,
+                                              const GameContextT<Yams2v2>&,
+                                              const PrecomputedTables&, SolverBuffers&,
+                                              const SolverConfig&, RNG&);

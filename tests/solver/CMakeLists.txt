@@ -7,6 +7,7 @@ add_executable(solver_tests
     solver_resolve_test.cc
     softmax_test.cc
     dp_tables_test.cc
+    middle_dp_test.cc
 )
 target_link_libraries(solver_tests PRIVATE solver gtest_main)
 add_test(NAME solver_tests COMMAND solver_tests)

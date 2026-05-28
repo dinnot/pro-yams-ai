@@ -152,6 +152,35 @@ TEST_F(TensorTest, FilledCell_GroupCProbabilityIsOne) {
 }
 
 // ---------------------------------------------------------------------------
+// SS forced scratch under a filled LS: with LS=20 and no SS golden, SS must be
+// < 20 but its natural floor is 20 → no legal SS sum → Group C p_one = 0.
+// (Guards the floor=20 edge the old `golden_min >= ls_val` check missed.)
+// ---------------------------------------------------------------------------
+TEST_F(TensorTest, SS_ForcedScratchUnderLS20_GroupCZero) {
+    apply_placement(0, kColFree, kRowLS, 20, gs.board, ctx);
+
+    float out[kTensorSize] = {};
+    generate_tensor(gs.board, ctx, 0, tables, out);
+
+    int ss_idx = kGroupCStart + (kColFree * kNumRows + kRowSS);
+    EXPECT_NEAR(out[ss_idx], 0.0f, 1e-6f) << "SS must be a forced scratch under LS=20";
+}
+
+// ---------------------------------------------------------------------------
+// SS band still open under a filled LS: with LS=25 and no SS golden, SS can
+// still legally land in [20,24] → Group C p_one stays > 0 (no over-zeroing).
+// ---------------------------------------------------------------------------
+TEST_F(TensorTest, SS_BandOpenUnderLS25_GroupCPositive) {
+    apply_placement(0, kColFree, kRowLS, 25, gs.board, ctx);
+
+    float out[kTensorSize] = {};
+    generate_tensor(gs.board, ctx, 0, tables, out);
+
+    int ss_idx = kGroupCStart + (kColFree * kNumRows + kRowSS);
+    EXPECT_GT(out[ss_idx], 0.0f) << "SS band [20,24] is still legal under LS=25";
+}
+
+// ---------------------------------------------------------------------------
 // Perspective flipping: Group A halves swap
 // ---------------------------------------------------------------------------
 TEST_F(TensorTest, PerspectiveFlip_GroupASymmetric) {
@@ -256,4 +285,31 @@ TEST_F(TensorTest, EmptyBoard_PhaseFlagsZero) {
     EXPECT_NEAR(out[phase_start + 0], 0.0f, 1e-6f);  // is_midgame
     EXPECT_NEAR(out[phase_start + 1], 0.0f, 1e-6f);  // is_endgame
     EXPECT_NEAR(out[phase_start + 2], 0.0f, 1e-6f);  // is_final
+}
+
+// ---------------------------------------------------------------------------
+// expected_duel_margin: clean-column bonus folded into the EV margin,
+// weighted by P_clean so the margin trends toward the clean-completed value
+// as P_clean goes 0 -> 1 (instead of stepping when is_clean flips).
+// ---------------------------------------------------------------------------
+TEST(ExpectedDuelMargin, CleanBonusWeightedByPClean) {
+    // Neither side can clean -> pure expected-raw margin.
+    EXPECT_DOUBLE_EQ(expected_duel_margin(300, 300, 0.0f, 0.0f, 10, 1), 0.0);
+    EXPECT_DOUBLE_EQ(expected_duel_margin(320, 300, 0.0f, 0.0f, 10, 1), 200.0);
+
+    // Opp certain to complete a clean column: margin drops by 200*coeff.
+    EXPECT_DOUBLE_EQ(expected_duel_margin(300, 300, 0.0f, 1.0f, 10, 1), -2000.0);
+    // Me certain to clean: symmetric.
+    EXPECT_DOUBLE_EQ(expected_duel_margin(300, 300, 1.0f, 0.0f, 10, 1), +2000.0);
+
+    // Monotone toward the clean-completed value as opp P_clean rises 0->.5->1.
+    double m0 = expected_duel_margin(300, 300, 0.0f, 0.0f, 10, 1);
+    double m1 = expected_duel_margin(300, 300, 0.0f, 0.5f, 10, 1);
+    double m2 = expected_duel_margin(300, 300, 0.0f, 1.0f, 10, 1);
+    EXPECT_GT(m0, m1);
+    EXPECT_GT(m1, m2);
+
+    // Under crush (x2) the clean bonus is 100, and the margin is doubled:
+    // me_adj=300, opp_adj=300+100 -> (300-400)*10*2 = -2000.
+    EXPECT_DOUBLE_EQ(expected_duel_margin(300, 300, 0.0f, 1.0f, 10, 2), -2000.0);
 }

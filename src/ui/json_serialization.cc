@@ -7,12 +7,13 @@
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
-// game_state_to_json
+// game_state_to_json<Traits>
 // ---------------------------------------------------------------------------
 
-json game_state_to_json(const GameSession& session) {
-    const GameState&   gs  = session.state;
-    const BoardState&  bs  = gs.board;
+template <typename Traits>
+json game_state_to_json(const GameSessionT<Traits>& session) {
+    const auto& gs = session.state;
+    const auto& bs = gs.board;
 
     json j;
     j["session_id"]        = session.session_id;
@@ -23,21 +24,22 @@ json game_state_to_json(const GameSession& session) {
     j["rolls_left"]        = static_cast<int>(gs.rolls_left);
     j["waiting_for_human"] = session.waiting_for_human;
 
-    // Dice
+    // Variant metadata so the frontend can pick the right layout.
+    j["game_variant"]      = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
+    j["num_players"]       = Traits::kNumPlayers;
+
     json dice = json::array();
     for (int i = 0; i < kNumDice; ++i)
         dice.push_back(static_cast<int>(gs.dice[i]));
     j["dice"] = dice;
 
-    // Column coefficients
     json coefs = json::array();
     for (int c = 0; c < kNumColumns; ++c)
         coefs.push_back(static_cast<int>(bs.coefficients[c]));
     j["coefficients"] = coefs;
 
-    // Player boards
     json boards = json::object();
-    for (int p = 0; p < kNumPlayers; ++p) {
+    for (int p = 0; p < Traits::kNumPlayers; ++p) {
         json pboard = json::object();
         for (int c = 0; c < kNumColumns; ++c) {
             json col = json::object();
@@ -49,7 +51,6 @@ json game_state_to_json(const GameSession& session) {
     }
     j["boards"] = boards;
 
-    // Turn history
     json hist = json::array();
     for (const auto& turn : session.history) {
         json t;
@@ -69,7 +70,7 @@ json game_state_to_json(const GameSession& session) {
             json hf = json::array();
             if (hi < turn.dice_after_hold.size()) {
                 const int8_t* prev_dice = (hi == 0) ? turn.initial_dice : turn.dice_after_hold[hi - 1].data();
-                
+
                 int8_t held_values[kNumDice];
                 int held_count = 0;
                 for (int i = 0; i < kNumDice; ++i) {
@@ -106,7 +107,6 @@ json game_state_to_json(const GameSession& session) {
         };
         t["score"] = static_cast<int>(turn.score);
 
-        // Debug block (omitted entirely when debug data is absent).
         if (!turn.hold_evals.empty() || !turn.placement_evals.empty() ||
             turn.has_board_nn_value) {
             json dbg;
@@ -118,7 +118,6 @@ json game_state_to_json(const GameSession& session) {
                     json c;
                     c["mask"]           = static_cast<int>(cand.hold_mask);
                     c["expected_value"] = static_cast<float>(cand.expected_value);
-                    // Expand mask to per-die flags for easy frontend rendering.
                     json flags = json::array();
                     for (int i = 0; i < kNumDice; ++i)
                         flags.push_back(static_cast<bool>((cand.hold_mask >> i) & 1));
@@ -152,11 +151,9 @@ json game_state_to_json(const GameSession& session) {
     }
     j["history"] = hist;
 
-    // Current board NN evaluation (debug mode only, if NN is available).
     if (session.has_current_board_nn)
         j["current_board_nn_value"] = session.current_board_nn_value;
 
-    // Player types
     auto pt_str = [](PlayerType pt) -> const char* {
         switch (pt) {
             case PlayerType::kHuman:         return "human";
@@ -182,8 +179,10 @@ json game_state_to_json(const GameSession& session) {
         }
         return "unknown";
     };
-    j["player_types"] = json::array({pt_str(session.player_types[0]),
-                                      pt_str(session.player_types[1])});
+    json pt_arr = json::array();
+    for (int p = 0; p < Traits::kNumPlayers; ++p)
+        pt_arr.push_back(pt_str(session.player_types[p]));
+    j["player_types"] = pt_arr;
 
     return j;
 }
@@ -210,3 +209,9 @@ json options_to_json(const std::vector<std::pair<Placement, int>>& options,
     j["placements"] = placements;
     return j;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations.
+// ---------------------------------------------------------------------------
+template json game_state_to_json<Yams1v1>(const GameSessionT<Yams1v1>&);
+template json game_state_to_json<Yams2v2>(const GameSessionT<Yams2v2>&);

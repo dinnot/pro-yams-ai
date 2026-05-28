@@ -1,5 +1,10 @@
 #include "solver/dp_tables.h"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -11,6 +16,34 @@
 #include "engine/constants.h"
 #include "solver/dp_tables_internal.h"
 #include "solver/precomputed_tables.h"
+
+// ===========================================================================
+// DPMmap — RAII wrapper around an mmap'd cache file.
+// The DPBuffer views inside DPTables point into base().
+// ===========================================================================
+class DPMmap {
+public:
+    DPMmap(int fd, void* base, std::size_t len) : fd_(fd), base_(base), len_(len) {}
+    DPMmap(const DPMmap&) = delete;
+    DPMmap& operator=(const DPMmap&) = delete;
+    ~DPMmap() {
+        if (base_ && base_ != MAP_FAILED) ::munmap(base_, len_);
+        if (fd_ >= 0) ::close(fd_);
+    }
+    void*       base() const { return base_; }
+    std::size_t len()  const { return len_; }
+
+private:
+    int         fd_   = -1;
+    void*       base_ = nullptr;
+    std::size_t len_  = 0;
+};
+
+// Out-of-line so the destructor sees the complete DPMmap type.
+DPTables::DPTables() = default;
+DPTables::~DPTables() = default;
+DPTables::DPTables(DPTables&&) noexcept = default;
+DPTables& DPTables::operator=(DPTables&&) noexcept = default;
 
 // ===========================================================================
 // Forward declarations from dp_tables_compute.cc
@@ -179,13 +212,23 @@ void decode_upper(int id, int8_t Sc[6]) {
     Sc[5] = kVals6s[id % 4];
 }
 
-int encode_middle(int8_t ss, int8_t ls) {
-    return enc_mid(ss) + 13 * enc_mid(ls);
+// SS upper-bound cap encoding: 0 = no binding cap; 21..29 = SS must be < cap.
+// (A filled LS <= 20 → SS impossible → expressed via ss_min=31, not the cap;
+//  a filled LS >= 30 → non-binding since SS raw maxes at 29 → cap 0.)
+inline int enc_cap(int8_t cap) {
+    if (cap >= 21 && cap <= 29) return cap - 20;  // 21->1 .. 29->9
+    return 0;                                     // 0 / 20 / >=30 → no cap
+}
+constexpr int8_t kCapVals[] = {0, 21, 22, 23, 24, 25, 26, 27, 28, 29};  // 10
+
+int encode_middle(int8_t ss, int8_t ls, int8_t ss_cap) {
+    return enc_mid(ss) + 13 * enc_mid(ls) + 169 * enc_cap(ss_cap);
 }
 
-void decode_middle(int id, int8_t Sc[2]) {
-    Sc[0] = kValsMid[id % 13];
-    Sc[1] = kValsMid[id / 13];
+void decode_middle(int id, int8_t Sc[3]) {
+    Sc[0] = kValsMid[id % 13]; id /= 13;
+    Sc[1] = kValsMid[id % 13]; id /= 13;
+    Sc[2] = kCapVals[id % 10];
 }
 
 int encode_lower(const int8_t Sc[5]) {
@@ -271,14 +314,14 @@ float get_upper_ev(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int
     return dp.dp_t4[dp_idx_t4(t, static_cast<int>(v), sc, s)];
 }
 
-float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].prob_no_scratch;
 }
 
-float get_middle_ev(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_ev(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].expected_pts;
 }
@@ -302,8 +345,8 @@ float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, 
     return dp.dp_t5[dp_idx_t4(t, static_cast<int>(v), sc, s)];
 }
 
-float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T) {
-    int sc = encode_middle(Sc[0], Sc[1]);
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[3], int T) {
+    int sc = encode_middle(Sc[0], Sc[1], Sc[2]);
     int t  = clamp_int(T, 0, kDPNumTurns - 1);
     return dp.dp_mid[dp_idx_mid(t, static_cast<int>(v), sc)].expected_pts_sq;
 }
@@ -320,7 +363,7 @@ float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T) 
 namespace {
 
 constexpr uint32_t kCacheMagic   = 0x59414D44;  // "DMAY"
-constexpr uint32_t kCacheVersion = 3;           // v3: E[X^2] for variance
+constexpr uint32_t kCacheVersion = 4;           // v4: SS forced-scratch under filled LS (middle DP)
 
 struct CacheHeader {
     uint32_t magic;
@@ -332,14 +375,34 @@ struct CacheHeader {
     uint64_t dp_low_count;
 };
 
+// Map the cache file read-only and point the DPBuffer views at it. Pages are
+// shared via the kernel page cache across processes, and unmapped on
+// DPTables destruction. Demand-paged: first access to a page triggers a
+// minor fault to bring it in from the page cache (or a major fault on first
+// run after boot).
 bool load_from_cache(DPTables& dp, const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    struct stat st;
+    if (::fstat(fd, &st) != 0) { ::close(fd); return false; }
+    const std::size_t flen = static_cast<std::size_t>(st.st_size);
+    if (flen < sizeof(CacheHeader)) { ::close(fd); return false; }
+
+    void* base = ::mmap(nullptr, flen, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+    if (base == MAP_FAILED) { ::close(fd); return false; }
+    // DP lookups are scattered; disable kernel read-ahead.
+    ::madvise(base, flen, MADV_RANDOM);
+
+    auto fail = [&]() {
+        ::munmap(base, flen);
+        ::close(fd);
+        return false;
+    };
 
     CacheHeader h{};
-    f.read(reinterpret_cast<char*>(&h), sizeof(h));
-    if (!f) return false;
-    if (h.magic != kCacheMagic || h.version != kCacheVersion) return false;
+    std::memcpy(&h, base, sizeof(h));
+    if (h.magic != kCacheMagic || h.version != kCacheVersion) return fail();
 
     const uint64_t exp_t1  = static_cast<uint64_t>(kDPNumTurns) * kDPNumVariants
                              * kDPUpperStates * kDPUpperRPad;
@@ -352,21 +415,29 @@ bool load_from_cache(DPTables& dp, const std::string& path) {
     if (h.dp_t1_count != exp_t1 || h.dp_t4_count != exp_t4
         || h.dp_t5_count != exp_t4 || h.dp_mid_count != exp_mid
         || h.dp_low_count != exp_low) {
-        return false;
+        return fail();
     }
 
-    dp.dp_t1.resize(exp_t1);
-    dp.dp_t4.resize(exp_t4);
-    dp.dp_t5.resize(exp_t4);
-    dp.dp_mid.resize(exp_mid);
-    dp.dp_low.resize(exp_low);
+    const std::size_t expected_size = sizeof(CacheHeader)
+                                    + exp_t1 * sizeof(float)
+                                    + exp_t4 * sizeof(float) * 2
+                                    + exp_mid * sizeof(DPVal)
+                                    + exp_low * sizeof(DPVal);
+    if (flen < expected_size) return fail();
 
-    f.read(reinterpret_cast<char*>(dp.dp_t1.data()), exp_t1 * sizeof(float));
-    f.read(reinterpret_cast<char*>(dp.dp_t4.data()), exp_t4 * sizeof(float));
-    f.read(reinterpret_cast<char*>(dp.dp_t5.data()), exp_t4 * sizeof(float));
-    f.read(reinterpret_cast<char*>(dp.dp_mid.data()), exp_mid * sizeof(DPVal));
-    f.read(reinterpret_cast<char*>(dp.dp_low.data()), exp_low * sizeof(DPVal));
-    return static_cast<bool>(f);
+    auto* p = static_cast<const char*>(base) + sizeof(CacheHeader);
+    dp.dp_t1 .adopt_view(reinterpret_cast<const float*>(p), exp_t1);
+    p += exp_t1 * sizeof(float);
+    dp.dp_t4 .adopt_view(reinterpret_cast<const float*>(p), exp_t4);
+    p += exp_t4 * sizeof(float);
+    dp.dp_t5 .adopt_view(reinterpret_cast<const float*>(p), exp_t4);
+    p += exp_t4 * sizeof(float);
+    dp.dp_mid.adopt_view(reinterpret_cast<const DPVal*>(p), exp_mid);
+    p += exp_mid * sizeof(DPVal);
+    dp.dp_low.adopt_view(reinterpret_cast<const DPVal*>(p), exp_low);
+
+    dp.mapped = std::make_unique<DPMmap>(fd, base, flen);
+    return true;
 }
 
 bool save_to_cache(const DPTables& dp, const std::string& path) {

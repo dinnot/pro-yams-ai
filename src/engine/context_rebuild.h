@@ -9,6 +9,8 @@
 //
 // Used by MC rollouts which start from a cloned board position and cannot
 // rely on incrementally maintained context. Slower than incremental updates
-// but O(156) — trivial compared to a full game simulation.
+// but O(kTotalCells) — trivial compared to a full game simulation.
 // ---------------------------------------------------------------------------
-void rebuild_context_from_board(const BoardState& board, GameContext& ctx);
+template <typename Traits>
+void rebuild_context_from_board(const BoardStateT<Traits>& board,
+                                GameContextT<Traits>& ctx);

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+
 #include "engine/board_state.h"
+#include "engine/constants.h"
 #include "engine/game_context.h"
 
 // ---------------------------------------------------------------------------
@@ -20,13 +23,28 @@ int crush_multiplier(int my_raw, int opp_raw);
 // compute_duel — calculate the final game result.
 //
 // Must only be called on a completed board (is_terminal() == true).
-// Returns total duel points from player 0's perspective:
-//   > 0  → player 0 wins
-//   < 0  → player 1 wins
+// Returns total duel points from Team 0's perspective:
+//   > 0  → Team 0 wins
+//   < 0  → Team 1 wins
 //   == 0 → draw
 //
-// @param board  Fully filled board (all 156 cells)
-// @param ctx    Game context (upper sums, scratch tracking)
-// @return Total duel points for player 0
+// 1v1: Team 0 = {P0}, Team 1 = {P1}. Single pairing (0, 1) per column.
+// 2v2: Team 0 = {P0, P2}, Team 1 = {P1, P3}. Four cross-team pairings per
+//       column. Crush multiplier and clean-column bonus value are computed
+//       independently per pairing.
 // ---------------------------------------------------------------------------
-int compute_duel(const BoardState& board, const GameContext& ctx);
+template <typename Traits>
+int compute_duel(const BoardStateT<Traits>& board,
+                 const GameContextT<Traits>& ctx);
+
+// ---------------------------------------------------------------------------
+// compute_duel_columns — same calculation as compute_duel(), but returns the
+// Team-0-perspective duel points for each column separately (the [c] entry is
+// the contribution of column c). compute_duel() == sum of the returned array.
+//
+// Used to record the per-column outcome breakdown of finished games.
+// ---------------------------------------------------------------------------
+template <typename Traits>
+std::array<int, kNumColumns> compute_duel_columns(
+    const BoardStateT<Traits>& board,
+    const GameContextT<Traits>& ctx);

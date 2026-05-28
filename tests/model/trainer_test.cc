@@ -37,9 +37,61 @@ TEST(TrainerTest, TrainStep_ReturnsFiniteLoss) {
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
     }
 
-    double loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    // train_step returns the PREVIOUS step's loss (NaN on first call) —
+    // grab the current step's loss via wait_until_step_complete.
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double loss = trainer.wait_until_step_complete();
     EXPECT_TRUE(std::isfinite(loss)) << "Loss is not finite: " << loss;
     EXPECT_GE(loss, 0.0) << "Loss is negative";
+}
+
+// ---------------------------------------------------------------------------
+// BCE path uses binary_cross_entropy_with_logits internally — finite loss
+// + decreases over a few steps. The numerical-stability win (vs plain BCE
+// on sigmoided outputs) is what motivated the forward_logits refactor.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, BCE_WithLogits_TrainsStably) {
+    torch::manual_seed(123);
+    ModelConfig cfg;
+    cfg.hidden_layers     = 2;
+    cfg.hidden_width      = 64;
+    cfg.output_activation = "sigmoid";
+    cfg.loss_function     = "bce";
+    cfg.learning_rate     = 0.001;
+    ModelTrainer trainer(cfg, cpu_device());
+
+    int batch_size = 64;
+    std::vector<float>  states(batch_size * kTensorSize);
+    std::vector<double> targets(batch_size);
+
+    torch::manual_seed(456);
+    auto state_t = torch::rand({batch_size, kTensorSize});
+    std::memcpy(states.data(), state_t.data_ptr<float>(),
+                batch_size * kTensorSize * sizeof(float));
+    // Mix easy (0, 1) and hard (smooth) targets — hard ones used to inflate
+    // naive BCE near sigmoid saturation.
+    for (int i = 0; i < batch_size; ++i) {
+        targets[i] = (i % 3 == 0) ? 0.05
+                                  : (i % 3 == 1 ? 0.95 : 0.5);
+    }
+
+    // Submit first step then materialise its loss (train_step returns prev).
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double first = trainer.wait_until_step_complete();
+    EXPECT_TRUE(std::isfinite(first));
+    double last = first;
+    for (int i = 0; i < 50; ++i) {
+        // After the first call, train_step returns the previous step's loss;
+        // that's good enough for the per-iter finiteness check.
+        last = trainer.train_step(states.data(), targets.data(), batch_size);
+        ASSERT_TRUE(std::isfinite(last))
+            << "BCE-with-logits produced non-finite loss at step " << i;
+    }
+    // Flush the last submitted step for the final comparison.
+    last = trainer.wait_until_step_complete();
+    EXPECT_LT(last, first)
+        << "BCE-with-logits training failed to descend (first=" << first
+        << " last=" << last << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -65,10 +117,12 @@ TEST(TrainerTest, LossDecreases_Over100Steps) {
     for (int i = 0; i < batch_size; ++i)
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
 
-    double first_loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    trainer.train_step(states.data(), targets.data(), batch_size);
+    double first_loss = trainer.wait_until_step_complete();
     double last_loss  = first_loss;
     for (int i = 1; i < 200; ++i)
         last_loss = trainer.train_step(states.data(), targets.data(), batch_size);
+    last_loss = trainer.wait_until_step_complete();
 
     EXPECT_LT(last_loss, first_loss)
         << "Loss did not decrease after 200 steps (first=" << first_loss
@@ -98,9 +152,9 @@ TEST(TrainerTest, Overfitting_TinyDataset) {
     for (int i = 0; i < n; ++i)
         targets[i] = (i % 2 == 0) ? 1.0 : 0.0;
 
-    double loss = 1.0;
     for (int step = 0; step < 3000; ++step)
-        loss = trainer.train_step(states.data(), targets.data(), n);
+        trainer.train_step(states.data(), targets.data(), n);
+    double loss = trainer.wait_until_step_complete();
 
     EXPECT_LT(loss, 0.01)
         << "Model failed to memorise tiny dataset (loss=" << loss << ")";
@@ -147,6 +201,45 @@ TEST(TrainerTest, CloneForInference_NoCrash) {
 // ---------------------------------------------------------------------------
 // Checkpoint round-trip: save + load restores model and metadata
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 2v2 migration Task 7.3: checkpoint refuses to load into a process running
+// the wrong game variant.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, Checkpoint_VariantMismatch_Throws) {
+    namespace fs = std::filesystem;
+
+    ModelConfig cfg_1v1;
+    cfg_1v1.game_variant = kGameVariant1v1;
+    cfg_1v1.hidden_layers = 2;
+    cfg_1v1.hidden_width  = 64;
+
+    const std::string tmpdir = "/tmp/pro_yams_ckpt_variant_test";
+    fs::create_directories(tmpdir);
+    const std::string ckpt_path = tmpdir + "/variant_ckpt";
+
+    // Save a 1v1 checkpoint.
+    ModelTrainer trainer_1v1(cfg_1v1, cpu_device());
+    trainer_1v1.save_checkpoint(ckpt_path, 0, 1.0, 0.0);
+
+    // Confirm metadata parses correctly.
+    auto loaded_cfg = ModelTrainer::config_from_checkpoint(ckpt_path);
+    EXPECT_EQ(loaded_cfg.game_variant, kGameVariant1v1);
+
+    // Construct a 2v2-configured trainer and try to load the 1v1 checkpoint.
+    ModelConfig cfg_2v2 = cfg_1v1;
+    cfg_2v2.game_variant = kGameVariant2v2;
+    ModelTrainer trainer_2v2(cfg_2v2, cpu_device());
+    int step; double temp, eps;
+    EXPECT_THROW(trainer_2v2.load_checkpoint(ckpt_path, step, temp, eps),
+                 std::runtime_error);
+
+    // Round-trip into a matching trainer still works.
+    ModelTrainer trainer_1v1_b(cfg_1v1, cpu_device());
+    EXPECT_NO_THROW(trainer_1v1_b.load_checkpoint(ckpt_path, step, temp, eps));
+
+    fs::remove_all(tmpdir);
+}
+
 TEST(TrainerTest, Checkpoint_RoundTrip) {
     namespace fs = std::filesystem;
 
@@ -216,9 +309,10 @@ TEST(TrainerTest, Checkpoint_ContinuedTraining) {
     for (auto& v : states) v = static_cast<float>(rand()) / RAND_MAX;
 
     // Train 20 steps
-    double loss_before = 0;
     for (int i = 0; i < 20; ++i)
-        loss_before = trainer.train_step(states.data(), targets.data(), 32);
+        trainer.train_step(states.data(), targets.data(), 32);
+    double loss_before = trainer.wait_until_step_complete();
+    (void)loss_before;  // captured for parity with the original assertion intent
 
     // Save and reload
     const std::string ckpt = tmpdir + "/cont";
@@ -230,9 +324,62 @@ TEST(TrainerTest, Checkpoint_ContinuedTraining) {
 
     // First step after load should give a reasonable loss, not far from the
     // pre-save value. BCE minimum with target=0.5 is -log(0.5) ≈ 0.693.
-    double loss_after = trainer2.train_step(states.data(), targets.data(), 32);
+    trainer2.train_step(states.data(), targets.data(), 32);
+    double loss_after = trainer2.wait_until_step_complete();
     EXPECT_LT(loss_after, 0.75)
         << "Loss spiked after checkpoint load (may indicate optimizer state not restored)";
+
+    fs::remove_all(tmpdir);
+}
+
+// ---------------------------------------------------------------------------
+// Learning-rate accessor/mutator (drives the training loop's LR back-off).
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, LearningRate_GetSet) {
+    ModelConfig cfg;
+    cfg.hidden_layers = 2;
+    cfg.hidden_width  = 64;
+    cfg.learning_rate = 0.002;
+
+    ModelTrainer trainer(cfg, cpu_device());
+    EXPECT_NEAR(trainer.learning_rate(), 0.002, 1e-12);
+
+    trainer.set_learning_rate(0.001);
+    EXPECT_NEAR(trainer.learning_rate(), 0.001, 1e-12);
+
+    // Halving (the back-off factor's typical effect) is reflected immediately.
+    trainer.set_learning_rate(trainer.learning_rate() * 0.5);
+    EXPECT_NEAR(trainer.learning_rate(), 0.0005, 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+// A backed-off learning rate survives a checkpoint round-trip: the loaded
+// trainer must report the reduced LR, not the original config value, so the
+// loop's back-off math stays consistent across a resume.
+// ---------------------------------------------------------------------------
+TEST(TrainerTest, LearningRate_PersistsAcrossCheckpoint) {
+    namespace fs = std::filesystem;
+    const std::string tmpdir = "/tmp/pro_yams_lr_ckpt_test";
+    fs::create_directories(tmpdir);
+    const std::string ckpt = tmpdir + "/lr";
+
+    ModelConfig cfg;
+    cfg.hidden_layers = 2;
+    cfg.hidden_width  = 64;
+    cfg.learning_rate = 0.001;
+
+    ModelTrainer trainer(cfg, cpu_device());
+    std::vector<float>  states(32 * kTensorSize, 0.1f);
+    std::vector<double> targets(32, 0.5);
+    trainer.train_step(states.data(), targets.data(), 32);
+    trainer.set_learning_rate(0.00025);  // simulate a back-off
+    trainer.save_checkpoint(ckpt, 5, 1.0, 0.0);
+
+    ModelTrainer trainer2(cfg, cpu_device());
+    int s; double t, e;
+    trainer2.load_checkpoint(ckpt, s, t, e);
+    EXPECT_NEAR(trainer2.learning_rate(), 0.00025, 1e-9)
+        << "Backed-off LR was not restored from the optimizer checkpoint";
 
     fs::remove_all(tmpdir);
 }

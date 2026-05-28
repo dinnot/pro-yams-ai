@@ -1,8 +1,11 @@
 #pragma once
 
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <torch/torch.h>
+#include <c10/cuda/CUDAStream.h>
 #include "model/pro_yams_net.h"
 #include "model/inference.h"
 
@@ -17,13 +20,39 @@ public:
     /// Construct a fresh trainer with Xavier-initialized model on the given device.
     ModelTrainer(const ModelConfig& config, torch::Device device);
 
-    /// Perform one training step (forward + backward + Adam step).
+    /// Submit one training step (forward + backward + Adam step) and return
+    /// the most-recently-computed loss.
     ///
-    /// @param states     Input float array [batch_size × kTensorSize]
-    /// @param targets    Target win probabilities [batch_size] in [0, 1]
-    /// @param batch_size Number of samples
-    /// @return MSE loss for this batch
+    /// The current step's GPU work is queued asynchronously; its loss tensor
+    /// is materialised at the start of the NEXT train_step() call (or on
+    /// demand via wait_until_step_complete()). This deferred-sync pattern
+    /// lets the caller's CPU-side batch sampling overlap with the GPU's
+    /// compute of the previous batch — otherwise the GPU sits idle waiting
+    /// for the CPU to sample the next batch, and CPU sits idle waiting on
+    /// loss.item() inside train_step.
+    ///
+    /// Returns:
+    ///   - NaN on the very first call (no completed step yet)
+    ///   - on subsequent calls, the loss of the most recently MATERIALISED
+    ///     step. That's the previous train_step if no intervening
+    ///     wait_until_step_complete() forced an earlier materialisation; if
+    ///     one did, the cached value from that wait is returned (the just-
+    ///     submitted step's loss is not yet computed).
+    ///
+    /// Memory safety: the .item() at the start of the next call fully
+    /// synchronises the train stream, so the pinned staging buffer is safe
+    /// to overwrite by the time we memcpy into it.
     double train_step(const float* states, const double* targets, int batch_size);
+
+    /// Block until the most recent train_step's GPU work has fully completed
+    /// and return the most-recently-computed loss (cached if no step is
+    /// pending). Returns NaN only if no train_step has ever been called.
+    ///
+    /// Idempotent — safe to call any number of times. Callers should invoke
+    /// this before reading model state that depends on the latest update
+    /// (e.g. running evaluation). save_checkpoint / clone_for_inference /
+    /// load_* call it internally.
+    double wait_until_step_complete();
 
     /// Access the current model (const; use clone_for_inference for a copy).
     const ProYamsNet& model() const { return *model_; }
@@ -65,19 +94,62 @@ public:
     /// Total number of train_step() calls made so far.
     int training_step_count() const { return training_step_; }
 
+    /// Current Adam learning rate (shared across all parameter groups).
+    double learning_rate() const { return learning_rate_; }
+
+    /// Overwrite the Adam learning rate on every parameter group. Used by the
+    /// training loop's learning-rate back-off. Adam's per-parameter moment
+    /// estimates are preserved — only the step size changes.
+    void set_learning_rate(double lr);
+
 private:
     std::shared_ptr<ProYamsNet>        model_;
     std::unique_ptr<torch::optim::Adam> optimizer_;
     torch::Device                       device_;
     ModelConfig                         config_;
     int                                 training_step_ = 0;
+    double                              learning_rate_ = 0.0;  // set in ctor
+
+    // High-priority CUDA stream reserved for training so train kernels are
+    // scheduled ahead of inference batches that share the GPU. Inference
+    // coordinators use normal-priority pool streams (see coordinator.cc).
+    std::optional<c10::cuda::CUDAStream> train_stream_;
+
+    // Pinned-memory staging buffers, reused across train_step calls. Pinned
+    // memory enables async CPU→GPU transfer (non_blocking=true), so the
+    // model.forward() call can be queued without waiting for the transfer
+    // to complete. Allocated lazily on first train_step; grown if a larger
+    // batch arrives.
+    //
+    // Single buffer is sufficient: with deferred .item() (see train_step
+    // docs), wait_until_step_complete() syncs the train stream before we
+    // overwrite the buffer on the next call, so the buffer is free at that
+    // point. Double-buffering would only be needed if we wanted >1 batch in
+    // flight on the GPU at once.
+    torch::Tensor pinned_state_buffer_;   // [max_batch_size, input_size] float32
+    torch::Tensor pinned_target_buffer_;  // [max_batch_size, 1] float32
+    int           pinned_capacity_ = 0;
+
+    // Loss tensor from the most recently SUBMITTED (but not yet materialised)
+    // training step. .item() on this tensor blocks until the train stream is
+    // drained, so it's both the loss value and the "GPU step is done"
+    // barrier. Detached so it doesn't keep the autograd graph alive.
+    torch::Tensor pending_loss_tensor_;
+    bool          has_pending_loss_ = false;
+
+    // Cached scalar loss of the most-recently MATERIALISED training step
+    // (updated whenever we .item() the pending tensor). Returned by
+    // train_step / wait_until_step_complete when there's nothing pending so
+    // callers always get a stable last-known value rather than NaN.
+    double last_finalized_loss_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 // ---------------------------------------------------------------------------
 // save_managed_checkpoint — save a checkpoint and prune old ones.
 //
-// Checkpoints are named: checkpoint_step_{step}.model / .optimizer
-// Old checkpoints beyond max_checkpoints are deleted.
+// Checkpoints are named: checkpoint_step_{step}.model / .optimizer / .buffer
+// For steps beyond max_checkpoints, the .optimizer and .buffer files are
+// pruned; the .model file is always kept to preserve the weight history.
 // ---------------------------------------------------------------------------
 void save_managed_checkpoint(ModelTrainer& trainer, const std::string& dir,
                               int step, double temperature, double epsilon,

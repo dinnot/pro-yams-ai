@@ -21,8 +21,9 @@
 //   Group F (180): per-player × per-column × {T_min,T_mid,T_max} mid/low P/EV + P_clean
 // ---------------------------------------------------------------------------
 
-/// Total number of float features in the state observation tensor.
-constexpr int kTensorSize = 986;
+/// 1v1 backward-compat alias — equals Yams1v1::kTensorSize. Remove at end of
+/// migration once no caller depends on the bare name.
+constexpr int kTensorSize = Yams1v1::kTensorSize;
 
 /// Maximum possible score per row (used for normalisation denominators).
 /// Indexed by row (0–12): 1s, 2s, 3s, 4s, 5s, 6s, SS, LS, FH, K, STR, U8, Y
@@ -32,16 +33,43 @@ constexpr int kMaxScorePerRow[kNumRows] = {
     50, 54, 50, 75, 100      // FH, K, STR, U8, Y (rows 8-12)
 };
 
+/// Expected per-pairing-column duel margin in raw points (pre-tanh), used for
+/// the Group B.2 margin_E feature. Mirrors the "now" margin but weights the
+/// clean-column bonus by the *probability* of completing a clean column
+/// (P_clean) instead of the binary current-state is_clean — so the EV side
+/// trends smoothly toward the clean-completed value instead of stepping into
+/// it only once the column is actually clean. The bonus (200 normally, 100
+/// under crush) is added AFTER the crush multiplier, exactly as the now-margin
+/// does, because crush thresholds are evaluated on raw (pre-bonus) score.
+inline double expected_duel_margin(double e_raw_me, double e_raw_opp,
+                                   float p_clean_me, float p_clean_opp,
+                                   int coeff, int active_crush) {
+    const int clean_bonus = (active_crush > 1) ? 100 : 200;
+    const double me_adj  = e_raw_me  + static_cast<double>(p_clean_me)  * clean_bonus;
+    const double opp_adj = e_raw_opp + static_cast<double>(p_clean_opp) * clean_bonus;
+    return (me_adj - opp_adj) * coeff * active_crush;
+}
+
 // ---------------------------------------------------------------------------
 // Main tensor generation function.
 //
+// The output is in CANONICAL VIEW relative to the perspective player:
+//   1v1: [Active, Opp]
+//   2v2: [Active, NextOpp, Teammate, PrevOpp]
+// Per-player feature groups iterate this canonical order; per-pairing
+// feature groups iterate Traits::kCanonicalPairing{T0,T1} in order. The
+// network never sees raw seat indices — this is the rotational-invariance
+// guarantee from Task 5.2.
+//
 // @param board   Board state to encode
 // @param ctx     Game context (cached derived data)
-// @param player  Perspective player (0 or 1); their data appears first
+// @param player  Perspective player (active seat)
 // @param tables  Precomputed tables (score tables, probability tables)
-// @param out     Output buffer of exactly kTensorSize floats
+// @param out     Output buffer of exactly Traits::kTensorSize floats
 // ---------------------------------------------------------------------------
-void generate_tensor(const BoardState& board, const GameContext& ctx,
+template <typename Traits>
+void generate_tensor(const BoardStateT<Traits>& board,
+                     const GameContextT<Traits>& ctx,
                      int player, const PrecomputedTables& tables,
                      float* out);
 
@@ -51,43 +79,50 @@ void generate_tensor(const BoardState& board, const GameContext& ctx,
 // For each request, applies the placement as a simple cell-write to a cloned
 // board (without full GameContext cache maintenance) and generates a tensor.
 // Writes tensors contiguously: out[i * kTensorSize .. (i+1) * kTensorSize).
-//
-// @param board          Base board state (before any placement)
-// @param ctx            Game context for the base state
-// @param player         Perspective player (0 or 1)
-// @param requests       Array of (placement, score) afterstate descriptors
-// @param request_count  Number of afterstates
-// @param tables         Precomputed tables
-// @param out            Output buffer: request_count × kTensorSize floats
 // ---------------------------------------------------------------------------
-void generate_tensor_batch(const BoardState& board, const GameContext& ctx,
-                            int player,
-                            const AfterstateRequest* requests, int request_count,
-                            const PrecomputedTables& tables,
-                            float* out);
+template <typename Traits>
+void generate_tensor_batch(const BoardStateT<Traits>& board,
+                           const GameContextT<Traits>& ctx,
+                           int player,
+                           const AfterstateRequest* requests, int request_count,
+                           const PrecomputedTables& tables,
+                           float* out);
 
 // ---------------------------------------------------------------------------
-// Helper functions (also used by tensor generation internally)
+// Helper functions (also used by tensor generation internally).
+//
+// These are variant-agnostic in their internal logic — they take a player
+// index and read board.cells[player] / ctx.upper_sum[player]. Templated on
+// Traits only so the engine/heuristic can call them with either 1v1 or 2v2
+// data structures.
 // ---------------------------------------------------------------------------
 
 /// Compute raw column score: sum of positive filled cells + upper section bonus.
 /// Does NOT include clean column bonus (that depends on duel context).
-int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
-                              int player, int column);
+template <typename Traits>
+int compute_column_raw_score(const BoardStateT<Traits>& board,
+                             const GameContextT<Traits>& ctx,
+                             int player, int column);
 
 /// Compute potential column score: raw score + max possible for empty cells
 /// + potential upper bonus (if all empty upper cells were maxed).
-int compute_column_potential_score(const BoardState& board, const GameContext& ctx,
-                                    int player, int column);
+template <typename Traits>
+int compute_column_potential_score(const BoardStateT<Traits>& board,
+                                   const GameContextT<Traits>& ctx,
+                                   int player, int column);
 
 /// Sum potential max scores across all columns for a player.
-int compute_total_potential(const BoardState& board, int player);
+template <typename Traits>
+int compute_total_potential(const BoardStateT<Traits>& board, int player);
 
 /// Count empty cells in a column for a player.
-int count_empty_cells(const BoardState& board, int player, int column);
+template <typename Traits>
+int count_empty_cells(const BoardStateT<Traits>& board, int player, int column);
 
 /// Count total filled cells for a player (all columns).
-int count_filled_cells(const BoardState& board, int player);
+template <typename Traits>
+int count_filled_cells(const BoardStateT<Traits>& board, int player);
 
 /// Sum all positive filled cell values for a player (all columns).
-int sum_all_filled(const BoardState& board, int player);
+template <typename Traits>
+int sum_all_filled(const BoardStateT<Traits>& board, int player);

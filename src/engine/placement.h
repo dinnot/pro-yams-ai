@@ -14,14 +14,12 @@
 //   - Updates upper_sum (rows 0-5)
 //   - Updates SS/LS scratch flags and applies mutual destruction
 //   - Updates lower_has_scratch
-//   - Calls update_legal_placements_after_move
-//
-// @param player  The placing player (0 or 1)
-// @param column  Target column (0-5)
-// @param row     Target row (0-12)
-// @param score   Score to place (0 = scratch, >0 = valid score)
-// @param board   Board state to modify
-// @param ctx     Game context to update
+//   - Calls update_legal_placements_after_move (unless `update_legal_cache`
+//     is false — set false when the resulting context is consumed for
+//     evaluation only and the legal-move caches are never read again).
 // ---------------------------------------------------------------------------
+template <typename Traits>
 void apply_placement(int player, int column, int row, int score,
-                     BoardState& board, GameContext& ctx);
+                     BoardStateT<Traits>& board,
+                     GameContextT<Traits>& ctx,
+                     bool update_legal_cache = true);

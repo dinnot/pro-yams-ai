@@ -1,11 +1,26 @@
 // REST API client for Pro Yams UI.
 
 const API = {
-    // Game management
-    async newGame(player0, player1, seed, debugMode = false) {
-        const body = { player0, player1, debug_mode: debugMode };
+    // GET /api/info — server's fixed variant ({game_variant, num_players}).
+    async getInfo() {
+        const res = await fetch('/api/info');
+        if (!res.ok) return { game_variant: '1v1', num_players: 2 };
+        return res.json();
+    },
+
+    // Game management. playerTypes: array of strings (one per seat). The
+    // server reads player0..playerN-1 from the body and uses array length
+    // to determine seat count.
+    async newGame(playerTypes, seed, debugMode = false, position = null) {
+        const body = { debug_mode: debugMode };
+        for (let i = 0; i < playerTypes.length; i++) {
+            body['player' + i] = playerTypes[i];
+        }
         if (seed !== undefined && seed !== null && seed !== '') body.seed = Number(seed);
         else body.seed = Math.floor(Math.random() * 1000000);
+        // When a starting position is supplied the server seeds the board from
+        // it (rebuilding context) instead of dealing a fresh empty board.
+        if (position) body.position = position;
         const res = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -117,6 +132,49 @@ const API = {
 
     async stopTournament() {
         const res = await fetch('/api/tournament/stop', { method: 'POST' });
+        return res.json();
+    },
+
+    // Recorded games
+    async getGamesStats() {
+        const res = await fetch('/api/games/stats');
+        if (!res.ok) return null;
+        return res.json();
+    },
+
+    async listGames({ checkpoint, variant, outcome, limit, offset } = {}) {
+        const params = new URLSearchParams();
+        if (checkpoint) params.set('checkpoint', checkpoint);
+        if (variant)    params.set('variant', variant);
+        if (outcome)    params.set('outcome', outcome);
+        if (limit  != null) params.set('limit', limit);
+        if (offset != null) params.set('offset', offset);
+        const qs = params.toString();
+        const res = await fetch('/api/games/list' + (qs ? `?${qs}` : ''));
+        if (!res.ok) return { total: 0, games: [] };
+        return res.json();
+    },
+
+    async getGameRecord(uuid) {
+        const res = await fetch(`/api/games/${uuid}`);
+        if (!res.ok) return null;
+        return res.json();
+    },
+
+    // Evaluate a single replay position with the checkpoint that played the
+    // game. Returns { nn_value, player } on success or { error } on failure
+    // (e.g. checkpoint not loadable, or variant mismatch with this server).
+    async evalGamePosition({ checkpoint, player, position }) {
+        const res = await fetch('/api/games/eval', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpoint, player, position })
+        });
+        if (!res.ok) {
+            let msg = 'eval failed';
+            try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
+            return { error: msg };
+        }
         return res.json();
     }
 };

@@ -2,6 +2,7 @@ add_executable(training_tests
     replay_buffer_test.cc
     logging_test.cc
     training_loop_test.cc
+    training_loop_2v2_test.cc
 )
 target_link_libraries(training_tests PRIVATE
     training eval model self_play solver engine

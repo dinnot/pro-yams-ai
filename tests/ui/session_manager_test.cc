@@ -316,6 +316,86 @@ TEST_F(SessionManagerTest, NNUnavailableFallsBackToHeuristic) {
 }
 
 // ---------------------------------------------------------------------------
+// Seeding a session from an explicit board position
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionManagerTest, CreateFromBoardSeedsCellsAndRollsDice) {
+    SessionManager mgr(tables_, nullptr, torch::kCPU);
+
+    BoardState1v1 board{};
+    for (int p = 0; p < 2; ++p)
+        for (int c = 0; c < kNumColumns; ++c)
+            for (int r = 0; r < kNumRows; ++r)
+                board.cells[p][c][r] = kCellEmpty;
+    int8_t coeffs[kNumColumns] = {8, 10, 12, 14, 16, 18};
+    for (int c = 0; c < kNumColumns; ++c) board.coefficients[c] = coeffs[c];
+    board.current_player = 1;
+    board.cells[0][0][0] = 5;   // P0 Down/1s
+    board.cells[0][3][6] = 0;   // P0 Mid/SS scratched
+    board.cells[1][1][12] = 50; // P1 Free/Y
+    board.cells_filled = 999;   // deliberately wrong; must be recomputed
+
+    PlayerType pts[2] = {PlayerType::kHeuristic, PlayerType::kHuman};
+    int id = mgr.create_session_from_board(pts, 2, board, 42);
+
+    GameSession copy;
+    ASSERT_TRUE(mgr.get_session_copy(id, copy));
+    EXPECT_FALSE(copy.game_over);
+    EXPECT_EQ(copy.state.board.current_player, 1);
+    EXPECT_EQ(copy.state.board.cells[0][0][0], 5);
+    EXPECT_EQ(copy.state.board.cells[0][3][6], 0);
+    EXPECT_EQ(copy.state.board.cells[1][1][12], 50);
+    EXPECT_EQ(copy.state.board.cells_filled, 3);  // recomputed from cells
+    for (int c = 0; c < kNumColumns; ++c)
+        EXPECT_EQ(copy.state.board.coefficients[c], coeffs[c]);
+    EXPECT_EQ(copy.state.rolls_left, 2);          // fresh dice were rolled
+    EXPECT_TRUE(copy.waiting_for_human);          // seat 1 is human
+
+    // Context was rebuilt: the current player has legal placements.
+    bool cr = false;
+    auto opts = mgr.get_human_options(id, cr);
+    EXPECT_FALSE(opts.empty());
+}
+
+TEST_F(SessionManagerTest, CreateFromTerminalBoardOpensGameOver) {
+    SessionManager mgr(tables_, nullptr, torch::kCPU);
+
+    // Produce a real terminal board by finishing a game, then re-seed from it.
+    int played = mgr.create_session(PlayerType::kHeuristic, PlayerType::kHeuristic, 7);
+    mgr.play_to_completion(played);
+    GameSession finished;
+    ASSERT_TRUE(mgr.get_session_copy(played, finished));
+    ASSERT_TRUE(finished.game_over);
+
+    PlayerType pts[2] = {PlayerType::kHeuristic, PlayerType::kHeuristic};
+    int id = mgr.create_session_from_board(pts, 2, finished.state.board, 1);
+
+    GameSession copy;
+    ASSERT_TRUE(mgr.get_session_copy(id, copy));
+    EXPECT_TRUE(copy.game_over);
+    EXPECT_EQ(copy.result, finished.result);  // same board ⇒ same duel outcome
+}
+
+TEST_F(SessionManagerTest, CreateFromMidGameBoardPlaysToCompletion) {
+    SessionManager mgr(tables_, nullptr, torch::kCPU);
+
+    // Play part of a game, snapshot the board, then resume from it.
+    int played = mgr.create_session(PlayerType::kHeuristic, PlayerType::kHeuristic, 321);
+    for (int i = 0; i < 20; ++i) mgr.advance_turn(played);
+    GameSession mid;
+    ASSERT_TRUE(mgr.get_session_copy(played, mid));
+    ASSERT_FALSE(mid.game_over);
+
+    PlayerType pts[2] = {PlayerType::kHeuristic, PlayerType::kHeuristic};
+    int id = mgr.create_session_from_board(pts, 2, mid.state.board, 5);
+    mgr.play_to_completion(id);
+
+    GameSession copy;
+    ASSERT_TRUE(mgr.get_session_copy(id, copy));
+    EXPECT_TRUE(copy.game_over);
+}
+
+// ---------------------------------------------------------------------------
 // Determinism
 // ---------------------------------------------------------------------------
 

@@ -96,29 +96,39 @@ struct SolverBuffers {
 };
 
 // ---------------------------------------------------------------------------
-// Solver API
+// Solver API (templated on game variant).
+//
+// The solver works from a single player's perspective — `state.board.current_player`
+// indexes board.cells / ctx.legal_*. No multi-player loops; templating just
+// generalises the data-structure types.
 // ---------------------------------------------------------------------------
 
 /// Step 1: Populate buffers.requests with every (placement, score) afterstate
 /// that needs evaluation. Sets buffers.request_count.
-void solver_get_requests(const GameState& state, const GameContext& ctx,
+template <typename Traits>
+void solver_get_requests(const GameStateT<Traits>& state,
+                         const GameContextT<Traits>& ctx,
                          const PrecomputedTables& tables, SolverBuffers& buffers);
 
 /// Step 2: Given buffers.evs filled by the caller, compute the best action
 /// via expectimax DP over reroll layers.
-SolverResult solver_resolve(const GameState& state, const GameContext& ctx,
+template <typename Traits>
+SolverResult solver_resolve(const GameStateT<Traits>& state,
+                            const GameContextT<Traits>& ctx,
                             const PrecomputedTables& tables, SolverBuffers& buffers,
                             const SolverConfig& config, RNG& rng);
 
 /// Convenience: greedy resolve (no exploration).
-inline SolverResult solver_resolve_greedy(const GameState& state, const GameContext& ctx,
+template <typename Traits>
+inline SolverResult solver_resolve_greedy(const GameStateT<Traits>& state,
+                                          const GameContextT<Traits>& ctx,
                                           const PrecomputedTables& tables,
                                           SolverBuffers& buffers,
                                           bool compute_pre_roll_ev = false) {
     RNG dummy(0);
     SolverConfig cfg;
     cfg.compute_pre_roll_ev = compute_pre_roll_ev;
-    return solver_resolve(state, ctx, tables, buffers, cfg, dummy);
+    return solver_resolve<Traits>(state, ctx, tables, buffers, cfg, dummy);
 }
 
 // ---------------------------------------------------------------------------

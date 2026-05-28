@@ -1,11 +1,12 @@
 #include "engine/scoring.h"
+#include "engine/game_traits.h"
 #include "engine/solver_tables.h"
 
 #include <algorithm>
 #include <cassert>
 
 // ---------------------------------------------------------------------------
-// Dice utilities
+// Dice utilities (variant-independent)
 // ---------------------------------------------------------------------------
 
 void sort_dice(int8_t dice[kNumDice]) {
@@ -36,9 +37,11 @@ int dice_sum(const int8_t dice[kNumDice]) {
 // calculate_score
 // ---------------------------------------------------------------------------
 
+template <typename Traits>
 int calculate_score(int row, const int8_t dice[kNumDice],
                     int player, int column,
-                    const BoardState& board, const GameContext& ctx) {
+                    const BoardStateT<Traits>& board,
+                    const GameContextT<Traits>& ctx) {
     // Sort a local copy so we can use compute_raw_score
     int8_t sorted[kNumDice];
     for (int i = 0; i < kNumDice; ++i) sorted[i] = dice[i];
@@ -50,7 +53,9 @@ int calculate_score(int row, const int8_t dice[kNumDice],
     // 2. If raw == 0, the dice don't qualify → forced scratch
     if (raw == 0) return 0;
 
-    // 3. Golden Rule: score must be >= golden_max for this (col, row)
+    // 3. Golden Rule: score must be >= golden_max for this (col, row).
+    //    In 2v2 this includes the teammate's score — golden_max is populated
+    //    by every player, by design.
     int gmax = ctx.golden_max[column][row];
     if (raw < gmax) return 0;
 
@@ -70,6 +75,7 @@ int calculate_score(int row, const int8_t dice[kNumDice],
         if (ctx.ss_scratched[player][column]) return 0;
 
         // LS must be strictly greater than the highest SS recorded by anyone
+        // (teammate included in 2v2 — golden_max is the global max).
         int max_ss = ctx.golden_max[column][kRowSS];
         if (max_ss > 0 && raw <= max_ss) return 0;
     }
@@ -81,11 +87,13 @@ int calculate_score(int row, const int8_t dice[kNumDice],
 // Board queries
 // ---------------------------------------------------------------------------
 
-bool is_terminal(const BoardState& board) {
-    return board.cells_filled >= kTotalCells;
+template <typename Traits>
+bool is_terminal(const BoardStateT<Traits>& board) {
+    return board.cells_filled >= Traits::kTotalCells;
 }
 
-int cells_remaining(const BoardState& board, int player) {
+template <typename Traits>
+int cells_remaining(const BoardStateT<Traits>& board, int player) {
     int count = 0;
     for (int c = 0; c < kNumColumns; ++c)
         for (int r = 0; r < kNumRows; ++r)
@@ -93,9 +101,27 @@ int cells_remaining(const BoardState& board, int player) {
     return count;
 }
 
-int column_cells_remaining(const BoardState& board, int player, int column) {
+template <typename Traits>
+int column_cells_remaining(const BoardStateT<Traits>& board, int player, int column) {
     int count = 0;
     for (int r = 0; r < kNumRows; ++r)
         if (board.cells[player][column][r] == kCellEmpty) count++;
     return count;
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template int  calculate_score<Yams1v1>(int, const int8_t[], int, int,
+                                       const BoardStateT<Yams1v1>&,
+                                       const GameContextT<Yams1v1>&);
+template int  calculate_score<Yams2v2>(int, const int8_t[], int, int,
+                                       const BoardStateT<Yams2v2>&,
+                                       const GameContextT<Yams2v2>&);
+template bool is_terminal<Yams1v1>(const BoardStateT<Yams1v1>&);
+template bool is_terminal<Yams2v2>(const BoardStateT<Yams2v2>&);
+template int  cells_remaining<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int  cells_remaining<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+template int  column_cells_remaining<Yams1v1>(const BoardStateT<Yams1v1>&, int, int);
+template int  column_cells_remaining<Yams2v2>(const BoardStateT<Yams2v2>&, int, int);

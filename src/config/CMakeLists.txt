@@ -14,4 +14,4 @@ add_library(config STATIC
     config_printer.cc
 )
 target_include_directories(config PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(config PUBLIC training yaml-cpp::yaml-cpp)
+target_link_libraries(config PUBLIC training distil yaml-cpp::yaml-cpp)

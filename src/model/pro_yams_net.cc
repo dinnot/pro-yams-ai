@@ -43,9 +43,13 @@ ProYamsNet::ProYamsNet(const ModelConfig& config) : config_(config) {
     output_layer_ = register_module("output", torch::nn::Linear(config.hidden_width, 1));
 }
 
-torch::Tensor ProYamsNet::forward(torch::Tensor x) {
+torch::Tensor ProYamsNet::forward_logits(torch::Tensor x) {
     x = hidden_blocks_->forward(x);
-    x = output_layer_->forward(x);
+    return output_layer_->forward(x);   // raw pre-activation outputs
+}
+
+torch::Tensor ProYamsNet::forward(torch::Tensor x) {
+    x = forward_logits(std::move(x));
     if (config_.output_activation == "sigmoid") {
         x = torch::sigmoid(x);
     } else {

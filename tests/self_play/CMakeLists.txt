@@ -5,6 +5,8 @@ add_executable(self_play_tests
     integration_test.cc
     trajectory_test.cc
     batch_manager_test.cc
+    # 2v2 migration Task 6:
+    trajectory_2v2_test.cc
 )
 target_link_libraries(self_play_tests
     PRIVATE self_play engine solver model gtest_main ${TORCH_LIBRARIES})

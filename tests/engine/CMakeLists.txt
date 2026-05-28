@@ -11,6 +11,12 @@ add_executable(engine_tests
     game_flow_test.cc
     turbo_test.cc
     full_game_test.cc
+    # 2v2 migration Task 1:
+    game_traits_test.cc
+    # 2v2 migration Task 2:
+    golden_rule_teammate_test.cc
+    # 2v2 migration Task 3:
+    duel_2v2_test.cc
 )
 target_link_libraries(engine_tests PRIVATE engine gtest_main)
 add_test(NAME engine_tests COMMAND engine_tests)
@@ -24,6 +30,8 @@ add_executable(tensor_tests
     tensor_test.cc
     tensor_batch_test.cc
     context_rebuild_test.cc
+    # 2v2 migration Task 5:
+    tensor_rotation_test.cc
 )
 target_link_libraries(tensor_tests PRIVATE solver heuristic engine gtest_main)
 add_test(NAME tensor_tests COMMAND tensor_tests)

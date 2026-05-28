@@ -3,18 +3,21 @@
 #include <cstring>
 
 #include "engine/constants.h"
+#include "engine/game_traits.h"
 #include "engine/legal_moves.h"
 
-void rebuild_context_from_board(const BoardState& board, GameContext& ctx) {
-    std::memset(&ctx, 0, sizeof(GameContext));
+template <typename Traits>
+void rebuild_context_from_board(const BoardStateT<Traits>& board,
+                                GameContextT<Traits>& ctx) {
+    std::memset(&ctx, 0, sizeof(GameContextT<Traits>));
 
-    for (int p = 0; p < kNumPlayers; ++p) {
+    for (int p = 0; p < Traits::kNumPlayers; ++p) {
         for (int c = 0; c < kNumColumns; ++c) {
             for (int r = 0; r < kNumRows; ++r) {
                 int8_t cell = board.cells[p][c][r];
                 if (cell == kCellEmpty) continue;
 
-                // Golden max (both players contribute).
+                // Golden max (all players contribute, including teammate in 2v2).
                 if (cell > ctx.golden_max[c][r])
                     ctx.golden_max[c][r] = cell;
 
@@ -45,6 +48,15 @@ void rebuild_context_from_board(const BoardState& board, GameContext& ctx) {
         ctx.non_turbo_cells_remaining[p] = static_cast<int8_t>(count);
 
         // Rebuild legal placements.
-        rebuild_legal_placements(p, board, ctx);
+        rebuild_legal_placements<Traits>(p, board, ctx);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template void rebuild_context_from_board<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                                  GameContextT<Yams1v1>&);
+template void rebuild_context_from_board<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                                  GameContextT<Yams2v2>&);

@@ -80,7 +80,7 @@ TEST_F(HeuristicBotTest, CompleteGame_100Games_NoCrash) {
     int p0_wins = 0, p1_wins = 0, draws = 0;
     for (int seed = 0; seed < 100; ++seed) {
         RNG rng(seed + 10000);
-        int result = play_heuristic_game(rng, tables);
+        int result = play_heuristic_game<Yams1v1>(rng, tables);
         if (result > 0) ++p0_wins;
         else if (result < 0) ++p1_wins;
         else ++draws;
@@ -170,7 +170,7 @@ TEST_F(HeuristicBotTest, V3_CompleteGame_50Games_NoCrash) {
     int filled_total = 0;
     for (int seed = 0; seed < 50; ++seed) {
         RNG rng(seed + 30000);
-        int result = play_heuristic_game(rng, tables, HeuristicVersion::V3);
+        int result = play_heuristic_game<Yams1v1>(rng, tables, HeuristicVersion::V3);
         // Just touch the result so the optimizer can't elide the loop.
         (void)result;
         ++filled_total;

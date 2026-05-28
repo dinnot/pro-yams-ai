@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "engine/duel.h"  // upper_section_bonus, crush_multiplier
+#include "engine/game_traits.h"
 #include "engine/placement.h"
 #include "solver/dp_eval.h"
 #include "solver/dp_tables.h"
@@ -14,14 +15,16 @@
 // Existing helpers
 // ---------------------------------------------------------------------------
 
-int count_empty_cells(const BoardState& board, int player, int column) {
+template <typename Traits>
+int count_empty_cells(const BoardStateT<Traits>& board, int player, int column) {
     int n = 0;
     for (int row = 0; row < kNumRows; ++row)
         if (board.cells[player][column][row] == kCellEmpty) ++n;
     return n;
 }
 
-int count_filled_cells(const BoardState& board, int player) {
+template <typename Traits>
+int count_filled_cells(const BoardStateT<Traits>& board, int player) {
     int n = 0;
     for (int col = 0; col < kNumColumns; ++col)
         for (int row = 0; row < kNumRows; ++row)
@@ -29,7 +32,8 @@ int count_filled_cells(const BoardState& board, int player) {
     return n;
 }
 
-int sum_all_filled(const BoardState& board, int player) {
+template <typename Traits>
+int sum_all_filled(const BoardStateT<Traits>& board, int player) {
     int s = 0;
     for (int col = 0; col < kNumColumns; ++col) {
         for (int row = 0; row < kNumRows; ++row) {
@@ -40,8 +44,10 @@ int sum_all_filled(const BoardState& board, int player) {
     return s;
 }
 
-int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
-                              int player, int column) {
+template <typename Traits>
+int compute_column_raw_score(const BoardStateT<Traits>& board,
+                             const GameContextT<Traits>& ctx,
+                             int player, int column) {
     int cell_sum = 0;
     for (int row = 0; row < kNumRows; ++row) {
         int8_t v = board.cells[player][column][row];
@@ -50,8 +56,10 @@ int compute_column_raw_score(const BoardState& board, const GameContext& ctx,
     return cell_sum + upper_section_bonus(ctx.upper_sum[player][column]);
 }
 
-int compute_column_potential_score(const BoardState& board, const GameContext& ctx,
-                                    int player, int column) {
+template <typename Traits>
+int compute_column_potential_score(const BoardStateT<Traits>& board,
+                                   const GameContextT<Traits>& ctx,
+                                   int player, int column) {
     int cell_sum = 0;
     int upper_potential = ctx.upper_sum[player][column];
     for (int row = 0; row < kNumRows; ++row) {
@@ -67,7 +75,8 @@ int compute_column_potential_score(const BoardState& board, const GameContext& c
     return cell_sum + upper_section_bonus(upper_potential);
 }
 
-int compute_total_potential(const BoardState& board, int player) {
+template <typename Traits>
+int compute_total_potential(const BoardStateT<Traits>& board, int player) {
     int total = 0;
     for (int col = 0; col < kNumColumns; ++col) {
         int cell_sum = 0;
@@ -89,6 +98,33 @@ int compute_total_potential(const BoardState& board, int player) {
 }
 
 // ---------------------------------------------------------------------------
+// Explicit instantiations of the helpers above (used by engine + heuristic).
+// generate_tensor / generate_tensor_batch stay 1v1-only for now; Task 5
+// rewrites them with rotational invariance.
+// ---------------------------------------------------------------------------
+
+template int count_empty_cells<Yams1v1>(const BoardStateT<Yams1v1>&, int, int);
+template int count_empty_cells<Yams2v2>(const BoardStateT<Yams2v2>&, int, int);
+template int count_filled_cells<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int count_filled_cells<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+template int sum_all_filled<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int sum_all_filled<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+template int compute_column_raw_score<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                               const GameContextT<Yams1v1>&,
+                                               int, int);
+template int compute_column_raw_score<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                               const GameContextT<Yams2v2>&,
+                                               int, int);
+template int compute_column_potential_score<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                                     const GameContextT<Yams1v1>&,
+                                                     int, int);
+template int compute_column_potential_score<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                                     const GameContextT<Yams2v2>&,
+                                                     int, int);
+template int compute_total_potential<Yams1v1>(const BoardStateT<Yams1v1>&, int);
+template int compute_total_potential<Yams2v2>(const BoardStateT<Yams2v2>&, int);
+
+// ---------------------------------------------------------------------------
 // V2.1 helpers — DP state encoders + horizon allocators live in
 // solver/dp_eval (shared with the V2 heuristic bot).
 // ---------------------------------------------------------------------------
@@ -104,10 +140,21 @@ inline float pts_to_Nx(int N, float me, float opp, float scale) {
     }
 }
 
+template <typename Traits>
+static void copy_tensor_context_fields(const GameContextT<Traits>& src,
+                                       GameContextT<Traits>& dst) {
+    std::memcpy(dst.golden_max, src.golden_max, sizeof(dst.golden_max));
+    std::memcpy(dst.upper_sum, src.upper_sum, sizeof(dst.upper_sum));
+    std::memcpy(dst.ss_scratched, src.ss_scratched, sizeof(dst.ss_scratched));
+    std::memcpy(dst.ls_scratched, src.ls_scratched, sizeof(dst.ls_scratched));
+    std::memcpy(dst.lower_has_scratch, src.lower_has_scratch,
+                sizeof(dst.lower_has_scratch));
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// generate_tensor — V2.1 implementation (986 features)
+// generate_tensor — templated implementation with canonical rotational view.
 // ---------------------------------------------------------------------------
 
 struct PCData {
@@ -116,21 +163,35 @@ struct PCData {
     float e_raw;
     int raw_score;
     int pot_score;
+    bool is_clean;        // matches compute_duel: upper_sum >= 60 && !lower_has_scratch
+    bool clean_possible;  // upper_potential >= 60 && !lower_has_scratch (for pot_score upper bound)
     float p_one[13]; // kNumRows
     float grp_E[18];
     float grp_F[15];
 };
 
-static void compute_pc_data(const BoardState& board, const GameContext& ctx,
-                            int p, int col, int player_filled, const PrecomputedTables& tables,
+template <typename Traits>
+static void compute_pc_data(const BoardStateT<Traits>& board,
+                            const GameContextT<Traits>& ctx,
+                            int p, int col, int player_filled,
+                            const PrecomputedTables& tables,
                             PCData& d) {
     const DPTables& dp = tables.dp_tables;
     const bool dp_ready = !dp.dp_t1.empty();
     static const int kUpperTargets[5] = {60, 70, 80, 90, 100};
 
     d.upper_sum = ctx.upper_sum[p][col];
-    d.raw_score = compute_column_raw_score(board, ctx, p, col);
-    d.pot_score = compute_column_potential_score(board, ctx, p, col);
+    d.raw_score = compute_column_raw_score<Traits>(board, ctx, p, col);
+    d.pot_score = compute_column_potential_score<Traits>(board, ctx, p, col);
+    d.is_clean = (ctx.upper_sum[p][col] >= 60) && (!ctx.lower_has_scratch[p][col]);
+    // Upper-bound clean-possible: column can still earn the clean bonus iff
+    // the upper section can still reach 60 and no lower row has scratched yet.
+    int upper_potential_for_clean = ctx.upper_sum[p][col];
+    for (int row = 0; row <= kRow6s; ++row) {
+        if (board.cells[p][col][row] == kCellEmpty)
+            upper_potential_for_clean += kMaxScorePerRow[row];
+    }
+    d.clean_possible = (upper_potential_for_clean >= 60) && (!ctx.lower_has_scratch[p][col]);
 
     for (int row = 0; row < kNumRows; ++row) {
         int8_t v = board.cells[p][col][row];
@@ -147,9 +208,16 @@ static void compute_pc_data(const BoardState& board, const GameContext& ctx,
         int golden_min = ctx.golden_max[col][row];
         if (golden_min == 0) golden_min = 1;
         if (row == kRowSS) {
+            // SS must stay strictly below a filled LS (scoring.cc:67-69). With
+            // SS's natural floor of 20, no legal SS sum remains once the
+            // effective lower bound reaches the filled LS value → forced
+            // scratch. (A still-open band below LS is not modelled here; p_one
+            // then mildly overestimates, matching the DP's min-threshold
+            // limitation.)
             int8_t ls_val = board.cells[p][col][kRowLS];
-            if (ls_val != kCellEmpty && ls_val > 0 && golden_min >= ls_val) {
-                d.p_one[row] = 0.0f; continue;
+            if (ls_val != kCellEmpty && ls_val > 0) {
+                int ss_floor = std::max(20, static_cast<int>(ctx.golden_max[col][kRowSS]));
+                if (ss_floor >= ls_val) { d.p_one[row] = 0.0f; continue; }
             }
         }
         if (row == kRowLS) {
@@ -167,9 +235,9 @@ static void compute_pc_data(const BoardState& board, const GameContext& ctx,
         d.p_one[row] = p_one;
     }
 
-    int8_t Sc_U[6], Sc_M[2], Sc_L[5];
+    int8_t Sc_U[6], Sc_M[3], Sc_L[5];
     int EU, EM, EL;
-    build_Sc(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
+    build_Sc<Traits>(p, col, board, ctx, Sc_U, Sc_M, Sc_L, EU, EM, EL);
     d.empty_in_col = EU + EM + EL;
 
     int T_min = d.empty_in_col;
@@ -241,14 +309,28 @@ static void compute_pc_data(const BoardState& board, const GameContext& ctx,
     d.e_raw = eu_min + em_min + el_min + static_cast<float>(filled_score);
 }
 
-static void write_tensor_from_pc(const BoardState& board, int player,
-                                 const PCData pc[2][6], float* out) {
-    const int opp = 1 - player;
+// Compute the canonical seat order relative to the active player.
+//   canonical[ci] = (active + ci) % kNumPlayers
+//
+// For 1v1: [active, opp].
+// For 2v2: [Active, NextOpp, Teammate, PrevOpp].
+template <typename Traits>
+static inline void make_canonical_order(int active, int (&canonical)[Traits::kNumPlayers]) {
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        canonical[ci] = (active + ci) % Traits::kNumPlayers;
+    }
+}
+
+template <typename Traits>
+static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
+                                 const PCData pc[Traits::kNumPlayers][6], float* out) {
+    int canonical[Traits::kNumPlayers];
+    make_canonical_order<Traits>(player, canonical);
     int idx = 0;
 
-    // Group A (312)
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
-        int p = (pi == 0) ? player : opp;
+    // Group A — per-player × per-cell {filled flag, normalised value}.
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        const int p = canonical[ci];
         for (int col = 0; col < kNumColumns; ++col) {
             for (int row = 0; row < kNumRows; ++row) {
                 int8_t v = board.cells[p][col][row];
@@ -263,167 +345,277 @@ static void write_tensor_from_pc(const BoardState& board, int player,
         }
     }
 
-    // Group B.1
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
+    // Group B.1 — per-player × per-column {upper_sum/100, e_raw/500}.
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
         for (int col = 0; col < kNumColumns; ++col) {
-            out[idx++] = std::min(1.0f, static_cast<float>(pc[pi][col].upper_sum) / 100.0f);
-            out[idx++] = std::min(1.0f, std::max(0.0f, pc[pi][col].e_raw / 500.0f));
+            out[idx++] = std::min(1.0f, static_cast<float>(pc[ci][col].upper_sum) / 100.0f);
+            out[idx++] = std::min(1.0f, std::max(0.0f, pc[ci][col].e_raw / 500.0f));
         }
     }
 
-    // Group B.2
+    // Group B.2 — per-PAIRING × per-column duel summaries (14 features each).
+    // Pairings are in canonical order: 1v1 has 1; 2v2 has 4 (Active×NextOpp,
+    // Active×PrevOpp, Teammate×NextOpp, Teammate×PrevOpp). The summed margin
+    // across all pairings is later emitted in Group D as a team aggregate.
     long long total_duel_now = 0;
-    double total_duel_E = 0.0;
-    for (int col = 0; col < kNumColumns; ++col) {
-        int coeff = board.coefficients[col];
-        int rem_me = pc[0][col].empty_in_col;
-        int rem_opp = pc[1][col].empty_in_col;
-        out[idx++] = static_cast<float>(rem_me) / static_cast<float>(kNumRows);
-        out[idx++] = static_cast<float>(rem_opp) / static_cast<float>(kNumRows);
-
-        int my_r = pc[0][col].raw_score;
-        int opp_r = pc[1][col].raw_score;
-        int crush_my = crush_multiplier(my_r, opp_r);
-        int crush_opp = crush_multiplier(opp_r, my_r);
-        int active_crush = std::max(crush_my, crush_opp);
-        long long margin_now = static_cast<long long>(my_r - opp_r) * coeff * active_crush;
-        out[idx++] = std::tanh(static_cast<float>(margin_now) / 15000.0f);
-        total_duel_now += margin_now;
-
-        int my_eR = static_cast<int>(pc[0][col].e_raw + 0.5f);
-        int opp_eR = static_cast<int>(pc[1][col].e_raw + 0.5f);
-        int crush_my_E = crush_multiplier(my_eR, opp_eR);
-        int crush_opp_E = crush_multiplier(opp_eR, my_eR);
-        int active_crush_E = std::max(crush_my_E, crush_opp_E);
-        double margin_E = static_cast<double>(pc[0][col].e_raw - pc[1][col].e_raw) * coeff * active_crush_E;
-        out[idx++] = std::tanh(static_cast<float>(margin_E / 15000.0));
-        total_duel_E += margin_E;
-
-        out[idx++] = static_cast<float>(crush_my - crush_opp) / 5.0f;
-        out[idx++] = static_cast<float>(crush_my_E - crush_opp_E) / 5.0f;
-
-        const float curr_scales[4] = {500.0f, 750.0f, 1000.0f, 1250.0f};
-        for (int k = 0; k < 4; ++k) {
-            out[idx++] = pts_to_Nx(k + 2, static_cast<float>(my_r), static_cast<float>(opp_r), curr_scales[k]);
-        }
-        for (int k = 0; k < 4; ++k) {
-            out[idx++] = pts_to_Nx(k + 2, pc[0][col].e_raw, pc[1][col].e_raw, curr_scales[k]);
-        }
-    }
-
-    // Group C
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
+    double    total_duel_E = 0.0;
+    for (int pi = 0; pi < Traits::kNumPairings; ++pi) {
+        const int t0_ci = Traits::kCanonicalPairingT0[pi];
+        const int t1_ci = Traits::kCanonicalPairingT1[pi];
         for (int col = 0; col < kNumColumns; ++col) {
-            for (int row = 0; row < kNumRows; ++row) {
-                out[idx++] = pc[pi][col].p_one[row];
+            const int coeff = board.coefficients[col];
+            const int rem_me  = pc[t0_ci][col].empty_in_col;
+            const int rem_opp = pc[t1_ci][col].empty_in_col;
+            out[idx++] = static_cast<float>(rem_me)  / static_cast<float>(kNumRows);
+            out[idx++] = static_cast<float>(rem_opp) / static_cast<float>(kNumRows);
+
+            const int my_r_raw  = pc[t0_ci][col].raw_score;
+            const int opp_r_raw = pc[t1_ci][col].raw_score;
+            const int crush_my  = crush_multiplier(my_r_raw,  opp_r_raw);
+            const int crush_opp = crush_multiplier(opp_r_raw, my_r_raw);
+            const int active_crush = std::max(crush_my, crush_opp);
+            // Apply per-pairing clean-column bonus the same way compute_duel does:
+            // bonus value is 200 when no crush, 100 when crush, applied to each
+            // clean player within the pairing.
+            const int clean_bonus_val = (active_crush > 1) ? 100 : 200;
+            const int my_r  = my_r_raw  + (pc[t0_ci][col].is_clean ? clean_bonus_val : 0);
+            const int opp_r = opp_r_raw + (pc[t1_ci][col].is_clean ? clean_bonus_val : 0);
+            const long long margin_now =
+                static_cast<long long>(my_r - opp_r) * coeff * active_crush;
+            out[idx++] = std::tanh(static_cast<float>(margin_now) / 15000.0f);
+            total_duel_now += margin_now;
+
+            const int my_eR  = static_cast<int>(pc[t0_ci][col].e_raw + 0.5f);
+            const int opp_eR = static_cast<int>(pc[t1_ci][col].e_raw + 0.5f);
+            const int crush_my_E  = crush_multiplier(my_eR,  opp_eR);
+            const int crush_opp_E = crush_multiplier(opp_eR, my_eR);
+            const int active_crush_E = std::max(crush_my_E, crush_opp_E);
+            // Fold the expected clean-column bonus into the margin, weighted by
+            // P_clean (T_min tier, grp_F[4]) so the EV side anticipates an
+            // impending clean completion instead of stepping into it only when
+            // is_clean flips. Mirrors the now-margin's clean handling above.
+            const double margin_E = expected_duel_margin(
+                pc[t0_ci][col].e_raw, pc[t1_ci][col].e_raw,
+                pc[t0_ci][col].grp_F[4], pc[t1_ci][col].grp_F[4],
+                coeff, active_crush_E);
+            out[idx++] = std::tanh(static_cast<float>(margin_E / 15000.0));
+            total_duel_E += margin_E;
+
+            out[idx++] = static_cast<float>(crush_my   - crush_opp)   / 5.0f;
+            out[idx++] = static_cast<float>(crush_my_E - crush_opp_E) / 5.0f;
+
+            const float curr_scales[4] = {500.0f, 750.0f, 1000.0f, 1250.0f};
+            for (int k = 0; k < 4; ++k) {
+                // pts_to_Nx works against raw (pre-clean-bonus) scores because
+                // crush thresholds are evaluated on raw_score, not adj_score.
+                out[idx++] = pts_to_Nx(k + 2,
+                                       static_cast<float>(my_r_raw),
+                                       static_cast<float>(opp_r_raw),
+                                       curr_scales[k]);
+            }
+            for (int k = 0; k < 4; ++k) {
+                out[idx++] = pts_to_Nx(k + 2,
+                                       pc[t0_ci][col].e_raw,
+                                       pc[t1_ci][col].e_raw,
+                                       curr_scales[k]);
             }
         }
     }
 
-    // Group D
+    // Group C — per-player × per-cell single-turn-non-scratch probability.
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        for (int col = 0; col < kNumColumns; ++col) {
+            for (int row = 0; row < kNumRows; ++row) {
+                out[idx++] = pc[ci][col].p_one[row];
+            }
+        }
+    }
+
+    // Group D — global aggregates and phase flags.
     for (int col = 0; col < kNumColumns; ++col) {
         out[idx++] = static_cast<float>(board.coefficients[col]) / 18.0f;
     }
-    out[idx++] = static_cast<float>(board.cells_filled) / static_cast<float>(kTotalCells);
-    out[idx++] = std::tanh(static_cast<float>(total_duel_now) / 80000.0f);
-    out[idx++] = std::tanh(static_cast<float>(total_duel_E) / 100000.0);
+    out[idx++] = static_cast<float>(board.cells_filled) /
+                 static_cast<float>(Traits::kTotalCells);
+    // The margin-now / margin-E totals are now MY-TEAM margins (sum of all
+    // canonical pairings, each defined as "my team's player − their player").
+    // In 1v1 the single pairing reproduces the previous behaviour bit-for-bit.
+    out[idx++] = std::tanh(static_cast<float>(total_duel_now) /
+                           (80000.0f * Traits::kPlayersPerTeam));
+    out[idx++] = std::tanh(static_cast<float>(total_duel_E)   /
+                           (100000.0 * Traits::kPlayersPerTeam));
 
+    // "Locked-in" margin flags: did MY TEAM already secure / lose the game
+    // (against the opposing team's max / min potential)? In 1v1 this collapses
+    // to the previous my-vs-opp comparison.
+    //
+    // For the upper bound used in opp_max / my_max we add the maximum possible
+    // clean-column bonus (200, taken when there is no crush) on top of
+    // pot_score whenever the column can still earn it. Without this the
+    // "locked-in win" flag (my_min > opp_max) can fire prematurely, since
+    // compute_duel can add up to 200 per-column to opp's adj score.
     int my_min = 0, my_max = 0, opp_min = 0, opp_max = 0;
-    for (int col = 0; col < kNumColumns; ++col) {
-        my_min += pc[0][col].raw_score;
-        my_max += pc[0][col].pot_score;
-        opp_min += pc[1][col].raw_score;
-        opp_max += pc[1][col].pot_score;
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        // Canonical seats: 0, 2, ... are "my team"; 1, 3, ... are opposing.
+        const bool on_my_team = ((ci % 2) == 0);
+        for (int col = 0; col < kNumColumns; ++col) {
+            const int min_adj = pc[ci][col].raw_score +
+                                (pc[ci][col].is_clean ? 100 : 0);  // crush ⇒ 100
+            const int max_adj = pc[ci][col].pot_score +
+                                (pc[ci][col].clean_possible ? 200 : 0);
+            if (on_my_team) {
+                my_min += min_adj;
+                my_max += max_adj;
+            } else {
+                opp_min += min_adj;
+                opp_max += max_adj;
+            }
+        }
     }
     out[idx++] = (my_min > opp_max) ? 1.0f : 0.0f;
     out[idx++] = (my_max < opp_min) ? 1.0f : 0.0f;
 
-    int filled = static_cast<int>(board.cells_filled);
-    out[idx++] = (filled > 50)  ? 1.0f : 0.0f;
-    out[idx++] = (filled > 100) ? 1.0f : 0.0f;
-    out[idx++] = (filled > 140) ? 1.0f : 0.0f;
+    // Phase flags — thresholds scaled to total cells. 1v1: 50/100/140 of 156.
+    // 2v2: 100/200/280 of 312 (same proportions: 32%, 64%, 90%).
+    const int filled = static_cast<int>(board.cells_filled);
+    constexpr int kPhase1 = (Traits::kTotalCells * 50) / 156;
+    constexpr int kPhase2 = (Traits::kTotalCells * 100) / 156;
+    constexpr int kPhase3 = (Traits::kTotalCells * 140) / 156;
+    out[idx++] = (filled > kPhase1) ? 1.0f : 0.0f;
+    out[idx++] = (filled > kPhase2) ? 1.0f : 0.0f;
+    out[idx++] = (filled > kPhase3) ? 1.0f : 0.0f;
 
-    // Group E
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
+    // Group E — per-player × per-column × 18 DP upper features.
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
         for (int col = 0; col < kNumColumns; ++col) {
             for (int i = 0; i < 18; ++i) {
-                out[idx++] = pc[pi][col].grp_E[i];
+                out[idx++] = pc[ci][col].grp_E[i];
             }
         }
     }
 
-    // Group F
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
+    // Group F — per-player × per-column × 15 DP mid/low/clean features.
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
         for (int col = 0; col < kNumColumns; ++col) {
             for (int i = 0; i < 15; ++i) {
-                out[idx++] = pc[pi][col].grp_F[i];
+                out[idx++] = pc[ci][col].grp_F[i];
             }
         }
     }
 
-    assert(idx == kTensorSize);
+    assert(idx == Traits::kTensorSize);
 }
 
 // ---------------------------------------------------------------------------
-// generate_tensor — V2.1 implementation (986 features)
+// generate_tensor — canonical-view templated implementation.
 // ---------------------------------------------------------------------------
-void generate_tensor(const BoardState& board, const GameContext& ctx,
+template <typename Traits>
+void generate_tensor(const BoardStateT<Traits>& board,
+                     const GameContextT<Traits>& ctx,
                      int player, const PrecomputedTables& tables,
                      float* out) {
-    PCData pc[2][6];
-    const int opp = 1 - player;
-    
-    for (int pi = 0; pi < kNumPlayers; ++pi) {
-        int p = (pi == 0) ? player : opp;
-        int player_filled = count_filled_cells(board, p);
+    PCData pc[Traits::kNumPlayers][6];
+    int canonical[Traits::kNumPlayers];
+    make_canonical_order<Traits>(player, canonical);
+
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        const int p = canonical[ci];
+        const int player_filled = count_filled_cells<Traits>(board, p);
         for (int col = 0; col < kNumColumns; ++col) {
-            compute_pc_data(board, ctx, p, col, player_filled, tables, pc[pi][col]);
+            compute_pc_data<Traits>(board, ctx, p, col, player_filled, tables, pc[ci][col]);
         }
     }
-    
-    write_tensor_from_pc(board, player, pc, out);
+
+    write_tensor_from_pc<Traits>(board, player, pc, out);
 }
 
 // ---------------------------------------------------------------------------
-// generate_tensor_batch
+// generate_tensor_batch — apply each candidate placement, regenerate tensor.
+// Optimisation: pre-compute per-(canonical, col) base data once, then only
+// recompute the (active_canonical_idx, placement.col) entry per request.
 // ---------------------------------------------------------------------------
-void generate_tensor_batch(const BoardState& board, const GameContext& ctx,
-                            int player,
-                            const AfterstateRequest* requests, int request_count,
-                            const PrecomputedTables& tables,
-                            float* out) {
-    PCData base_me[6];
-    PCData base_opp[6];
-    int opp = 1 - player;
-    int me_filled = count_filled_cells(board, player) + 1;
-    int opp_filled = count_filled_cells(board, opp);
-    
-    for (int col = 0; col < kNumColumns; ++col) {
-        compute_pc_data(board, ctx, player, col, me_filled, tables, base_me[col]);
-        compute_pc_data(board, ctx, opp, col, opp_filled, tables, base_opp[col]);
+template <typename Traits>
+void generate_tensor_batch(const BoardStateT<Traits>& board,
+                           const GameContextT<Traits>& ctx,
+                           int player,
+                           const AfterstateRequest* requests, int request_count,
+                           const PrecomputedTables& tables,
+                           float* out) {
+    int canonical[Traits::kNumPlayers];
+    make_canonical_order<Traits>(player, canonical);
+
+    PCData base_pc[Traits::kNumPlayers][6];
+    int filled[Traits::kNumPlayers];
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        const int p = canonical[ci];
+        filled[ci] = count_filled_cells<Traits>(board, p);
     }
+    // Active player gains one filled cell after the placement.
+    filled[0] += 1;
+
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        const int p = canonical[ci];
+        for (int col = 0; col < kNumColumns; ++col) {
+            compute_pc_data<Traits>(board, ctx, p, col, filled[ci], tables, base_pc[ci][col]);
+        }
+    }
+
+    PCData saved_col[Traits::kNumPlayers];
 
     for (int i = 0; i < request_count; ++i) {
-        BoardState board_clone = board;
-        GameContext ctx_clone = ctx;
+        BoardStateT<Traits> board_clone = board;
+        GameContextT<Traits> ctx_clone;
+        copy_tensor_context_fields<Traits>(ctx, ctx_clone);
 
         const AfterstateRequest& req = requests[i];
-        int col = req.placement.column;
-        int row = req.placement.row;
-        int score = req.score;
-        int p = player;
+        const int col = req.placement.column;
+        const int row = req.placement.row;
+        const int score = req.score;
 
-        apply_placement(p, col, row, score, board_clone, ctx_clone);
+        // The clone is consumed solely by compute_pc_data, which never reads
+        // the legal_all / legal_no_turbo caches.
+        apply_placement<Traits>(player, col, row, score, board_clone, ctx_clone,
+                                /*update_legal_cache=*/false);
 
-        PCData pc[2][6];
-        for (int c = 0; c < 6; ++c) {
-            pc[0][c] = base_me[c];
-            pc[1][c] = base_opp[c];
+        // Mutate base_pc in place for the affected column, write the tensor,
+        // then restore. The placement updates ctx.golden_max[col][row], which
+        // influences every player's expected EV in that column, so we have to
+        // recompute the affected column for ALL players (not just active).
+        for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+            saved_col[ci] = base_pc[ci][col];
+        }
+        for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+            const int p_other = canonical[ci];
+            compute_pc_data<Traits>(board_clone, ctx_clone, p_other, col,
+                                    filled[ci], tables, base_pc[ci][col]);
         }
 
-        compute_pc_data(board_clone, ctx_clone, player, col, me_filled, tables, pc[0][col]);
-        compute_pc_data(board_clone, ctx_clone, opp, col, opp_filled, tables, pc[1][col]);
+        write_tensor_from_pc<Traits>(board_clone, player, base_pc,
+                                     out + static_cast<ptrdiff_t>(i) * Traits::kTensorSize);
 
-        write_tensor_from_pc(board_clone, player, pc, out + static_cast<ptrdiff_t>(i) * kTensorSize);
+        for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+            base_pc[ci][col] = saved_col[ci];
+        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template void generate_tensor<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                       const GameContextT<Yams1v1>&,
+                                       int, const PrecomputedTables&, float*);
+template void generate_tensor<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                       const GameContextT<Yams2v2>&,
+                                       int, const PrecomputedTables&, float*);
+template void generate_tensor_batch<Yams1v1>(const BoardStateT<Yams1v1>&,
+                                             const GameContextT<Yams1v1>&,
+                                             int,
+                                             const AfterstateRequest*, int,
+                                             const PrecomputedTables&, float*);
+template void generate_tensor_batch<Yams2v2>(const BoardStateT<Yams2v2>&,
+                                             const GameContextT<Yams2v2>&,
+                                             int,
+                                             const AfterstateRequest*, int,
+                                             const PrecomputedTables&, float*);

@@ -5,11 +5,17 @@ const Game = {
     state: null,
     options: null,
     holdMask: 0,
+    // Boards the current session was loaded from (PY1 position), or null for a
+    // fresh game. copy-position replays history on top of this.
+    basePosition: null,
     autoPlayTimer: null,
     legalCollapsed: true,
+    serverNumPlayers: 2,
+    serverVariant: '1v1',
 
     async init() {
         document.getElementById('btn-new-game').addEventListener('click', () => Game.newGame());
+        document.getElementById('btn-load-position').addEventListener('click', () => Game.loadPosition());
         document.getElementById('btn-step').addEventListener('click', () => Game.step());
         document.getElementById('btn-play-all').addEventListener('click', () => Game.playAll());
         document.getElementById('btn-reroll').addEventListener('click', () => Game.reroll());
@@ -17,14 +23,66 @@ const Game = {
             Game.legalCollapsed = !Game.legalCollapsed;
             Game.applyLegalCollapse();
         });
+
+        // The server's variant is fixed at launch — query once so we know
+        // whether to expose the P2/P3 dropdowns.
+        try {
+            const info = await API.getInfo();
+            Game.serverNumPlayers = info.num_players || 2;
+            Game.serverVariant    = info.game_variant || '1v1';
+        } catch (_) { /* leave defaults */ }
+        document.body.dataset.variant = Game.serverVariant;
+        const show2v2 = Game.serverNumPlayers >= 4;
+        for (const el of document.querySelectorAll('.sel-2v2-only')) {
+            el.hidden = !show2v2;
+        }
+    },
+
+    // Ensure board-pN / board-grid-N divs exist for each player. The HTML
+    // ships with P0/P1; P2/P3 are created on demand when the JSON reports
+    // a 2v2 game. Also toggles the boards-area layout via data-variant.
+    ensureBoardContainers(numPlayers, variant) {
+        const area = document.querySelector('.boards-area');
+        if (!area) return;
+        area.dataset.variant = variant;
+
+        // Team assignment in 2v2: P0/P2 are Team 0, P1/P3 are Team 1.
+        const teamOf = (p) => (p & 1) === 0 ? 0 : 1;
+
+        for (let p = 0; p < numPlayers; ++p) {
+            let container = document.getElementById(`board-p${p}`);
+            if (!container) {
+                container = document.createElement('div');
+                container.id = `board-p${p}`;
+                container.className = 'board-container';
+                container.innerHTML =
+                    `<h3>Player ${p} <span class="player-label" id="p${p}-type"></span></h3>` +
+                    `<div id="board-grid-${p}" class="board-grid"></div>`;
+                area.appendChild(container);
+            }
+            // Update team class for 2x2 shading.
+            container.classList.remove('team-0', 'team-1');
+            if (variant === '2v2') {
+                container.classList.add(`team-${teamOf(p)}`);
+            }
+        }
+
+        // Hide any leftover containers from a previous larger game.
+        for (let p = numPlayers; p < 8; ++p) {
+            const c = document.getElementById(`board-p${p}`);
+            if (c) c.style.display = 'none';
+        }
+        for (let p = 0; p < numPlayers; ++p) {
+            const c = document.getElementById(`board-p${p}`);
+            if (c) c.style.display = '';
+        }
     },
 
     async newGame() {
         Game.stopAutoPlay();
-        const p0 = document.getElementById('sel-p0').value;
-        const p1 = document.getElementById('sel-p1').value;
+        Game.basePosition = null;
         const debugMode = document.getElementById('chk-debug').checked;
-        const data = await API.newGame(p0, p1, undefined, debugMode);
+        const data = await API.newGame(Game.collectPlayerTypes(), undefined, debugMode);
         Game.sessionId = data.session_id;
         Game.state = data.game_state;
         Game.holdMask = 0;
@@ -39,6 +97,71 @@ const Game = {
         if (!Game.state.waiting_for_human && !Game.state.game_over) {
             // Leave it for user to click Step or Play All.
         }
+    },
+
+    // Player types for every seat the server expects (P2/P3 dropdowns exist
+    // but are .hidden in 1v1). Shared by newGame() and loadPosition().
+    collectPlayerTypes() {
+        const playerTypes = [];
+        for (let p = 0; p < Game.serverNumPlayers; p++) {
+            const sel = document.getElementById(`sel-p${p}`);
+            playerTypes.push(sel ? sel.value : 'heuristic_v2');
+        }
+        return playerTypes;
+    },
+
+    // Copy the board position after history turn `index` to the clipboard as a
+    // PY1 notation string. `el` is the clicked icon, flashed ✓ on success.
+    async copyPositionAt(index, el) {
+        const gs = Game.state;
+        if (!gs || !gs.history || !gs.history[index]) return;
+        const variant = gs.game_variant ||
+            ((gs.num_players === 4) ? '2v2' : '1v1');
+        const pos = Position.fromHistory(gs.history, gs.coefficients, variant,
+                                         index, Game.basePosition);
+        const ok = await Position.copyToClipboard(Position.encode(pos));
+        if (el) {
+            const prev = el.textContent;
+            el.textContent = ok ? '✓' : '✗';
+            setTimeout(() => { el.textContent = prev; }, 900);
+        }
+    },
+
+    // Start a new game from a pasted PY1 position string. Reuses the current
+    // player-type selectors and debug toggle; dice are rolled fresh for the
+    // player on move.
+    async loadPosition() {
+        const input = document.getElementById('position-input');
+        const errEl = document.getElementById('position-error');
+        const raw = (input.value || '').trim();
+        const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? '' : 'none'; } };
+        showErr('');
+        if (!raw) { showErr('Paste a position string first.'); return; }
+
+        let pos;
+        try { pos = Position.decode(raw); }
+        catch (e) { showErr('Invalid position: ' + e.message); return; }
+
+        if (pos.variant !== Game.serverVariant) {
+            showErr(`Position is ${pos.variant} but this server runs ${Game.serverVariant}.`);
+            return;
+        }
+
+        Game.stopAutoPlay();
+        const debugMode = document.getElementById('chk-debug').checked;
+        const data = await API.newGame(Game.collectPlayerTypes(), undefined, debugMode, pos);
+        if (data.error) { showErr(data.error); return; }
+        // Remember the loaded board so copy-position can replay history on top
+        // of it rather than starting from an empty board.
+        Game.basePosition = pos.boards;
+        Game.sessionId = data.session_id;
+        Game.state = data.game_state;
+        Game.holdMask = 0;
+        Game.updateUI();
+
+        document.getElementById('btn-step').disabled = false;
+        document.getElementById('btn-play-all').disabled = false;
+        document.getElementById('btn-show-tensor').disabled = false;
     },
 
     async step() {
@@ -105,7 +228,8 @@ const Game = {
         }
     },
 
-    // Mirrors compute_duel() from duel.cc.
+    // Mirrors compute_duel<Traits>() from duel.cc. Iterates every cross-team
+    // pairing (1 in 1v1, 4 in 2v2). totalDuel is Team-0 minus Team-1 margin.
     computeDuel(gs) {
         if (!gs.boards || !gs.coefficients) return null;
 
@@ -126,10 +250,13 @@ const Game = {
             return 1;
         };
 
+        const numPlayers = gs.num_players ||
+            (gs.player_types ? gs.player_types.length : 2);
+        const team0 = numPlayers === 4 ? [0, 2] : [0];
+        const team1 = numPlayers === 4 ? [1, 3] : [1];
         const UPPER = ROW_NAMES.slice(0, 6);
         const LOWER = ROW_NAMES.slice(6);
-        const boards = [gs.boards.player0, gs.boards.player1];
-        const coeffs  = gs.coefficients;
+        const coeffs = gs.coefficients;
 
         let totalDuel = 0;
         const colData = [];
@@ -137,10 +264,10 @@ const Game = {
         for (let c = 0; c < 6; c++) {
             const colKey = COLUMN_KEYS[c];
             const coeff  = coeffs[c];
-            const players = [];
 
-            for (let p = 0; p < 2; p++) {
-                const b = boards[p];
+            const players = [];
+            for (let p = 0; p < numPlayers; p++) {
+                const b = gs.boards[`player${p}`];
                 let upperSum = 0, cellsSum = 0, lowerHasScratch = false;
                 for (const rn of UPPER) {
                     const v = b?.[colKey]?.[rn] ?? -1;
@@ -152,23 +279,46 @@ const Game = {
                     if (v > 0) cellsSum += v;
                 }
                 const uBonus = upperBonus(upperSum);
-                players.push({ upperSum, cellsSum, uBonus, raw: cellsSum + uBonus, lowerHasScratch });
+                players.push({
+                    seat: p,
+                    upperSum, cellsSum, uBonus,
+                    raw: cellsSum + uBonus,
+                    lowerHasScratch,
+                    isClean: upperSum >= 60 && !lowerHasScratch,
+                    cBonus: 0,
+                    adjusted: cellsSum + uBonus,
+                });
             }
 
-            const crush0 = crushMult(players[0].raw, players[1].raw);
-            const crush1 = crushMult(players[1].raw, players[0].raw);
-            const activeCrush = Math.max(crush0, crush1);
-            const cleanBonus = activeCrush > 1 ? 100 : 200;
-
-            for (const pl of players) {
-                pl.isClean = pl.upperSum >= 60 && !pl.lowerHasScratch;
-                pl.cBonus   = pl.isClean ? cleanBonus : 0;
-                pl.adjusted = pl.raw + pl.cBonus;
+            const pairings = [];
+            let colDuel = 0;
+            let maxCrush = 1;
+            for (const t0p of team0) {
+                for (const t1p of team1) {
+                    const a = players[t0p], b = players[t1p];
+                    const crush0 = crushMult(a.raw, b.raw);
+                    const crush1 = crushMult(b.raw, a.raw);
+                    const activeCrush = Math.max(crush0, crush1);
+                    if (activeCrush > maxCrush) maxCrush = activeCrush;
+                    const cleanBonus = activeCrush > 1 ? 100 : 200;
+                    const adjA = a.raw + (a.isClean ? cleanBonus : 0);
+                    const adjB = b.raw + (b.isClean ? cleanBonus : 0);
+                    const duelPts = (adjA - adjB) * activeCrush * coeff;
+                    colDuel += duelPts;
+                    pairings.push({ t0p, t1p, activeCrush, cleanBonus,
+                                    adjA, adjB, duelPts });
+                    if (a.isClean && cleanBonus > a.cBonus) {
+                        a.cBonus = cleanBonus; a.adjusted = a.raw + cleanBonus;
+                    }
+                    if (b.isClean && cleanBonus > b.cBonus) {
+                        b.cBonus = cleanBonus; b.adjusted = b.raw + cleanBonus;
+                    }
+                }
             }
 
-            const duelPts = (players[0].adjusted - players[1].adjusted) * activeCrush * coeff;
-            totalDuel += duelPts;
-            colData.push({ c, colKey, coeff, players, activeCrush, duelPts });
+            totalDuel += colDuel;
+            colData.push({ c, colKey, coeff, players, pairings,
+                           activeCrush: maxCrush, duelPts: colDuel });
         }
 
         return { totalDuel, colData };
@@ -184,50 +334,142 @@ const Game = {
         const { totalDuel, colData } = Game.computeDuel(gs);
         panel.style.display = 'block';
 
+        const numPlayers = gs.num_players ||
+            (gs.player_types ? gs.player_types.length : 2);
         const fmt = (n) => n > 0 ? `+${n}` : String(n);
         const bonusCell = (v) => v > 0 ? `<span class="bonus-val">+${v}</span>` : '<span style="color:#444">—</span>';
 
+        let html;
+        if (numPlayers === 4) {
+            html = Game.renderBreakdown2v2(colData, totalDuel, fmt);
+        } else {
+            // 1v1: one row per column with full per-player stat columns.
+            let header1 = `<tr><th rowspan="2">Column</th>`;
+            for (let p = 0; p < numPlayers; p++) {
+                header1 += `<th colspan="4" style="border-bottom:1px solid #0f3460">Player ${p}</th>`;
+            }
+            header1 += `<th rowspan="2">Crush</th><th rowspan="2">Duel pts</th></tr>`;
+            let header2 = `<tr>`;
+            for (let p = 0; p < numPlayers; p++) {
+                header2 += `<th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>`;
+            }
+            header2 += `</tr>`;
+
+            html = `<h4>Score Breakdown</h4>
+            <table class="score-table">
+                <thead>${header1}${header2}</thead>
+                <tbody>`;
+
+            for (const col of colData) {
+                const ptsCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
+                let row = `<tr><td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
+                for (const pl of col.players) {
+                    row += `<td>${pl.cellsSum}</td><td>${bonusCell(pl.uBonus)}</td>` +
+                           `<td>${bonusCell(pl.cBonus)}</td><td class="adj-val">${pl.adjusted}</td>`;
+                }
+                row += `<td class="crush-val">×${col.activeCrush}</td>` +
+                       `<td class="${ptsCls}">${fmt(col.duelPts)}</td></tr>`;
+                html += row;
+            }
+
+            const totalCls = totalDuel > 0 ? 'pts-pos' : totalDuel < 0 ? 'pts-neg' : '';
+            const totalColSpan = 1 + 4 * numPlayers + 1;
+            html += `</tbody>
+                <tfoot>
+                    <tr class="score-total">
+                        <td colspan="${totalColSpan}" style="text-align:right;color:#aaa">Total duel score (T0 − T1)</td>
+                        <td class="${totalCls}">${fmt(totalDuel)}</td>
+                    </tr>
+                </tfoot>
+            </table>`;
+        }
+
+        panel.innerHTML = html;
+        return totalDuel;
+    },
+
+    renderBreakdown2v2(colData, totalDuel, fmt) {
+        // Accumulate per-player signed contribution: T0 players gain, T1 players lose.
+        const playerTotals = [0, 0, 0, 0];
+        for (const col of colData) {
+            for (const pr of col.pairings) {
+                playerTotals[pr.t0p] += pr.duelPts;
+                playerTotals[pr.t1p] -= pr.duelPts;
+            }
+        }
+
+        // 8 columns: Column | T0 | adj | vs | T1 | adj | ×crush | pts
         let html = `<h4>Score Breakdown</h4>
         <table class="score-table">
             <thead>
-                <tr>
-                    <th rowspan="2">Column</th>
-                    <th colspan="4" style="border-bottom:1px solid #0f3460">Player 0</th>
-                    <th colspan="4" style="border-bottom:1px solid #0f3460">Player 1</th>
-                    <th rowspan="2">Crush</th>
-                    <th rowspan="2">Duel pts</th>
-                </tr>
-                <tr>
-                    <th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>
-                    <th>cells</th><th>+upper</th><th>+clean</th><th>adj</th>
-                </tr>
+              <tr>
+                <th>Column</th>
+                <th>T0</th><th>adj</th>
+                <th></th>
+                <th>T1</th><th>adj</th>
+                <th>×crush</th><th>pts</th>
+              </tr>
             </thead>
             <tbody>`;
 
         for (const col of colData) {
-            const [p0, p1] = col.players;
-            const ptsCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
-            html += `<tr>
-                <td class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>
-                <td>${p0.cellsSum}</td><td>${bonusCell(p0.uBonus)}</td><td>${bonusCell(p0.cBonus)}</td><td class="adj-val">${p0.adjusted}</td>
-                <td>${p1.cellsSum}</td><td>${bonusCell(p1.uBonus)}</td><td>${bonusCell(p1.cBonus)}</td><td class="adj-val">${p1.adjusted}</td>
-                <td class="crush-val">×${col.activeCrush}</td>
-                <td class="${ptsCls}">${fmt(col.duelPts)}</td>
-            </tr>`;
+            const nPr = col.pairings.length;
+            for (let i = 0; i < nPr; i++) {
+                const pr = col.pairings[i];
+                const ptsCls = pr.duelPts > 0 ? 'pts-pos' : pr.duelPts < 0 ? 'pts-neg' : '';
+                html += `<tr>`;
+                if (i === 0) {
+                    html += `<td rowspan="${nPr + 1}" class="col-name">${COLUMN_NAMES[col.c]}<span class="col-mult"> ×${col.coeff}</span></td>`;
+                }
+                html += `<td>P${pr.t0p}</td><td class="adj-val">${pr.adjA}</td>
+                         <td style="color:#555">vs</td>
+                         <td>P${pr.t1p}</td><td class="adj-val">${pr.adjB}</td>
+                         <td class="crush-val">×${pr.activeCrush}</td>
+                         <td class="${ptsCls}">${fmt(pr.duelPts)}</td>
+                       </tr>`;
+            }
+            // Subtotal row — shares the rowspan column cell, so 7 cells here.
+            const colCls = col.duelPts > 0 ? 'pts-pos' : col.duelPts < 0 ? 'pts-neg' : '';
+            html += `<tr class="col-subtotal">
+                       <td colspan="6" style="text-align:right;color:#aaa">Column total (T0 − T1)</td>
+                       <td class="${colCls}">${fmt(col.duelPts)}</td>
+                     </tr>`;
         }
 
-        const totalCls = totalDuel > 0 ? 'pts-pos' : totalDuel < 0 ? 'pts-neg' : '';
-        html += `</tbody>
-            <tfoot>
-                <tr class="score-total">
-                    <td colspan="10" style="text-align:right;color:#aaa">Total duel score</td>
-                    <td class="${totalCls}">${fmt(totalDuel)}</td>
-                </tr>
-            </tfoot>
-        </table>`;
+        html += `</tbody><tfoot>`;
 
-        panel.innerHTML = html;
-        return totalDuel;
+        // Team 0 per-player then sum — 8 cells per row in tfoot.
+        for (const p of [0, 2]) {
+            const cls = playerTotals[p] > 0 ? 'pts-pos' : playerTotals[p] < 0 ? 'pts-neg' : '';
+            html += `<tr>
+                       <td colspan="7" style="text-align:right;color:#aaa">P${p} total</td>
+                       <td class="${cls}">${fmt(playerTotals[p])}</td>
+                     </tr>`;
+        }
+        const t0 = playerTotals[0] + playerTotals[2];
+        const t0Cls = t0 > 0 ? 'pts-pos' : t0 < 0 ? 'pts-neg' : '';
+        html += `<tr class="score-total">
+                   <td colspan="7" style="text-align:right">Team 0 (P0 + P2)</td>
+                   <td class="${t0Cls}">${fmt(t0)}</td>
+                 </tr>`;
+
+        // Team 1 per-player then sum.
+        for (const p of [1, 3]) {
+            const cls = playerTotals[p] > 0 ? 'pts-pos' : playerTotals[p] < 0 ? 'pts-neg' : '';
+            html += `<tr>
+                       <td colspan="7" style="text-align:right;color:#aaa">P${p} total</td>
+                       <td class="${cls}">${fmt(playerTotals[p])}</td>
+                     </tr>`;
+        }
+        const t1 = playerTotals[1] + playerTotals[3];
+        const t1Cls = t1 > 0 ? 'pts-pos' : t1 < 0 ? 'pts-neg' : '';
+        html += `<tr class="score-total">
+                   <td colspan="7" style="text-align:right">Team 1 (P1 + P3)</td>
+                   <td class="${t1Cls}">${fmt(t1)}</td>
+                 </tr>`;
+
+        html += `</tfoot></table>`;
+        return html;
     },
 
     async updateUI() {
@@ -241,9 +483,16 @@ const Game = {
         if (gs.game_over) {
             const scoreStr = duel != null ? ` (duel score: ${duel > 0 ? '+' + duel : duel})` : '';
             const r = gs.result;
-            if (r === 1.0) Game.setStatus(`Game over — Player 0 wins!${scoreStr}`, 'win');
-            else if (r === 0.0) Game.setStatus(`Game over — Player 1 wins!${scoreStr}`, 'win');
-            else Game.setStatus(`Game over — Draw!${scoreStr}`, 'draw');
+            const numP = gs.num_players || (gs.player_types ? gs.player_types.length : 2);
+            if (r === 1.0) {
+                const winners = numP === 4 ? 'P0 and P2' : 'Player 0';
+                Game.setStatus(`Game over — ${winners} win!${scoreStr}`, 'win');
+            } else if (r === 0.0) {
+                const winners = numP === 4 ? 'P1 and P3' : 'Player 1';
+                Game.setStatus(`Game over — ${winners} win!${scoreStr}`, 'win');
+            } else {
+                Game.setStatus(`Game over — Draw!${scoreStr}`, 'draw');
+            }
             document.getElementById('btn-step').disabled = true;
             document.getElementById('btn-play-all').disabled = true;
         } else if (gs.waiting_for_human) {
@@ -255,10 +504,18 @@ const Game = {
             Game.setStatus(`Player ${pIdx}'s turn (${pType}) — click Step to advance`);
         }
 
+        // Variant-aware UI: switch the boards area into 2x2 layout for 2v2
+        // and ensure a board container exists for each player.
+        const numPlayers = gs.num_players || (gs.player_types ? gs.player_types.length : 2);
+        const variant = gs.game_variant || ((numPlayers === 4) ? '2v2' : '1v1');
+        Game.ensureBoardContainers(numPlayers, variant);
+
         // Player type labels.
         if (gs.player_types) {
-            document.getElementById('p0-type').textContent = `(${gs.player_types[0]})`;
-            document.getElementById('p1-type').textContent = `(${gs.player_types[1]})`;
+            for (let p = 0; p < numPlayers; ++p) {
+                const el = document.getElementById(`p${p}-type`);
+                if (el) el.textContent = `(${gs.player_types[p]})`;
+            }
         }
 
         // Dice.
@@ -295,12 +552,19 @@ const Game = {
             document.getElementById('options-panel').style.display = 'none';
         }
 
-        // Boards.
+        // Boards. Render one per player; legalPN is non-null only for the
+        // current human player's sheet.
         if (gs.boards) {
-            Board.render('board-grid-0', gs.boards.player0, gs.coefficients,
-                         legalP0, (c, r) => Game.placeScore(c, r));
-            Board.render('board-grid-1', gs.boards.player1, gs.coefficients,
-                         legalP1, (c, r) => Game.placeScore(c, r));
+            for (let p = 0; p < numPlayers; ++p) {
+                const board = gs.boards[`player${p}`];
+                if (!board) continue;
+                let legalForP = null;
+                if (gs.waiting_for_human && !gs.game_over && p === gs.current_player) {
+                    legalForP = (p === 0) ? legalP0 : (p === 1 ? legalP1 : (Game.options?.placements || []));
+                }
+                Board.render(`board-grid-${p}`, board, gs.coefficients,
+                             legalForP, (c, r) => Game.placeScore(c, r));
+            }
         }
 
         // History.
@@ -397,7 +661,15 @@ const Game = {
 
             entry.innerHTML =
                 `<span class="${pClass}">P${turn.player}</span> ${chain}` +
+                ' <span class="copy-board" title="Copy the board position after this turn">⧉</span>' +
                 (hasDebug ? ' <span class="debug-toggle" title="Show bot evaluations">▶</span>' : '');
+
+            // Copy the board position as it stood right after this turn, so it
+            // can be pasted into "Load Position" to branch from here.
+            entry.querySelector('.copy-board').addEventListener('click', (e) => {
+                e.stopPropagation();
+                Game.copyPositionAt(i, e.target);
+            });
 
             // --- Debug panel (collapsed by default) ---
             let debugPanel = null;

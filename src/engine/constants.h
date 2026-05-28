@@ -1,18 +1,21 @@
 #pragma once
 
 #include <cstdint>
+#include "engine/game_traits.h"
 
 // ---------------------------------------------------------------------------
 // Global constants and enumerations for Pro Yams
 // ---------------------------------------------------------------------------
 
-constexpr int kNumPlayers  = 2;
 constexpr int kNumColumns  = 6;
 constexpr int kNumRows     = 13;
 constexpr int kNumDice     = 5;
 constexpr int kNumDieSides = 6;
-// Total cells on both players' boards
-constexpr int kTotalCells  = kNumPlayers * kNumColumns * kNumRows;  // 156
+
+// 1v1 backward-compat aliases. Existing non-templated call sites refer to
+// these; they are gradually removed as the engine is templatized (Tasks 2-7).
+constexpr int kNumPlayers = Yams1v1::kNumPlayers;        // 2
+constexpr int kTotalCells = Yams1v1::kTotalCells;        // 156
 
 // Column indices (fixed assignment per design doc)
 enum Column : int8_t {

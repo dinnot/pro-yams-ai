@@ -1,16 +1,30 @@
 // REST API client for the Pro Yams Play frontend.
 
 const API = {
-    async newGame(player0, player1) {
+    // The server's variant is fixed at launch (1v1 or 2v2). Probe it
+    // before creating a game so the client sends the correct number of
+    // player_types — otherwise missing seats default to heuristic.
+    async info() {
+        const res = await fetch('/api/info');
+        return res.json();
+    },
+
+    // playerTypes is an array of strings (one per seat: 'human', 'nn',
+    // 'heuristic_v2', etc.) The server reads player0..playerN-1 keys and
+    // defaults missing seats to heuristic — so the array length must
+    // match the server's variant (2 entries → 1v1, 4 entries → 2v2).
+    async newGame(playerTypes) {
+        const body = {
+            seed: Math.floor(Math.random() * 1000000),
+            debug_mode: false,
+        };
+        for (let i = 0; i < playerTypes.length; i++) {
+            body['player' + i] = playerTypes[i];
+        }
         const res = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                player0,
-                player1,
-                seed: Math.floor(Math.random() * 1000000),
-                debug_mode: false,
-            }),
+            body: JSON.stringify(body),
         });
         return res.json();
     },
@@ -22,6 +36,11 @@ const API = {
 
     async step(id) {
         const res = await fetch(`/api/game/${id}/step`, { method: 'POST' });
+        return res.json();
+    },
+
+    async botStep(id) {
+        const res = await fetch(`/api/game/${id}/bot_step`, { method: 'POST' });
         return res.json();
     },
 

@@ -1,4 +1,5 @@
 #include "engine/placement.h"
+#include "engine/game_traits.h"
 #include "engine/legal_moves.h"
 
 #include <algorithm>
@@ -6,17 +7,25 @@
 
 // Recompute golden_max for a (column, row) from the actual cell values.
 // Called after mutual SS/LS destruction overwrites a previously non-zero cell.
-static void recalc_golden_max(int column, int row, const BoardState& board, GameContext& ctx) {
+// In 2v2 this scans all 4 players (teammates included) — the Golden Rule
+// applies globally across the table.
+template <typename Traits>
+static void recalc_golden_max(int column, int row,
+                              const BoardStateT<Traits>& board,
+                              GameContextT<Traits>& ctx) {
     int8_t best = 0;
-    for (int p = 0; p < kNumPlayers; ++p) {
+    for (int p = 0; p < Traits::kNumPlayers; ++p) {
         int8_t v = board.cells[p][column][row];
         if (v > best) best = v;
     }
     ctx.golden_max[column][row] = best;
 }
 
+template <typename Traits>
 void apply_placement(int player, int column, int row, int score,
-                     BoardState& board, GameContext& ctx) {
+                     BoardStateT<Traits>& board,
+                     GameContextT<Traits>& ctx,
+                     bool update_legal_cache) {
     assert(board.cells[player][column][row] == kCellEmpty &&
            "Cannot place in an already filled cell!");
 
@@ -45,7 +54,7 @@ void apply_placement(int player, int column, int row, int score,
             board.cells[player][column][kRowLS] = 0;
             ctx.ls_scratched[player][column] = true;
             ctx.lower_has_scratch[player][column] = true;
-            recalc_golden_max(column, kRowLS, board, ctx);
+            recalc_golden_max<Traits>(column, kRowLS, board, ctx);
         }
     } else if (row == kRowLS && score == 0) {
         ctx.ls_scratched[player][column] = true;
@@ -55,7 +64,7 @@ void apply_placement(int player, int column, int row, int score,
             board.cells[player][column][kRowSS] = 0;
             ctx.ss_scratched[player][column] = true;
             ctx.lower_has_scratch[player][column] = true;
-            recalc_golden_max(column, kRowSS, board, ctx);
+            recalc_golden_max<Traits>(column, kRowSS, board, ctx);
         }
     }
 
@@ -69,6 +78,23 @@ void apply_placement(int player, int column, int row, int score,
         ctx.non_turbo_cells_remaining[player]--;
     }
 
-    // 8. Update legal placements (incremental)
-    update_legal_placements_after_move(player, column, row, board, ctx);
+    // 8. Update legal placements (incremental). Skipped when the caller
+    //    will only consult the resulting context for board/score lookups
+    //    and not for legal-move iteration.
+    if (update_legal_cache) {
+        update_legal_placements_after_move<Traits>(player, column, row, board, ctx);
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Explicit instantiations
+// ---------------------------------------------------------------------------
+
+template void apply_placement<Yams1v1>(int, int, int, int,
+                                       BoardStateT<Yams1v1>&,
+                                       GameContextT<Yams1v1>&,
+                                       bool);
+template void apply_placement<Yams2v2>(int, int, int, int,
+                                       BoardStateT<Yams2v2>&,
+                                       GameContextT<Yams2v2>&,
+                                       bool);

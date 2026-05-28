@@ -2,12 +2,91 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "engine/constants.h"
 
 struct PrecomputedTables;
+class DPMmap;  // RAII wrapper around the mmap'd cache file (defined in .cc).
+
+// ---------------------------------------------------------------------------
+// DPBuffer<T> — a vector-like buffer that can either own heap memory (used
+// when DP tables are computed fresh) or refer to an externally-managed region
+// (used when tables are loaded via mmap of the on-disk cache).
+//
+// Exposes the subset of std::vector's API that DP-table code uses:
+//   data(), size(), empty(), operator[], resize(), assign(n, value).
+// resize/assign always switch the buffer to owning (heap) mode.
+// ---------------------------------------------------------------------------
+template <typename T>
+class DPBuffer {
+public:
+    DPBuffer() = default;
+    DPBuffer(const DPBuffer&) = delete;
+    DPBuffer& operator=(const DPBuffer&) = delete;
+
+    DPBuffer(DPBuffer&& o) noexcept { steal(o); }
+    DPBuffer& operator=(DPBuffer&& o) noexcept {
+        if (this != &o) { release(); steal(o); }
+        return *this;
+    }
+    ~DPBuffer() { release(); }
+
+    // Owning, heap-backed allocation. Used by the compute path.
+    void assign(std::size_t n, const T& value) {
+        release();
+        if (n == 0) return;
+        data_  = new T[n];
+        size_  = n;
+        owns_  = true;
+        for (std::size_t i = 0; i < n; ++i) data_[i] = value;
+    }
+    void resize(std::size_t n) {
+        release();
+        if (n == 0) return;
+        data_  = new T[n]();   // value-initialise (zero for arithmetic types)
+        size_  = n;
+        owns_  = true;
+    }
+
+    // Non-owning view into externally-managed memory (e.g. the mmap region).
+    // Lifetime of the backing memory must outlive this buffer.
+    void adopt_view(const T* ptr, std::size_t n) {
+        release();
+        data_ = const_cast<T*>(ptr);
+        size_ = n;
+        owns_ = false;
+    }
+
+    T*          data()                       { return data_; }
+    const T*    data()  const                { return data_; }
+    std::size_t size()  const                { return size_; }
+    bool        empty() const                { return size_ == 0; }
+    T&          operator[](std::size_t i)       { return data_[i]; }
+    const T&    operator[](std::size_t i) const { return data_[i]; }
+
+private:
+    void release() {
+        if (owns_) delete[] data_;
+        data_ = nullptr;
+        size_ = 0;
+        owns_ = false;
+    }
+    void steal(DPBuffer& o) noexcept {
+        data_ = o.data_;
+        size_ = o.size_;
+        owns_ = o.owns_;
+        o.data_ = nullptr;
+        o.size_ = 0;
+        o.owns_ = false;
+    }
+
+    T*          data_ = nullptr;
+    std::size_t size_ = 0;
+    bool        owns_ = false;
+};
 
 // ---------------------------------------------------------------------------
 // DP Tables — six precomputed Dynamic Programming tables for Pro Yams.
@@ -32,7 +111,7 @@ struct PrecomputedTables;
 constexpr int kDPNumTurns        = 79;     // T = 0..78
 constexpr int kDPNumVariants     = 5;
 constexpr int kDPUpperStates     = 6400;
-constexpr int kDPMiddleStates    = 169;    // 13×13 (incl. 31 = forced scratch)
+constexpr int kDPMiddleStates    = 1690;   // 13(ss_min)×13(ls_min)×10(ss_cap)
 constexpr int kDPLowerStates     = 17640;
 constexpr int kDPUpperRMax       = 100;
 constexpr int kDPUpperSumMax     = 105;
@@ -59,31 +138,48 @@ struct DPVal {
 
 struct DPTables {
     // dp_t1[T][var][sc][R]   layout, R dim padded to kDPUpperRPad
-    std::vector<float> dp_t1;
+    DPBuffer<float> dp_t1;
     // dp_t4[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad
-    std::vector<float> dp_t4;
+    DPBuffer<float> dp_t4;
     // dp_t5[T][var][sc][S]   layout, S dim padded to kDPUpperSumPad (E[X^2])
-    std::vector<float> dp_t5;
+    DPBuffer<float> dp_t5;
     // dp_mid[T][var][sc]
-    std::vector<DPVal> dp_mid;
+    DPBuffer<DPVal> dp_mid;
     // dp_low[T][var][sc]
-    std::vector<DPVal> dp_low;
+    DPBuffer<DPVal> dp_low;
+
+    // Owns the mmap region when tables are loaded from cache. The DPBuffer
+    // views above point into this region; declare it last so it outlives them
+    // and on destruction is freed only after the views are released.
+    std::unique_ptr<DPMmap> mapped;
+
+    DPTables();
+    ~DPTables();
+    DPTables(DPTables&&) noexcept;
+    DPTables& operator=(DPTables&&) noexcept;
+    DPTables(const DPTables&) = delete;
+    DPTables& operator=(const DPTables&) = delete;
 };
 
 // =========================================================================
 // Encoders / Decoders
 // Invalid (un-mapped) values in Sc clamp to index 1 (== a "0" constraint).
 //
-// Middle Sc convention: SS / LS each take values in
-//   {-1 (filled), 0 (no constraint), 21..30 (golden threshold),
-//    31 (forced scratch — mutual destruction)}.
+// Middle Sc convention: a 3-slot state {ss_min, ls_min, ss_cap}.
+//   Sc[0] ss_min, Sc[1] ls_min each take values in
+//     {-1 (filled), 0 (no constraint), 21..30 (golden threshold),
+//      31 (forced scratch — mutual destruction)}.
+//   Sc[2] ss_cap is the strict upper bound imposed on SS by an already-filled
+//     LS (SS must be < LS): 0 (no binding cap, i.e. LS open / LS >= 30) or
+//     21..29 (SS < this value). A filled LS <= 20 makes SS impossible and is
+//     expressed via Sc[0]=31 instead, so the cap range starts at 21.
 // At runtime, callers must pass Sc[LS]=31 if ctx.ss_scratched is true and
 // LS is still empty (and likewise Sc[SS]=31 if ctx.ls_scratched is true).
 // =========================================================================
 int  encode_upper (const int8_t Sc[6]);
 void decode_upper (int id, int8_t Sc[6]);
-int  encode_middle(int8_t ss, int8_t ls);
-void decode_middle(int id, int8_t Sc[2]);
+int  encode_middle(int8_t ss, int8_t ls, int8_t ss_cap);
+void decode_middle(int id, int8_t Sc[3]);
 int  encode_lower (const int8_t Sc[5]);
 void decode_lower (int id, int8_t Sc[5]);
 
@@ -107,9 +203,9 @@ void init_dp_tables(DPTables& dp,
 float get_upper_prob (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int R);
 float get_upper_ev   (const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
 float get_upper_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[6], int T, int current_sum);
-float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
-float get_middle_ev  (const DPTables& dp, Variant v, const int8_t Sc[2], int T);
-float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[2], int T);
+float get_middle_prob(const DPTables& dp, Variant v, const int8_t Sc[3], int T);
+float get_middle_ev  (const DPTables& dp, Variant v, const int8_t Sc[3], int T);
+float get_middle_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[3], int T);
 float get_lower_prob (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 float get_lower_ev   (const DPTables& dp, Variant v, const int8_t Sc[5], int T);
 float get_lower_ev_sq(const DPTables& dp, Variant v, const int8_t Sc[5], int T);

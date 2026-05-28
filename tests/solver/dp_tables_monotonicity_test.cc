@@ -71,7 +71,7 @@ TEST(DPMonotonicityTest, UpperEVNonnegativeFromEmpty) {
 
 TEST(DPMonotonicityTest, MiddleAndLowerInRangeFromEmpty) {
     const DPTables& dp = shared_dp();
-    int8_t mid[2] = {0, 0};
+    int8_t mid[3] = {0, 0, 0};
     int8_t low[5] = {0, 0, 0, 0, 0};
     for (int v : kVariants) {
         for (int T = 2; T <= 78; ++T) {
@@ -113,7 +113,7 @@ TEST(DPMonotonicityTest, MoreTurnsHelpEmptyUpper) {
 
 TEST(DPMonotonicityTest, MoreTurnsHelpEmptyMiddleLower) {
     const DPTables& dp = shared_dp();
-    int8_t mid[2] = {0, 0};
+    int8_t mid[3] = {0, 0, 0};
     int8_t low[5] = {0, 0, 0, 0, 0};
     float prev_pm = -1.0f, prev_em = -1.0f;
     for (int T = 2; T <= 78; ++T) {

@@ -453,13 +453,13 @@ inline void scalar_rollback(ScalarBuffers& buf,
 // Middle Section DP (Tasks 2 & 5)
 // ===========================================================================
 void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
-    std::vector<std::array<int8_t, 2>> Sc_decoded(kDPMiddleStates);
+    std::vector<std::array<int8_t, 3>> Sc_decoded(kDPMiddleStates);
     std::vector<int> ec_count(kDPMiddleStates);
     for (int sc = 0; sc < kDPMiddleStates; ++sc) {
         decode_middle(sc, Sc_decoded[sc].data());
         int n = 0;
         for (int i = 0; i < 2; ++i) if (Sc_decoded[sc][i] != -1) ++n;
-        ec_count[sc] = n;
+        ec_count[sc] = n;  // ss_cap (Sc[2]) is metadata, not a playable cell
     }
 
     // T = 0 base.
@@ -509,12 +509,24 @@ void compute_middle_dp(DPTables& dp, const PrecomputedTables& tables) {
                             int c = valid[idx];
                             int row = kMiddleRow[c];
                             int raw = tables.score_tables.dice_score[d][row];
-                            int score = (raw >= Sc[c]) ? raw : 0;
+                            int score;
+                            if (c == 0) {
+                                // SS: clear the golden min AND stay strictly
+                                // below the LS cap (Sc[2]; 0 = no cap).
+                                const int8_t cap = Sc[2];
+                                bool ok = (raw >= Sc[0]) &&
+                                          (cap == 0 || raw < cap);
+                                score = ok ? raw : 0;
+                            } else {
+                                score = (raw >= Sc[1]) ? raw : 0;
+                            }
 
-                            int8_t next_ss, next_ls;
+                            int8_t next_ss, next_ls, next_cap;
                             apply_middle_destruction(c, score, Sc[0], Sc[1],
-                                                     next_ss, next_ls);
-                            int next_sc_dc = encode_middle(next_ss, next_ls);
+                                                     Sc[2], next_ss, next_ls,
+                                                     next_cap);
+                            int next_sc_dc =
+                                encode_middle(next_ss, next_ls, next_cap);
                             const DPVal& prev =
                                 dp.dp_mid[dp_idx_mid(T - 1, v, next_sc_dc)];
 

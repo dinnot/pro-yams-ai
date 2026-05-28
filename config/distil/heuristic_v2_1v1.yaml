@@ -1,0 +1,29 @@
+distil:
+  teacher_kind: heuristic
+  teacher_heuristic_version: 2
+  game_variant: 1v1
+  self_play:
+    num_workers: 16
+    num_games: 512
+  student:
+    hidden_layers: 4
+    hidden_width: 512
+    architecture: mlp
+    output_activation: tanh
+  train_batch_size: 1024
+  replay_buffer_capacity: 2000000
+  min_samples_to_start: 16384
+  samples_per_train: 1.0
+  max_steps: 500000
+  min_steps: 5000
+  reference_heuristic_version: 2
+  convergence_win_rate_delta: 0.02
+  convergence_patience: 3
+  eval_interval: 1000
+  eval_games: 200
+  final_eval_games: 1000
+  use_duel_margin_maximization: true
+  duel_margin_maximization_scale: 4000.0
+  checkpoint_dir: checkpoints/distil_v2
+  log_dir: logs/distil_v2
+  log_path: logs/distil_v2/distil_log.csv

@@ -147,7 +147,7 @@ static void BM_HeuristicFullGame(benchmark::State& state) {
     EnsureInit();
     for (auto _ : state) {
         RNG rng(state.iterations());
-        benchmark::DoNotOptimize(play_heuristic_game(rng, g_tables));
+        benchmark::DoNotOptimize(play_heuristic_game<Yams1v1>(rng, g_tables));
     }
 }
 BENCHMARK(BM_HeuristicFullGame);

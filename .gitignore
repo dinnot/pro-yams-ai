@@ -10,3 +10,12 @@ checkpoints/
 
 # Data files
 *.bin
+
+# Recorded games (default --games_dir for pro_yams_play / pro_yams_ui)
+recorded_games/
+
+# AI
+.claude/
+.agents/
+.codex/
+.antigravitycli/
