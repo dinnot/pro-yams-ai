@@ -133,5 +133,48 @@ const API = {
     async stopTournament() {
         const res = await fetch('/api/tournament/stop', { method: 'POST' });
         return res.json();
+    },
+
+    // Recorded games
+    async getGamesStats() {
+        const res = await fetch('/api/games/stats');
+        if (!res.ok) return null;
+        return res.json();
+    },
+
+    async listGames({ checkpoint, variant, outcome, limit, offset } = {}) {
+        const params = new URLSearchParams();
+        if (checkpoint) params.set('checkpoint', checkpoint);
+        if (variant)    params.set('variant', variant);
+        if (outcome)    params.set('outcome', outcome);
+        if (limit  != null) params.set('limit', limit);
+        if (offset != null) params.set('offset', offset);
+        const qs = params.toString();
+        const res = await fetch('/api/games/list' + (qs ? `?${qs}` : ''));
+        if (!res.ok) return { total: 0, games: [] };
+        return res.json();
+    },
+
+    async getGameRecord(uuid) {
+        const res = await fetch(`/api/games/${uuid}`);
+        if (!res.ok) return null;
+        return res.json();
+    },
+
+    // Evaluate a single replay position with the checkpoint that played the
+    // game. Returns { nn_value, player } on success or { error } on failure
+    // (e.g. checkpoint not loadable, or variant mismatch with this server).
+    async evalGamePosition({ checkpoint, player, position }) {
+        const res = await fetch('/api/games/eval', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpoint, player, position })
+        });
+        if (!res.ok) {
+            let msg = 'eval failed';
+            try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
+            return { error: msg };
+        }
+        return res.json();
     }
 };

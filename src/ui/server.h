@@ -1,8 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -12,10 +15,12 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "engine/duel.h"
 #include "engine/game_flow.h"
 #include "engine/game_traits.h"
 #include "engine/tensor.h"
 #include "eval/tournament.h"
+#include "ui/game_recorder.h"
 #include "ui/json_serialization.h"
 #include "ui/session_manager.h"
 
@@ -40,12 +45,16 @@ public:
               Sessions& sessions,
               const std::string& log_dir,
               const std::string& checkpoints_dir,
-              TournamentManagerT<Traits>* tournament)
+              TournamentManagerT<Traits>* tournament,
+              GameRecorder* recorder = nullptr,
+              const std::string& games_dir = "")
         : sessions_(sessions),
           log_dir_(log_dir),
           static_dir_(static_dir),
           checkpoints_dir_(checkpoints_dir),
+          games_dir_(games_dir),
           tournament_(tournament),
+          recorder_(recorder),
           port_(port) {
         register_routes();
     }
@@ -109,6 +118,16 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_tournament_status(req, res); });
         server_.Post("/api/tournament/stop",
             [this](const httplib::Request& req, httplib::Response& res) { handle_tournament_stop(req, res); });
+
+        // Recorded games (admin viewer). Available whenever a games dir is set.
+        server_.Get("/api/games/stats",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_stats(req, res); });
+        server_.Get("/api/games/list",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_list(req, res); });
+        server_.Post("/api/games/eval",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_eval(req, res); });
+        server_.Get(R"(/api/games/([0-9a-fA-F\-]+))",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_game_record(req, res); });
 
         if (!static_dir_.empty() && fs::exists(static_dir_)) {
             server_.set_mount_point("/", static_dir_);
@@ -277,6 +296,24 @@ private:
 
         Session copy;
         sessions_.get_session_copy(id, copy);
+
+        // Record the game start (play server only). Human seats are those
+        // configured as kHuman; coefficients come from the freshly dealt board.
+        if (recorder_) {
+            GameStartInfo info;
+            info.variant     = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
+            info.num_players = Traits::kNumPlayers;
+            for (int p = 0; p < Traits::kNumPlayers; ++p)
+                if (pts[p] == PlayerType::kHuman) info.human_seats.push_back(p);
+            for (int c = 0; c < kNumColumns; ++c)
+                info.coefficients.push_back(
+                    static_cast<int>(copy.state.board.coefficients[c]));
+            info.ip              = req.remote_addr;
+            info.x_forwarded_for = req.get_header_value("X-Forwarded-For");
+            info.user_agent      = req.get_header_value("User-Agent");
+            recorder_->start_game(id, info);
+        }
+
         json_response(res, {{"session_id", id},
                              {"game_state", game_state_to_json<Traits>(copy)}});
     }
@@ -297,6 +334,7 @@ private:
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
         }
+        record_if_finished(id, copy);
         json_response(res, game_state_to_json<Traits>(copy));
     }
 
@@ -307,6 +345,7 @@ private:
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
         }
+        record_if_finished(id, copy);
         json_response(res, game_state_to_json<Traits>(copy));
     }
 
@@ -317,12 +356,16 @@ private:
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
         }
+        record_if_finished(id, copy);
         json_response(res, game_state_to_json<Traits>(copy));
     }
 
     void handle_delete_game(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
         sessions_.remove_session(id);
+        // A game deleted before completion counts as abandoned (its started.jsonl
+        // line has no matching finished.jsonl entry → drop rate).
+        if (recorder_) recorder_->forget(id);
         json_response(res, {{"ok", true}});
     }
 
@@ -369,6 +412,7 @@ private:
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
         }
+        record_if_finished(id, copy);
         json_response(res, game_state_to_json<Traits>(copy));
     }
 
@@ -591,12 +635,330 @@ private:
         json_response(res, {{"ok", true}});
     }
 
+    // ---- Recorded games ----
+    static int team_of(int player) {
+        return (Traits::kNumPlayers == 4) ? (player & 1) : player;
+    }
+
+    // If the game just ended (and recording is enabled), compute the outcome
+    // and hand the full record to the recorder. Idempotent: the recorder drops
+    // its per-session metadata on the first call, so later calls are no-ops.
+    void record_if_finished(int id, const Session& copy) {
+        if (!recorder_ || !copy.game_over) return;
+
+        GameOutcome out;
+        out.result      = copy.result;
+        out.winner_team = (copy.result > 0.5) ? 0 : (copy.result < 0.5) ? 1 : -1;
+
+        out.human_team = -1;
+        for (int p = 0; p < Traits::kNumPlayers; ++p) {
+            if (copy.player_types[p] == PlayerType::kHuman) {
+                out.human_team = team_of(p);
+                break;
+            }
+        }
+
+        const auto cols = compute_duel_columns<Traits>(copy.state.board, copy.ctx);
+        long total = 0;
+        out.column_margins.resize(kNumColumns);
+        for (int c = 0; c < kNumColumns; ++c) {
+            out.column_margins[c] = cols[c];
+            total += cols[c];
+        }
+        out.total_margin = total;
+
+        out.player_column_scores.resize(Traits::kNumPlayers);
+        for (int p = 0; p < Traits::kNumPlayers; ++p) {
+            out.player_column_scores[p].resize(kNumColumns);
+            for (int c = 0; c < kNumColumns; ++c) {
+                int cell_sum = 0;
+                for (int r = 0; r < kNumRows; ++r) {
+                    int8_t v = copy.state.board.cells[p][c][r];
+                    if (v > 0) cell_sum += v;
+                }
+                out.player_column_scores[p][c] =
+                    cell_sum + upper_section_bonus(copy.ctx.upper_sum[p][c]);
+            }
+        }
+
+        recorder_->finish_game(id, game_state_to_json<Traits>(copy), out);
+    }
+
+    std::vector<nlohmann::json> read_jsonl(const std::string& path) const {
+        std::vector<nlohmann::json> out;
+        std::ifstream f(path);
+        if (!f) return out;
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.empty()) continue;
+            try { out.push_back(nlohmann::json::parse(line)); }
+            catch (...) { /* skip malformed lines */ }
+        }
+        return out;
+    }
+
+    // Is this finished-game entry a human win / loss / draw?
+    static std::string human_result(const nlohmann::json& g) {
+        double result = g.value("result", 0.5);
+        int team = g.value("human_team", -1);
+        if (result == 0.5 || team < 0) return "draw";
+        bool team0_won = (result > 0.5);
+        bool human_won = (team0_won && team == 0) || (!team0_won && team == 1);
+        return human_won ? "win" : "loss";
+    }
+    static long human_margin(const nlohmann::json& g) {
+        long m = g.value("total_margin", 0);
+        return (g.value("human_team", 0) == 0) ? m : -m;
+    }
+
+    // Effective client IP for an entry: the proxy-forwarded address when set
+    // (the real client behind our reverse proxy), otherwise the socket peer.
+    static std::string client_ip(const nlohmann::json& g) {
+        std::string xff = g.value("x_forwarded_for", "");
+        return xff.empty() ? g.value("ip", "") : xff;
+    }
+
+    void handle_games_stats(const httplib::Request&, httplib::Response& res) {
+        if (games_dir_.empty()) { error_response(res, "no games directory configured", 404); return; }
+        namespace fs = std::filesystem;
+        auto started  = read_jsonl((fs::path(games_dir_) / "started.jsonl").string());
+        auto finished = read_jsonl((fs::path(games_dir_) / "finished.jsonl").string());
+
+        struct Agg {
+            std::string checkpoint, variant;
+            long started = 0, finished = 0;
+            long wins = 0, losses = 0, draws = 0;
+            double margin_sum = 0.0;
+        };
+        std::map<std::string, Agg> groups;  // key: checkpoint \n variant
+        auto key_of = [](const std::string& ckpt, const std::string& var) {
+            return ckpt + "\n" + var;
+        };
+
+        for (const auto& g : started) {
+            std::string ckpt = g.value("checkpoint", "");
+            std::string var  = g.value("variant", "");
+            auto& a = groups[key_of(ckpt, var)];
+            a.checkpoint = ckpt; a.variant = var; a.started++;
+        }
+        for (const auto& g : finished) {
+            std::string ckpt = g.value("checkpoint", "");
+            std::string var  = g.value("variant", "");
+            auto& a = groups[key_of(ckpt, var)];
+            a.checkpoint = ckpt; a.variant = var; a.finished++;
+            std::string hr = human_result(g);
+            if      (hr == "win")  a.wins++;
+            else if (hr == "loss") a.losses++;
+            else                   a.draws++;
+            a.margin_sum += static_cast<double>(human_margin(g));
+        }
+
+        nlohmann::json by_ckpt = nlohmann::json::array();
+        long tot_started = 0, tot_finished = 0, tot_wins = 0, tot_losses = 0, tot_draws = 0;
+        double tot_margin = 0.0;
+        for (const auto& [k, a] : groups) {
+            long dropped = a.started - a.finished;
+            if (dropped < 0) dropped = 0;
+            nlohmann::json row;
+            row["checkpoint"]      = a.checkpoint;
+            row["variant"]         = a.variant;
+            row["started"]         = a.started;
+            row["finished"]        = a.finished;
+            row["dropped"]         = dropped;
+            row["drop_rate"]       = a.started > 0 ? static_cast<double>(dropped) / a.started : 0.0;
+            row["human_wins"]      = a.wins;
+            row["human_losses"]    = a.losses;
+            row["draws"]           = a.draws;
+            row["human_win_rate"]  = a.finished > 0 ? static_cast<double>(a.wins) / a.finished : 0.0;
+            row["avg_human_margin"]= a.finished > 0 ? a.margin_sum / a.finished : 0.0;
+            by_ckpt.push_back(row);
+            tot_started += a.started; tot_finished += a.finished;
+            tot_wins += a.wins; tot_losses += a.losses; tot_draws += a.draws;
+            tot_margin += a.margin_sum;
+        }
+
+        // ---- Per-human aggregation ----
+        // A "human" is keyed by effective client IP + user-agent. started lines
+        // carry that identity directly; finished lines do not, so we join them
+        // back to their started line by uuid.
+        struct HumanAgg {
+            std::string ip, user_agent;
+            long started = 0, finished = 0;
+            long wins = 0, losses = 0, draws = 0;
+            double margin_sum = 0.0;
+            int64_t last_ts_ms = 0;
+        };
+        std::map<std::string, HumanAgg> humans;          // key: ip \n user_agent
+        std::map<std::string, std::string> uuid_to_human;  // finished -> identity
+        auto human_key = [](const std::string& ip, const std::string& ua) {
+            return ip + "\n" + ua;
+        };
+
+        for (const auto& g : started) {
+            std::string ip = client_ip(g);
+            std::string ua = g.value("user_agent", "");
+            std::string key = human_key(ip, ua);
+            auto& h = humans[key];
+            h.ip = ip; h.user_agent = ua; h.started++;
+            int64_t ts = g.value("start_ts_ms", (int64_t)0);
+            if (ts > h.last_ts_ms) h.last_ts_ms = ts;
+            std::string uuid = g.value("uuid", "");
+            if (!uuid.empty()) uuid_to_human[uuid] = key;
+        }
+        for (const auto& g : finished) {
+            auto it = uuid_to_human.find(g.value("uuid", ""));
+            if (it == uuid_to_human.end()) continue;  // no matching started line
+            auto& h = humans[it->second];
+            h.finished++;
+            std::string hr = human_result(g);
+            if      (hr == "win")  h.wins++;
+            else if (hr == "loss") h.losses++;
+            else                   h.draws++;
+            h.margin_sum += static_cast<double>(human_margin(g));
+            int64_t ts = g.value("finish_ts_ms", (int64_t)0);
+            if (ts > h.last_ts_ms) h.last_ts_ms = ts;
+        }
+
+        nlohmann::json by_human = nlohmann::json::array();
+        for (const auto& [k, h] : humans) {
+            long dropped = h.started - h.finished;
+            if (dropped < 0) dropped = 0;
+            nlohmann::json row;
+            row["ip"]               = h.ip;
+            row["user_agent"]       = h.user_agent;
+            row["started"]          = h.started;
+            row["finished"]         = h.finished;
+            row["dropped"]          = dropped;
+            row["drop_rate"]        = h.started > 0 ? static_cast<double>(dropped) / h.started : 0.0;
+            row["human_wins"]       = h.wins;
+            row["human_losses"]     = h.losses;
+            row["draws"]            = h.draws;
+            row["human_win_rate"]   = h.finished > 0 ? static_cast<double>(h.wins) / h.finished : 0.0;
+            row["avg_human_margin"] = h.finished > 0 ? h.margin_sum / h.finished : 0.0;
+            row["last_ts_ms"]       = h.last_ts_ms;
+            by_human.push_back(row);
+        }
+
+        long tot_dropped = tot_started - tot_finished;
+        if (tot_dropped < 0) tot_dropped = 0;
+        nlohmann::json overall;
+        overall["started"]          = tot_started;
+        overall["finished"]         = tot_finished;
+        overall["dropped"]          = tot_dropped;
+        overall["drop_rate"]        = tot_started > 0 ? static_cast<double>(tot_dropped) / tot_started : 0.0;
+        overall["human_wins"]       = tot_wins;
+        overall["human_losses"]     = tot_losses;
+        overall["draws"]            = tot_draws;
+        overall["human_win_rate"]   = tot_finished > 0 ? static_cast<double>(tot_wins) / tot_finished : 0.0;
+        overall["avg_human_margin"] = tot_finished > 0 ? tot_margin / tot_finished : 0.0;
+
+        json_response(res, {{"overall", overall}, {"by_checkpoint", by_ckpt},
+                            {"by_human", by_human}});
+    }
+
+    void handle_games_list(const httplib::Request& req, httplib::Response& res) {
+        if (games_dir_.empty()) { error_response(res, "no games directory configured", 404); return; }
+        namespace fs = std::filesystem;
+        auto finished = read_jsonl((fs::path(games_dir_) / "finished.jsonl").string());
+
+        const std::string f_ckpt   = req.has_param("checkpoint") ? req.get_param_value("checkpoint") : "";
+        const std::string f_var    = req.has_param("variant")    ? req.get_param_value("variant")    : "";
+        const std::string f_out    = req.has_param("outcome")    ? req.get_param_value("outcome")    : "";
+
+        std::vector<const nlohmann::json*> rows;
+        for (const auto& g : finished) {
+            if (!f_ckpt.empty() && g.value("checkpoint", "") != f_ckpt) continue;
+            if (!f_var.empty()  && g.value("variant", "")    != f_var)  continue;
+            if (!f_out.empty()  && human_result(g)           != f_out)  continue;
+            rows.push_back(&g);
+        }
+        // Newest first.
+        std::sort(rows.begin(), rows.end(), [](const nlohmann::json* a, const nlohmann::json* b) {
+            return a->value("finish_ts_ms", (int64_t)0) > b->value("finish_ts_ms", (int64_t)0);
+        });
+
+        long total  = static_cast<long>(rows.size());
+        long offset = req.has_param("offset") ? std::stol(req.get_param_value("offset")) : 0;
+        long limit  = req.has_param("limit")  ? std::stol(req.get_param_value("limit"))  : 50;
+        if (offset < 0) offset = 0;
+        if (limit  < 0) limit  = 0;
+
+        nlohmann::json games = nlohmann::json::array();
+        for (long i = offset; i < total && i < offset + limit; ++i)
+            games.push_back(*rows[i]);
+
+        json_response(res, {{"total", total}, {"offset", offset},
+                            {"limit", limit}, {"games", games}});
+    }
+
+    // POST /api/games/eval — evaluate a single replay position with the
+    // checkpoint that played the game. Body:
+    //   { "checkpoint": "<path>", "player": <seat>,
+    //     "position": { variant, coefficients, current_player, boards } }
+    // The position's variant must match this server's variant (parse_position
+    // enforces it), so a 2v2 game can only be evaluated by the 2v2 server.
+    // Returns { nn_value, player, checkpoint } where nn_value is the win-rate
+    // the checkpoint assigns to `player` (0..1).
+    void handle_games_eval(const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...) { error_response(res, "invalid JSON body"); return; }
+
+        std::string checkpoint = body.value("checkpoint", "");
+        if (checkpoint.empty()) { error_response(res, "missing checkpoint"); return; }
+        if (!body.contains("position") || !body["position"].is_object()) {
+            error_response(res, "missing position"); return;
+        }
+
+        BoardStateT<Traits> board;
+        std::string err;
+        if (!parse_position(body["position"], board, err)) {
+            error_response(res, err); return;
+        }
+
+        int player = body.value("player", -1);
+        if (player < 0) player = static_cast<int>(board.current_player);
+        if (player >= Traits::kNumPlayers) { error_response(res, "player out of range"); return; }
+
+        float value = 0.0f;
+        if (!sessions_.evaluate_position(checkpoint, board, player, value, err)) {
+            // libtorch load failures carry a full backtrace in what(); keep only
+            // the first line so the UI shows a readable message.
+            std::string brief = err.substr(0, err.find('\n'));
+            error_response(res, "could not load checkpoint: " + brief); return;
+        }
+        json_response(res, {{"nn_value", value}, {"player", player},
+                            {"checkpoint", checkpoint}});
+    }
+
+    void handle_game_record(const httplib::Request& req, httplib::Response& res) {
+        if (games_dir_.empty()) { error_response(res, "no games directory configured", 404); return; }
+        std::string uuid = req.matches[1].str();
+        // The route regex already restricts to [0-9a-fA-F-]; double-check to be
+        // safe against path traversal.
+        for (char c : uuid) {
+            if (!(std::isxdigit(static_cast<unsigned char>(c)) || c == '-')) {
+                error_response(res, "invalid id"); return;
+            }
+        }
+        namespace fs = std::filesystem;
+        fs::path p = fs::path(games_dir_) / "games" / (uuid + ".json");
+        std::ifstream f(p);
+        if (!f) { error_response(res, "game not found", 404); return; }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        res.status = 200;
+        res.set_content(ss.str(), "application/json");
+    }
+
     httplib::Server server_;
     Sessions&       sessions_;
     std::string     log_dir_;
     std::string     static_dir_;
     std::string     checkpoints_dir_;
+    std::string     games_dir_;
     TournamentManagerT<Traits>* tournament_;
+    GameRecorder*   recorder_;
     int             port_;
 };
 

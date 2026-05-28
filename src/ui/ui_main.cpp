@@ -20,18 +20,23 @@ template <typename Traits>
 int run_server_variant(int port, const std::string& static_dir,
                        const std::string& log_dir,
                        const std::string& checkpoints_dir,
+                       const std::string& games_dir,
                        const PrecomputedTables& tables,
                        ProYamsNet* model, torch::Device device) {
     SessionManagerT<Traits> sessions(tables, model, device);
     TournamentManagerT<Traits> tournament(tables, device);
+    // No recorder in the admin UI — it only reads the games directory written
+    // by the play servers.
     UIServerT<Traits> server(port, static_dir, sessions, log_dir,
-                              checkpoints_dir, &tournament);
+                              checkpoints_dir, &tournament,
+                              /*recorder=*/nullptr, games_dir);
 
     const char* tag = (Traits::kNumPlayers == 4) ? "(2v2)" : "";
     std::cout << "Pro Yams UI " << tag << " running at http://localhost:" << port << "\n";
     std::cout << "Frontend:        " << static_dir      << "\n";
     std::cout << "Log dir:         " << log_dir         << "\n";
     std::cout << "Checkpoints dir: " << checkpoints_dir << "\n";
+    std::cout << "Games dir:       " << games_dir       << "\n";
     std::cout << "Press Ctrl+C to stop.\n";
     server.start();
     return 0;
@@ -44,6 +49,7 @@ int main(int argc, char* argv[]) {
     std::string log_dir         = ".";
     std::string static_dir      = "./static";
     std::string checkpoints_dir;
+    std::string games_dir       = "./recorded_games";
     int         port            = 8080;
     std::string variant         = "1v1";
 
@@ -53,6 +59,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--log_dir"         && i + 1 < argc) log_dir         = argv[++i];
         else if (arg == "--static_dir"      && i + 1 < argc) static_dir      = argv[++i];
         else if (arg == "--checkpoints_dir" && i + 1 < argc) checkpoints_dir = argv[++i];
+        else if (arg == "--games_dir"       && i + 1 < argc) games_dir       = argv[++i];
         else if (arg == "--port"            && i + 1 < argc) port            = std::stoi(argv[++i]);
         else if (arg == "--variant"         && i + 1 < argc) variant         = argv[++i];
         else if (arg == "--game_variant"    && i + 1 < argc) variant         = argv[++i];
@@ -102,10 +109,10 @@ int main(int argc, char* argv[]) {
 
     if (variant == "2v2") {
         return run_server_variant<Yams2v2>(port, static_dir, log_dir,
-                                            checkpoints_dir, tables,
+                                            checkpoints_dir, games_dir, tables,
                                             model.get(), device);
     }
     return run_server_variant<Yams1v1>(port, static_dir, log_dir,
-                                        checkpoints_dir, tables,
+                                        checkpoints_dir, games_dir, tables,
                                         model.get(), device);
 }

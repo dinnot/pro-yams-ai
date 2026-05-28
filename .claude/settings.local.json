@@ -373,7 +373,27 @@
       "Bash(echo \"CTEST_EXIT=$?\")",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build --target dp_tables_monotonicity_test)",
       "Bash(echo \"launched PID $!\")",
-      "Bash(DP_TABLES_CACHE=/home/sorin/pro_yams_ai/cache/dp_tables/dp_verify_tmp.bin /tmp/chk)"
+      "Bash(DP_TABLES_CACHE=/home/sorin/pro_yams_ai/cache/dp_tables/dp_verify_tmp.bin /tmp/chk)",
+      "Bash(ldconfig -p)",
+      "Bash(cmake --build . --target pro_yams_ui)",
+      "Bash(./build/bin/pro_yams_ui --port 8096 --games_dir ./recorded_games --static_dir ./src/ui/static)",
+      "Bash(curl -s http://localhost:8096/api/games/stats)",
+      "Bash(./build/src/ui/pro_yams_ui --port 8096 --games_dir ./recorded_games --static_dir ./src/ui/static)",
+      "Bash(cmake --build . --target pro_yams_play)",
+      "Bash(./build/bin/pro_yams_ui --port 8095 --variant 1v1 --games_dir recorded_games --static_dir src/ui/static)",
+      "Bash(echo \"launched pid $!\")",
+      "Bash(curl -s localhost:8095/api/info)",
+      "Bash(break)",
+      "Bash(curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./checkpoints/mlp-256/selfplay10/checkpoint_step_200000\",\"player\":0,\"position\":{\"variant\":\"1v1\",\"coefficients\":[1,1,1,1,1,1],\"current_player\":0,\"boards\":{\"player0\":{},\"player1\":{}}}}')",
+      "Bash(time curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./checkpoints/mlp-256/selfplay10/checkpoint_step_200000\",\"player\":1,\"position\":{\"variant\":\"1v1\",\"coefficients\":[1,1,1,1,1,1],\"current_player\":0,\"boards\":{\"player0\":{},\"player1\":{}}}}')",
+      "Bash(curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./nonexistent/foo\",\"player\":0,\"position\":{\"variant\":\"1v1\",\"coefficients\":[1,1,1,1,1,1],\"current_player\":0,\"boards\":{\"player0\":{},\"player1\":{}}}}')",
+      "Bash(curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./checkpoints/mlp-256/selfplay10/checkpoint_step_200000\",\"player\":0,\"position\":{\"variant\":\"2v2\",\"coefficients\":[1,1,1,1,1,1],\"current_player\":0,\"boards\":{\"player0\":{},\"player1\":{}}}}')",
+      "Bash(cmake --build build --target pro_yams_ui)",
+      "Bash(kill 286623)",
+      "Bash(echo \"pid $!\")",
+      "Bash(curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./checkpoints/mlp-256/selfplay10/checkpoint_step_200000\",\"player\":0,\"position\":{\"variant\":\"1v1\",\"coefficients\":[2,1,1,1,1,1],\"current_player\":1,\"boards\":{\"player0\":{\"down\":{\"1s\":5,\"2s\":10,\"3s\":15,\"4s\":20,\"5s\":25,\"6s\":30,\"K\":30,\"Y\":50}},\"player1\":{\"down\":{\"1s\":1,\"2s\":2}}}}')",
+      "Bash(curl -s -X POST localhost:8095/api/games/eval -H 'Content-Type: application/json' -d '{\"checkpoint\":\"./checkpoints/mlp-256/selfplay10/checkpoint_step_200000\",\"player\":1,\"position\":{\"variant\":\"1v1\",\"coefficients\":[2,1,1,1,1,1],\"current_player\":1,\"boards\":{\"player0\":{\"down\":{\"1s\":5,\"2s\":10,\"3s\":15,\"4s\":20,\"5s\":25,\"6s\":30,\"K\":30,\"Y\":50}},\"player1\":{\"down\":{\"1s\":1,\"2s\":2}}}}')",
+      "Bash(kill 291790)"
     ]
   }
 }

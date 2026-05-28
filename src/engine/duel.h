@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+
 #include "engine/board_state.h"
+#include "engine/constants.h"
 #include "engine/game_context.h"
 
 // ---------------------------------------------------------------------------
@@ -33,3 +36,15 @@ int crush_multiplier(int my_raw, int opp_raw);
 template <typename Traits>
 int compute_duel(const BoardStateT<Traits>& board,
                  const GameContextT<Traits>& ctx);
+
+// ---------------------------------------------------------------------------
+// compute_duel_columns — same calculation as compute_duel(), but returns the
+// Team-0-perspective duel points for each column separately (the [c] entry is
+// the contribution of column c). compute_duel() == sum of the returned array.
+//
+// Used to record the per-column outcome breakdown of finished games.
+// ---------------------------------------------------------------------------
+template <typename Traits>
+std::array<int, kNumColumns> compute_duel_columns(
+    const BoardStateT<Traits>& board,
+    const GameContextT<Traits>& ctx);

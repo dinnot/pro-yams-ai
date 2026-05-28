@@ -15,6 +15,7 @@
     <button class="tab-btn" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="comparison">Run Comparison</button>
     <button class="tab-btn" data-tab="tournament">Tournament</button>
+    <button class="tab-btn" data-tab="games">Recorded Games</button>
   </nav>
 </header>
 
@@ -269,6 +270,80 @@
     </div>
   </section>
 
+  <!-- ===== RECORDED GAMES ===== -->
+  <section id="tab-games" class="tab-section">
+    <div class="games-controls">
+      <button id="btn-games-refresh">Refresh</button>
+      <span id="games-overall" class="games-overall"></span>
+    </div>
+
+    <h3>Per-checkpoint performance vs. humans</h3>
+    <div class="games-stats-wrap">
+      <table id="games-stats-table" class="tour-table"></table>
+    </div>
+
+    <h3>Per-human performance <span class="games-overall" style="font-weight:normal;">(identified by client IP + user-agent)</span></h3>
+    <div class="games-stats-wrap">
+      <table id="games-humans-table" class="tour-table"></table>
+    </div>
+
+    <h3>Games</h3>
+    <div class="games-filter-bar">
+      <label>Checkpoint:
+        <select id="games-filter-checkpoint"><option value="">All</option></select>
+      </label>
+      <label>Variant:
+        <select id="games-filter-variant">
+          <option value="">All</option>
+          <option value="1v1">1v1</option>
+          <option value="2v2">2v2</option>
+        </select>
+      </label>
+      <label>Outcome (human):
+        <select id="games-filter-outcome">
+          <option value="">All</option>
+          <option value="win">Win</option>
+          <option value="loss">Loss</option>
+          <option value="draw">Draw</option>
+        </select>
+      </label>
+      <button id="btn-games-apply">Apply</button>
+    </div>
+    <div class="games-list-wrap">
+      <table id="games-list-table" class="tour-table"></table>
+    </div>
+    <div class="games-pager">
+      <button id="btn-games-prev" disabled>← Prev</button>
+      <span id="games-page-info"></span>
+      <button id="btn-games-next" disabled>Next →</button>
+    </div>
+
+    <!-- Replay modal -->
+    <div id="games-replay-modal" class="tensor-modal" style="display:none">
+      <div class="tensor-modal-backdrop" id="games-replay-backdrop"></div>
+      <div class="tensor-modal-content">
+        <div class="tensor-modal-header">
+          <h3>Game Replay</h3>
+          <div class="tensor-modal-meta" id="games-replay-meta"></div>
+          <div class="tensor-modal-controls">
+            <button id="btn-replay-first">⏮</button>
+            <button id="btn-replay-prev">◀ Prev turn</button>
+            <span id="replay-turn-info"></span>
+            <button id="btn-replay-next">Next turn ▶</button>
+            <button id="btn-replay-last">⏭</button>
+            <button id="btn-replay-breakdown">📊 Score breakdown</button>
+            <button id="btn-replay-eval">🎯 Load checkpoint</button>
+            <button id="btn-games-replay-close">Close</button>
+          </div>
+          <div class="tensor-modal-controls">
+            <span id="replay-eval-info" class="replay-eval"></span>
+          </div>
+        </div>
+        <div id="games-replay-body" class="tensor-modal-body"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== RUN COMPARISON ===== -->
   <section id="tab-comparison" class="tab-section">
     <div class="comparison-controls">
@@ -293,6 +368,7 @@
 <script src="js/dashboard.js"></script>
 <script src="js/comparison.js"></script>
 <script src="js/tournament.js"></script>
+<script src="js/games.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

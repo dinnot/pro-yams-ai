@@ -19,7 +19,9 @@
 #include "engine/scoring.h"
 #include "engine/tensor.h"
 #include "heuristic/heuristic_bot.h"
+#include "model/model_config.h"
 #include "model/pro_yams_net.h"
+#include "model/trainer.h"
 #include "solver/precomputed_tables.h"
 #include "solver/solver.h"
 #include "ui/game_session.h"
@@ -386,6 +388,74 @@ public:
 
     bool has_nn() const { return nn_model_ != nullptr; }
 
+    // Evaluate an arbitrary board position with a checkpoint loaded on demand,
+    // returning the model's win-rate for `player` (same forward + normalization
+    // as debug-mode board eval). Used by the recorded-games replay viewer to
+    // show, at each step, the win-rate the playing checkpoint assigns to the
+    // player who just placed.
+    //
+    // Models are cached by checkpoint path in eval_models_, so a checkpoint is
+    // loaded at most once no matter how many games (or steps) reference it —
+    // this both avoids redundant loads and keeps memory bounded by the number
+    // of distinct checkpoints, not the number of previews.
+    bool evaluate_position(const std::string& checkpoint_path,
+                           const BoardStateT<Traits>& board,
+                           int player, float& out_value, std::string& err) {
+        if (player < 0 || player >= Traits::kNumPlayers) {
+            err = "player out of range";
+            return false;
+        }
+
+        std::shared_ptr<ProYamsNet> model;
+        {
+            std::lock_guard<std::mutex> lock(eval_models_mutex_);
+            auto it = eval_models_.find(checkpoint_path);
+            if (it != eval_models_.end()) {
+                model = it->second;
+            } else {
+                try {
+                    ModelConfig cfg =
+                        ModelTrainer::config_from_checkpoint(checkpoint_path);
+                    ModelTrainer trainer(cfg, device_);
+                    trainer.load_weights(checkpoint_path);
+                    model = trainer.clone_for_inference(device_);
+                    model->to(device_);
+                    model->eval();
+                } catch (const std::exception& e) {
+                    err = e.what();
+                    return false;
+                }
+                eval_models_[checkpoint_path] = model;
+            }
+        }
+
+        // Rebuild context from the supplied cells (cells_filled recomputed so
+        // the tensor's stage-dependent features are sound).
+        BoardStateT<Traits> b = board;
+        uint16_t filled = 0;
+        for (int p = 0; p < Traits::kNumPlayers; ++p)
+            for (int c = 0; c < kNumColumns; ++c)
+                for (int r = 0; r < kNumRows; ++r)
+                    if (b.cells[p][c][r] != kCellEmpty) ++filled;
+        b.cells_filled = filled;
+
+        GameContextT<Traits> ctx;
+        rebuild_context_from_board<Traits>(b, ctx);
+
+        std::vector<float> tensor(Traits::kTensorSize, 0.0f);
+        generate_tensor<Traits>(b, ctx, player, tables_, tensor.data());
+
+        torch::NoGradGuard no_grad;
+        auto input = torch::from_blob(tensor.data(), {1, Traits::kTensorSize},
+                                      torch::kFloat32).to(device_);
+        auto output = model->forward(input).to(torch::kCPU).contiguous();
+        float val = output.template data_ptr<float>()[0];
+        if (model->config().output_activation != "sigmoid")
+            val = (val + 1.0f) / 2.0f;
+        out_value = val;
+        return true;
+    }
+
     bool compute_current_tensor(int session_id, int player,
                                 std::vector<float>& out_tensor,
                                 float& out_nn_value,
@@ -738,6 +808,11 @@ private:
     std::map<int, std::shared_ptr<Entry>> sessions_;
     int next_session_id_ = 1;
     mutable std::mutex map_mutex_;
+
+    // Checkpoints loaded on demand for recorded-game replay evaluation, keyed
+    // by path so each distinct checkpoint is held exactly once.
+    std::map<std::string, std::shared_ptr<ProYamsNet>> eval_models_;
+    std::mutex eval_models_mutex_;
 };
 
 // Backward-compat aliases.

@@ -1,6 +1,7 @@
 add_executable(ui_tests
     session_manager_test.cc
     json_test.cc
+    game_recorder_test.cc
 )
 target_link_libraries(ui_tests PRIVATE
     ui_lib config

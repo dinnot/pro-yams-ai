@@ -1,4 +1,4 @@
-num_steps: 300000
+num_steps: 500000
 
 training:
   game_variant: "2v2"

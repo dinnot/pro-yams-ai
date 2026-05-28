@@ -41,9 +41,10 @@ int crush_multiplier(int my_raw, int opp_raw) {
 // identical to the previous non-templated implementation.
 // ---------------------------------------------------------------------------
 template <typename Traits>
-int compute_duel(const BoardStateT<Traits>& board,
-                 const GameContextT<Traits>& ctx) {
-    int total_duel_points = 0;
+std::array<int, kNumColumns> compute_duel_columns(
+    const BoardStateT<Traits>& board,
+    const GameContextT<Traits>& ctx) {
+    std::array<int, kNumColumns> column_points{};
 
     for (int col = 0; col < kNumColumns; ++col) {
         // Step 1: Raw scores per player.
@@ -67,6 +68,7 @@ int compute_duel(const BoardStateT<Traits>& board,
         const int coeff = board.coefficients[col];
 
         // Step 3: Per-pairing crush and clean-bonus value, summed into Team 0.
+        int col_points = 0;
         for (int i = 0; i < Traits::kPlayersPerTeam; ++i) {
             for (int j = 0; j < Traits::kPlayersPerTeam; ++j) {
                 const int t0p = Traits::kTeam0[i];
@@ -88,11 +90,21 @@ int compute_duel(const BoardStateT<Traits>& board,
                 const int adj1 = raw1 + (is_clean[t1p] ? bonus_value : 0);
                 const int diff = adj0 - adj1;
 
-                total_duel_points += diff * active_crush * coeff;
+                col_points += diff * active_crush * coeff;
             }
         }
+        column_points[col] = col_points;
     }
 
+    return column_points;
+}
+
+template <typename Traits>
+int compute_duel(const BoardStateT<Traits>& board,
+                 const GameContextT<Traits>& ctx) {
+    const std::array<int, kNumColumns> cols = compute_duel_columns(board, ctx);
+    int total_duel_points = 0;
+    for (int c = 0; c < kNumColumns; ++c) total_duel_points += cols[c];
     return total_duel_points;
 }
 
@@ -104,3 +116,8 @@ template int compute_duel<Yams1v1>(const BoardStateT<Yams1v1>&,
                                    const GameContextT<Yams1v1>&);
 template int compute_duel<Yams2v2>(const BoardStateT<Yams2v2>&,
                                    const GameContextT<Yams2v2>&);
+
+template std::array<int, kNumColumns> compute_duel_columns<Yams1v1>(
+    const BoardStateT<Yams1v1>&, const GameContextT<Yams1v1>&);
+template std::array<int, kNumColumns> compute_duel_columns<Yams2v2>(
+    const BoardStateT<Yams2v2>&, const GameContextT<Yams2v2>&);

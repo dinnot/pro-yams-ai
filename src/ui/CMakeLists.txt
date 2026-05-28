@@ -27,6 +27,7 @@ add_library(ui_lib STATIC
     session_manager.cc
     server.cc
     json_serialization.cc
+    game_recorder.cc
 )
 target_include_directories(ui_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(ui_lib PUBLIC
