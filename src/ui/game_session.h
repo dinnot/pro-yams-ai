@@ -126,6 +126,11 @@ struct GameSessionT {
     // an inert player (-1) on each commit so a stale mask is never shown.
     int     live_hold_player = -1;
     uint8_t live_hold_mask   = 0;
+    // True between the moment the active player commits a reroll and the moment
+    // the new dice land — lets a spectating teammate start the spin animation
+    // immediately (masking the round-trip) instead of waiting for the result.
+    // The held dice during the spin are live_hold_mask. Cleared on reroll/place.
+    bool    live_rolling     = false;
 
     float current_board_nn_value = 0.0f;
     bool  has_current_board_nn   = false;

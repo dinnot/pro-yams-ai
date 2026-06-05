@@ -90,6 +90,15 @@ const Play = {
     // turn lands in history. { player, initial, shownRerolls } or null.
     liveSpec: null,
     _holdPreviewTimer: null,
+    // One-shot: make the first shared diff replay history from turn 0 so opening
+    // NN moves animate for both players regardless of who triggered them.
+    _animateFromStart: false,
+    // Server-Sent Events: the primary push channel while watching (not my turn).
+    // _sseQueue holds the latest pushed state (coalesced); _sseDraining
+    // serializes processing so an in-flight animation finishes first.
+    _sse: null,
+    _sseQueue: null,
+    _sseDraining: false,
     // Seats whose human was replaced by the NN this game (from the server's
     // nn_takeover_seats). Used so a taken-over teammate's turns are labelled and
     // treated as AI rather than as a live human.
@@ -172,6 +181,7 @@ const Play = {
         if (this.mmTicket) { API.matchmakeCancel(this.mmTicket); this.mmTicket = null; }
         this.mmCancelled = true;
         this.stopHeartbeat();
+        this.stopSharedEvents();
         if (this.sessionId && !this.sharedMode) { API.deleteGame(this.sessionId); }
         this.sessionId = null;
         this.sharedMode = false;
@@ -179,6 +189,7 @@ const Play = {
         this.liveSpec = null;
         this._takeoverPending = false;
         this.lastVersion = null;
+        this._animateFromStart = false;
         if (this._holdPreviewTimer) { clearTimeout(this._holdPreviewTimer); this._holdPreviewTimer = null; }
         document.getElementById('matchmaking').hidden = true;
         document.getElementById('disconnect-prompt').hidden = true;
@@ -209,6 +220,7 @@ const Play = {
         // start() drives the single-client modes (1v1 / whole-team / NN-teammate).
         // Ensure any prior shared game is torn down first.
         this.stopHeartbeat();
+        this.stopSharedEvents();
         this.sharedMode = false;
         document.getElementById('matchmaking').hidden = true;
         if (this.sessionId) { API.deleteGame(this.sessionId); this.sessionId = null; }
@@ -321,6 +333,7 @@ const Play = {
     async startFriend() {
         // Tear down any prior game/loop and reset matchmaking flags.
         this.stopHeartbeat();
+        this.stopSharedEvents();
         if (this.sessionId && !this.sharedMode) { API.deleteGame(this.sessionId); }
         this.sessionId   = null;
         this.sharedMode  = false;
@@ -427,15 +440,28 @@ const Play = {
         catch (e) { this.handleFailure(e); return; }
         if (data && data.error) { this.setTurnInfo('Error: ' + data.error); return; }
 
-        this.serverState   = data;
-        this.lastVersion   = (data.version !== undefined) ? data.version : null;
-        this.numPlayers    = data.num_players || 4;
-        this.variant       = variantFromState(data);
-        this.displayBoards = cloneBoards(data.boards);
+        // Show the game's opening BEFORE any NN moves: hide the opening NN
+        // placements and flag the first diff to animate from turn 0. Otherwise
+        // whichever human connected after the AI already moved would see it
+        // already done — its baseline state would include the placement, so the
+        // diff is empty. Safe at fresh entry: no human has acted yet, so the
+        // whole current history is opening NN turns that should animate.
+        const openingBoards = cloneBoards(data.boards);
+        for (const turn of (data.history || [])) {
+            const pb = openingBoards['player' + turn.player];
+            const col = pb && pb[COLUMN_KEYS[turn.placement.column]];
+            if (col) col[ROW_NAMES[turn.placement.row]] = -1;  // hide
+        }
+        this.serverState     = data;
+        this.lastVersion     = (data.version !== undefined) ? data.version : null;
+        this.numPlayers      = data.num_players || 4;
+        this.variant         = variantFromState(data);
+        this.displayBoards   = openingBoards;
+        this._animateFromStart = true;  // first applySharedDiff replays from 0
         this.renderAll();
 
         this.startHeartbeat();
-        await this.sharedLoop();
+        this.startSharedEvents();
     },
 
     // Keep our seat marked alive on the server so we aren't handed to the NN
@@ -517,11 +543,107 @@ const Play = {
         }
     },
 
+    // ----- Server-Sent Events: push-driven "watching" mode -----------------
+    // Used while it's NOT my turn. The server streams the full game state on
+    // every change; we process each (serialized so animations don't overlap)
+    // exactly like the poll loop body. Falls back to the long-poll sharedLoop
+    // when EventSource is unavailable. During my own turn the stream is closed
+    // (nothing to watch); humanPlace reopens it after I place.
+    startSharedEvents() {
+        this.stopSharedEvents();
+        if (!this.sharedMode || !this.sessionId) return;
+        if (typeof EventSource === 'undefined') { this.sharedLoop(); return; }
+
+        const id = this.sessionId;
+        const es = new EventSource(`/api/game/${id}/events`);
+        this._sse = es;
+        es.onmessage = (ev) => {
+            if (this._sse !== es) return;  // stale
+            let data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+            this.showReconnecting(false);
+            this._sseQueue = data;          // coalesce to the latest snapshot
+            this._drainSharedQueue();
+        };
+        es.onerror = () => {
+            if (this._sse !== es) return;
+            if (es.readyState === EventSource.CLOSED) {
+                // Server rejected / session gone — fall back to recovery.
+                this.stopSharedEvents();
+                this.handleFailure(new Error('event stream closed'));
+            } else {
+                // Transient: the browser is auto-reconnecting.
+                this.showReconnecting(true);
+            }
+        };
+    },
+
+    stopSharedEvents() {
+        if (this._sse) { this._sse.close(); this._sse = null; }
+        this._sseQueue = null;
+    },
+
+    async _drainSharedQueue() {
+        if (this._sseDraining) return;
+        this._sseDraining = true;
+        try {
+            while (this._sseQueue && this.sharedMode && this.sessionId) {
+                const data = this._sseQueue;
+                this._sseQueue = null;
+                await this._handleSharedState(data);
+            }
+        } finally {
+            this._sseDraining = false;
+        }
+    },
+
+    // Process one pushed state snapshot (same decisions as the poll loop body).
+    async _handleSharedState(data) {
+        if (!this.sharedMode || !this.sessionId || !data || data.error) return;
+        if (data.version !== undefined) this.lastVersion = data.version;
+
+        await this.applySharedDiff(data);
+        if (!this.sharedMode) return;
+        this.maybeShowTakeover(data);
+        this.updateDisconnectPrompt(data);
+
+        if (this.serverState.game_over) {
+            this.stopSharedEvents();
+            this.renderAll();
+            this.showEndgame();
+            return;
+        }
+
+        if (this.serverState.waiting_for_human) {
+            if (this.serverState.current_player === this.mySeat) {
+                // My turn — stop watching and hand off to the interactive flow.
+                this.liveSpec   = null;
+                this.holdMask   = 0;
+                this.nnHeldMask = 0;
+                this.stopSharedEvents();
+                try { await this.beginHumanTurn(); }
+                catch (e) { this.handleFailure(e); }
+                return;
+            }
+            // The other human is mid-turn — show its current state. The next
+            // push (their next action) arrives on the stream.
+            await this.spectateLiveTurn(this.serverState);
+        } else {
+            // Pending NN seats — advance them; the resulting change is pushed.
+            try { await API.playAll(this.sessionId); } catch (_) { /* retry on next push */ }
+        }
+    },
+
     // Animate the turns in `data.history` that we haven't shown yet (the
     // partner's and the NN's moves). My own turns never appear here — they are
     // applied synchronously in humanPlace. Mirrors runNnTurn's reveal trick.
     async applySharedDiff(data) {
-        const oldLen   = this.serverState ? this.serverState.history.length : 0;
+        // On first entry, replay from turn 0 so the opening NN move(s) animate
+        // even if our baseline already includes them (the other player triggered
+        // them before we connected).
+        const oldLen   = this._animateFromStart
+            ? 0
+            : (this.serverState ? this.serverState.history.length : 0);
+        this._animateFromStart = false;
         const newTurns = (data.history || []).slice(oldLen);
 
         if (newTurns.length === 0) {
@@ -544,24 +666,25 @@ const Play = {
         this.nnHeldMask = 0;  // drop any stale spectated-hold highlight
         for (const t of newTurns) {
             if (!this.sharedMode) { this.animating = false; return; }
-            // If this is the turn we were already watching unfold live, only the
-            // placement is left to reveal — don't replay the roll/rerolls.
-            const placementOnly = !!(this.liveSpec &&
-                this.liveSpec.player === t.player &&
-                sameDice(this.liveSpec.initial, t.initial_dice));
-            if (placementOnly) this.liveSpec = null;
 
-            // Catch-up speed only for a live human teammate's turn (the thing
-            // we're actually waiting on); NN moves keep their normal pacing.
             const isHumanSeat = data.player_types &&
                                 data.player_types[t.player] === 'human';
-            const tm = isHumanSeat ? T_FAST : T;
+            // A human teammate's turn was already shown live (its rolls/holds via
+            // spectateLiveTurn), so just reveal the placement — instantly, the
+            // way the active player sees it. NN moves keep their normal pacing.
+            const placementOnly = isHumanSeat || !!(this.liveSpec &&
+                this.liveSpec.player === t.player &&
+                sameDice(this.liveSpec.initial, t.initial_dice));
+            if (this.liveSpec && this.liveSpec.player === t.player) this.liveSpec = null;
 
+            const tm = isHumanSeat ? T_FAST : T;
             this.animationPlayer = t.player;
             this.setTurnInfo(this.turnLabelFor(t.player), this.turnClassFor(t.player));
             this.renderAll();
-            await sleep(placementOnly ? tm.nnBeforePlace : tm.preRollPause);
-            await this.animateBotTurn(t.player, t, { placementOnly, timing: tm });
+            // No pre-pause before a teammate's placement reveal — show it at once.
+            await sleep(isHumanSeat ? 0 : (placementOnly ? tm.nnBeforePlace : tm.preRollPause));
+            await this.animateBotTurn(t.player, t,
+                { placementOnly, instantReveal: isHumanSeat, timing: tm });
         }
         this.animationPlayer = null;
         this.nnHeldMask      = 0;
@@ -587,7 +710,7 @@ const Play = {
         if (fresh) {
             this.liveSpec = { player: seat,
                               initial: (lt.initial_dice || []).slice(),
-                              shownRerolls: 0 };
+                              shownRerolls: 0, rolling: false };
             this.animationPlayer = seat;
             this.displayBoards = cloneBoards(data.boards);
             this.setCurrentPlayerBodyClass(seat);
@@ -598,25 +721,29 @@ const Play = {
             this.animating = false;
         }
 
-        // Animate any rerolls committed since we last looked (snappy — we're
-        // tracking the partner's live turn).
+        // Reveal any rerolls committed since we last looked.
         const holds = lt.holds || [];
         if (holds.length > this.liveSpec.shownRerolls) {
             this.animating = true;
             for (let k = this.liveSpec.shownRerolls; k < holds.length; k++) {
                 const hold = holds[k];
-                const mask = hold.mask | 0;
-                this.nnHeldMask = mask;
-                this.renderAll();
-                await sleep(T_FAST.nnHoldHighlight);
-
-                const rolling = [];
-                for (let i = 0; i < this.displayDice.length; i++) {
-                    rolling.push(((mask >> i) & 1) === 0);
+                if (this.liveSpec.rolling) {
+                    // We were already spinning optimistically (the player's
+                    // "rolling" signal arrived first) — snap straight to the
+                    // result, no extra spin.
+                    this.liveSpec.rolling = false;
+                } else {
+                    // Brief spin. The held dice were already shown live via the
+                    // preview, so don't re-highlight them first (#2).
+                    const mask = hold.mask | 0;
+                    const spinning = [];
+                    for (let i = 0; i < this.displayDice.length; i++) {
+                        spinning.push(((mask >> i) & 1) === 0);
+                    }
+                    this.nnRollingFlags = spinning;
+                    this.renderAll();
+                    await sleep(T_FAST.rollSpin);
                 }
-                this.nnRollingFlags = rolling;
-                this.renderAll();
-                await sleep(T_FAST.rollSpin);
 
                 this.displayDice = (hold.dice_after || []).slice();
                 let postMask = 0;
@@ -631,11 +758,31 @@ const Play = {
             this.animating = false;
         }
 
-        // Reflect the current dice and the tentative (uncommitted) hold preview.
-        this.displayDice = (data.dice || []).slice();
-        this.nnHeldMask  = lt.preview_mask | 0;
-        this.animationPlayer = seat;
-        this.renderAll();
+        // Optimistic spin: the player committed a reroll but the new dice aren't
+        // here yet. Spin the un-held dice now and hold there until the result
+        // push reveals them (above). Idempotent across repeated pushes.
+        if (lt.rolling && !this.liveSpec.rolling) {
+            this.liveSpec.rolling = true;
+            const mask = lt.preview_mask | 0;
+            const spinning = [];
+            for (let i = 0; i < this.displayDice.length; i++) {
+                spinning.push(((mask >> i) & 1) === 0);
+            }
+            this.nnHeldMask = mask;
+            this.nnRollingFlags = spinning;
+            this.animationPlayer = seat;
+            this.renderAll();
+            return;
+        }
+
+        if (!lt.rolling) {
+            // Deliberating — reflect the current dice and tentative hold preview.
+            this.displayDice = (data.dice || []).slice();
+            this.nnHeldMask  = lt.preview_mask | 0;
+            this.nnRollingFlags = null;
+            this.animationPlayer = seat;
+            this.renderAll();
+        }
     },
 
     // Debounced push of my tentative hold selection (shared games only) so my
@@ -825,9 +972,17 @@ const Play = {
         const gs = this.serverState;
         if (!gs) return;
         if (gs.game_over) { this.renderAll(); this.showEndgame(); return; }
-        // Shared games always resume via the poll loop, which re-syncs and
-        // decides whose turn it is (mine → interactive, else spectate/advance).
-        if (this.sharedMode) { await this.sharedLoop(); return; }
+        // Shared games: if it's my turn, re-enter the interactive flow;
+        // otherwise resume watching via the event stream.
+        if (this.sharedMode) {
+            if (gs.waiting_for_human && gs.current_player === this.mySeat) {
+                this.stopSharedEvents();
+                await this.enterHumanTurnFromState();
+            } else {
+                this.startSharedEvents();
+            }
+            return;
+        }
         if (gs.waiting_for_human) await this.enterHumanTurnFromState();
         else await this.driveLoop();
     },
@@ -1026,15 +1181,28 @@ const Play = {
 
         const colKey = COLUMN_KEYS[turnRec.placement.column];
         const rowKey = ROW_NAMES[turnRec.placement.row];
-        this.flashCell(seat, turnRec.placement.column, turnRec.placement.row, tm.placeFlash);
-        await sleep(tm.placeFlash);
+        if (opts.instantReveal) {
+            // Show the value at once with a simultaneous flash — matches the
+            // active player's optimistic placement, so a spectating teammate
+            // sees the placement land immediately rather than after a flash gap.
+            this.displayBoards['player' + seat][colKey][rowKey] = turnRec.score;
+            this.justPlaced = { player: seat, column: turnRec.placement.column,
+                                 row: turnRec.placement.row };
+            this.flashCell(seat, turnRec.placement.column, turnRec.placement.row, tm.placeFlash);
+            this.renderAll();
+            await sleep(tm.afterPlace);
+            this.justPlaced = null;
+        } else {
+            this.flashCell(seat, turnRec.placement.column, turnRec.placement.row, tm.placeFlash);
+            await sleep(tm.placeFlash);
 
-        this.displayBoards['player' + seat][colKey][rowKey] = turnRec.score;
-        this.justPlaced = { player: seat, column: turnRec.placement.column,
-                             row: turnRec.placement.row };
-        this.renderAll();
-        await sleep(tm.afterPlace);
-        this.justPlaced = null;
+            this.displayBoards['player' + seat][colKey][rowKey] = turnRec.score;
+            this.justPlaced = { player: seat, column: turnRec.placement.column,
+                                 row: turnRec.placement.row };
+            this.renderAll();
+            await sleep(tm.afterPlace);
+            this.justPlaced = null;
+        }
     },
 
     // -----------------------------------------------------------------
@@ -1085,6 +1253,9 @@ const Play = {
         try {
             this.animating = true;
             const mask = this.holdMask;
+            // Tell a spectating teammate we're rolling now, so they start the
+            // spin in step with us instead of after the result round-trips back.
+            if (this.sharedMode) API.rolling(this.sessionId, this.mySeat, mask);
             const rolling = [];
             for (let i = 0; i < this.displayDice.length; i++) {
                 rolling.push(((mask >> i) & 1) === 0);
@@ -1198,7 +1369,7 @@ const Play = {
                 return;
             }
 
-            if (this.sharedMode) await this.sharedLoop();
+            if (this.sharedMode) this.startSharedEvents();
             else await this.driveLoop();
         } catch (e) {
             this.handleFailure(e);

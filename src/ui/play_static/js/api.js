@@ -186,6 +186,19 @@ const API = {
         } catch (_) { /* best-effort */ }
     },
 
+    // Signal that the active player committed a reroll keeping `mask` (the new
+    // dice are still in flight) so a spectating teammate can spin immediately.
+    // Fire-and-forget.
+    async rolling(id, seat, mask) {
+        try {
+            await _fetchOnce(`/api/game/${id}/rolling`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ seat, mask }),
+            });
+        } catch (_) { /* best-effort */ }
+    },
+
     // Surviving teammate chooses to hand a disconnected seat to the NN. Returns
     // the updated game state, or {error} if the seat isn't a disconnected human.
     async takeover(id, seat) {

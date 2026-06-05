@@ -198,9 +198,12 @@ json game_state_to_json(const GameSessionT<Traits>& session) {
         lt["initial_dice"] = init;
         lt["holds"]        = build_holds_json(ct.initial_dice, ct.hold_masks,
                                               ct.dice_after_hold);
-        lt["preview_mask"] =
-            (session.live_hold_player == static_cast<int>(bs.current_player))
-                ? static_cast<int>(session.live_hold_mask) : 0;
+        bool live_for_cur =
+            (session.live_hold_player == static_cast<int>(bs.current_player));
+        lt["preview_mask"] = live_for_cur ? static_cast<int>(session.live_hold_mask) : 0;
+        // rolling: the active player committed a reroll keeping preview_mask and
+        // the new dice haven't landed yet — a teammate can spin optimistically.
+        lt["rolling"] = live_for_cur && session.live_rolling;
         j["live_turn"] = lt;
     }
 

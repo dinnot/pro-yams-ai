@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -92,6 +93,8 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_get_game(req, res); });
         server_.Get(R"(/api/game/(\d+)/longpoll)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_longpoll(req, res); });
+        server_.Get(R"(/api/game/(\d+)/events)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_events(req, res); });
         server_.Post(R"(/api/game/(\d+)/step)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_step(req, res); });
         server_.Post(R"(/api/game/(\d+)/bot_step)",
@@ -106,6 +109,8 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_heartbeat(req, res); });
         server_.Post(R"(/api/game/(\d+)/hold_preview)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_hold_preview(req, res); });
+        server_.Post(R"(/api/game/(\d+)/rolling)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_rolling(req, res); });
         server_.Post(R"(/api/game/(\d+)/takeover)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_takeover(req, res); });
 
@@ -405,6 +410,55 @@ private:
         json_response(res, out);
     }
 
+    // GET /api/game/:id/events — Server-Sent Events stream of game state. Pushes
+    // a `data: <state+version>` frame on every change (partner/bot move, reroll,
+    // hold preview, takeover…) and a `: ping` keepalive when idle, so a shared-
+    // game spectator gets true push with no re-issue round-trip. The browser's
+    // EventSource auto-reconnects; the first frame after a (re)connect is the
+    // current state, so the client always resyncs. Each open stream holds one
+    // worker thread (bounded by the pool; few players).
+    void handle_events(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        // Reject unknown sessions up front (per the SSE spec a non-2xx response
+        // makes EventSource fail without reconnecting).
+        Session probe;
+        if (!sessions_.get_session_copy(id, probe)) {
+            error_response(res, "session not found", 404); return;
+        }
+
+        res.set_header("Cache-Control", "no-cache");
+        res.set_header("X-Accel-Buffering", "no");  // don't let a proxy buffer SSE
+
+        // Sentinel forces the first wait_for_change to return immediately so the
+        // opening frame carries the current state.
+        auto last = std::make_shared<uint64_t>(
+            std::numeric_limits<uint64_t>::max());
+
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [this, id, last](size_t /*offset*/, httplib::DataSink& sink) -> bool {
+                // Surface a grace-period expiry even with no other traffic.
+                sessions_.refresh_disconnects(id, kSharedTimeoutMs);
+
+                Session copy;
+                uint64_t version = 0;
+                if (!sessions_.wait_for_change(id, *last, kSseWaitMs, copy, version)) {
+                    return false;  // session gone — end the stream
+                }
+
+                std::string frame;
+                if (version != *last) {
+                    nlohmann::json out = game_state_to_json<Traits>(copy);
+                    out["version"] = version;
+                    frame = "data: " + out.dump() + "\n\n";
+                    *last = version;
+                } else {
+                    frame = ": ping\n\n";  // idle keepalive / dead-socket probe
+                }
+                return sink.write(frame.data(), frame.size());
+            });
+    }
+
     // GET /api/game/:id/luck — per-seat luck for the (finished) game, computed
     // from the recorded move history with the server's play model. Returns
     // { seat_luck: [v0, v1, ...] } where each entry is a mean-zero index in
@@ -527,6 +581,25 @@ private:
         }
         if (sessions_.set_hold_preview(id, seat, mask))
             sessions_.notify_changed(id);  // wake the spectating teammate's long-poll
+        json_response(res, {{"ok", true}});
+    }
+
+    // POST /api/game/:id/rolling  body { seat, mask } — the active player has
+    // committed a reroll (keeping `mask`); the new dice are still in flight.
+    // Pushed so a spectating teammate starts the spin immediately. Best-effort.
+    void handle_rolling(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        int     seat = -1;
+        uint8_t mask = 0;
+        if (!req.body.empty()) {
+            try {
+                nlohmann::json body = nlohmann::json::parse(req.body);
+                seat = body.value("seat", -1);
+                mask = static_cast<uint8_t>(body.value("mask", 0));
+            } catch (...) { /* ignore malformed */ }
+        }
+        if (sessions_.set_rolling(id, seat, mask))
+            sessions_.notify_changed(id);
         json_response(res, {{"ok", true}});
     }
 
@@ -1510,6 +1583,7 @@ private:
     static constexpr int64_t kSharedTimeoutMs = 120000;  // 2 min → NN takeover
     static constexpr int64_t kMatchTtlMs      = 600000;  // stale waiter/resolved TTL
     static constexpr int64_t kLongPollMs      = 25000;   // max hold for /longpoll
+    static constexpr int64_t kSseWaitMs       = 15000;   // SSE idle keepalive cadence
 
     std::vector<MatchTicket>      waiting_;    // FIFO of unmatched joiners
     std::map<int, MatchTicket>    resolved_;   // ticket id → match result (for poll)

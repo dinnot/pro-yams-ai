@@ -345,6 +345,7 @@ public:
         s->current_turn.hold_masks.push_back(hold_mask);
         perform_reroll<Traits>(s->state, hold_mask, s->rng);
         s->live_hold_player = -1;  // committed — drop the tentative preview
+        s->live_rolling     = false;  // result landed — stop the optimistic spin
         std::array<int8_t, kNumDice> after;
         std::memcpy(after.data(), s->state.dice, sizeof(s->state.dice));
         s->current_turn.dice_after_hold.push_back(after);
@@ -377,6 +378,7 @@ public:
             perform_placement<Traits>(s->state, s->ctx, column, row, s->rng);
             s->waiting_for_human = false;
             s->live_hold_player = -1;  // turn over — drop the tentative preview
+            s->live_rolling     = false;
 
             if (s->debug_mode) eval_and_store_board_nn(*s, s->current_turn);
 
@@ -501,6 +503,24 @@ public:
         if (static_cast<int>(s->state.board.current_player) != seat) return false;
         s->live_hold_player = seat;
         s->live_hold_mask   = mask;
+        s->live_rolling     = false;  // a fresh preview means still deliberating
+        return true;
+    }
+
+    // Mark that `seat` has committed a reroll keeping `mask` — the new dice
+    // aren't computed yet (the /hold request is in flight). Lets a spectating
+    // teammate start the spin at once. Cleared when the reroll actually lands.
+    bool set_rolling(int session_id, int seat, uint8_t mask) {
+        if (seat < 0 || seat >= Traits::kNumPlayers) return false;
+        auto entry = get_entry(session_id);
+        if (!entry) return false;
+        std::lock_guard<std::mutex> lock(entry->mutex);
+        Session* s = entry->session.get();
+        if (!s || s->game_over || !s->waiting_for_human) return false;
+        if (static_cast<int>(s->state.board.current_player) != seat) return false;
+        s->live_hold_player = seat;
+        s->live_hold_mask   = mask;
+        s->live_rolling     = true;
         return true;
     }
 
