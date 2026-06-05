@@ -69,6 +69,7 @@ GameRecorder::GameRecorder(std::string games_dir, std::string checkpoint_label,
     games_subdir_  = (fs::path(games_dir_) / "games").string();
     started_path_  = (fs::path(games_dir_) / "started.jsonl").string();
     finished_path_ = (fs::path(games_dir_) / "finished.jsonl").string();
+    flagged_path_  = (fs::path(games_dir_) / "flagged.jsonl").string();
 
     std::error_code ec;
     fs::create_directories(games_subdir_, ec);  // also creates games_dir_
@@ -111,12 +112,19 @@ std::string GameRecorder::start_game(int session_id, const GameStartInfo& info) 
     j["x_forwarded_for"] = meta.x_forwarded_for;
     j["user_agent"]      = meta.user_agent;
 
+    std::string uuid = meta.uuid;
     {
         std::lock_guard<std::mutex> lock(mu_);
         active_[session_id] = std::move(meta);
+        session_uuid_[session_id] = uuid;
+        // Bound the retained-uuid window. session_ids increase monotonically,
+        // so erasing the lowest keys drops the oldest games first.
+        constexpr size_t kMaxRetainedUuids = 8192;
+        while (session_uuid_.size() > kMaxRetainedUuids)
+            session_uuid_.erase(session_uuid_.begin());
         append_line(started_path_, j.dump());
     }
-    return j["uuid"].get<std::string>();
+    return uuid;
 }
 
 void GameRecorder::finish_game(int session_id,
@@ -171,7 +179,51 @@ void GameRecorder::finish_game(int session_id,
     append_line(finished_path_, summary.dump());
 }
 
+bool GameRecorder::flag_game(int session_id, const std::string& note) {
+    std::string uuid;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = session_uuid_.find(session_id);
+        if (it == session_uuid_.end()) return false;
+        uuid = it->second;
+    }
+
+    const int64_t ts = now_ms();
+
+    nlohmann::json line;
+    line["uuid"]    = uuid;
+    line["port"]    = port_;
+    line["ts_ms"]   = ts;
+    line["iso"]     = iso8601_utc(ts);
+    if (!note.empty()) line["note"] = note;
+    append_line(flagged_path_, line.dump());
+
+    // Best-effort: stamp the per-game record so the replay viewer can show the
+    // flag even without consulting flagged.jsonl. The play and admin servers
+    // share games_dir, so this file is also what the admin UI reads.
+    namespace fs = std::filesystem;
+    std::string file_path =
+        (fs::path(games_subdir_) / (uuid + ".json")).string();
+    try {
+        nlohmann::json full;
+        {
+            std::ifstream in(file_path);
+            if (in) in >> full;
+        }
+        if (full.is_object()) {
+            full["flagged"] = true;
+            if (!note.empty()) full["flag_note"] = note;
+            std::ofstream out(file_path, std::ios::trunc);
+            if (out) out << full.dump();
+        }
+    } catch (...) {
+        // never let a logging error propagate; flagged.jsonl already has it.
+    }
+    return true;
+}
+
 void GameRecorder::forget(int session_id) {
     std::lock_guard<std::mutex> lock(mu_);
     active_.erase(session_id);
+    session_uuid_.erase(session_id);
 }

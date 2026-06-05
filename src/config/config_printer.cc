@@ -136,6 +136,7 @@ void emit_config(YAML::Emitter& out, const AppConfig& cfg) {
     out << YAML::Key << "log_dir"              << YAML::Value << tc.log_dir;
     out << YAML::Key << "log_path"             << YAML::Value << tc.log_path;
     out << YAML::Key << "debug_mode"           << YAML::Value << tc.debug_mode;
+    out << YAML::Key << "yams_first_roll_bonus" << YAML::Value << tc.yams_first_roll_bonus;
     out << YAML::Key << "initial_heuristic_weight" << YAML::Value << tc.initial_heuristic_weight;
     out << YAML::Key << "heuristic_decay_steps" << YAML::Value << tc.heuristic_decay_steps;
     out << YAML::Key << "heuristic_version"     << YAML::Value << tc.heuristic_version;

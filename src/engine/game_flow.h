@@ -35,6 +35,14 @@ void start_turn(GameStateT<Traits>& gs, RNG& rng);
 template <typename Traits>
 void perform_reroll(GameStateT<Traits>& gs, uint8_t hold_mask, RNG& rng);
 
+/// Returns true if the "Lucky Yams" bonus is active for the current dice state:
+/// the rule is enabled, this is the player's first roll (rolls_left == 2), and
+/// all five dice show the same face. While active, the player may place the
+/// maximum legal score in any cell (see calculate_yams_bonus_score). Re-rolling
+/// forfeits the bonus (rolls_left drops below 2).
+template <typename Traits>
+bool yams_bonus_active(const GameStateT<Traits>& gs);
+
 /// Returns true if the player can reroll.
 /// False when rolls_left == 0, or when rolls_left == 1 and only Turbo cells remain.
 template <typename Traits>

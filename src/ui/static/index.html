@@ -307,6 +307,9 @@
           <option value="draw">Draw</option>
         </select>
       </label>
+      <label class="games-filter-flag">
+        <input type="checkbox" id="games-filter-flagged"> 🚩 Flagged only
+      </label>
       <button id="btn-games-apply">Apply</button>
     </div>
     <div class="games-list-wrap">
@@ -333,10 +336,19 @@
             <button id="btn-replay-last">⏭</button>
             <button id="btn-replay-breakdown">📊 Score breakdown</button>
             <button id="btn-replay-eval">🎯 Load checkpoint</button>
+            <button id="btn-replay-moves" disabled>📋 Move evals</button>
+            <button id="btn-replay-accuracy" disabled>📈 Evaluate accuracy & luck</button>
             <button id="btn-games-replay-close">Close</button>
           </div>
           <div class="tensor-modal-controls">
             <span id="replay-eval-info" class="replay-eval"></span>
+            <span id="replay-moves-filter" class="replay-moves-filter" hidden>
+              <label><input type="radio" name="moves-filter" value="valid" checked> Valid after roll</label>
+              <label><input type="radio" name="moves-filter" value="all"> All possible</label>
+            </span>
+          </div>
+          <div class="tensor-modal-controls">
+            <span id="replay-accuracy-info" class="replay-accuracy"></span>
           </div>
         </div>
         <div id="games-replay-body" class="tensor-modal-body"></div>

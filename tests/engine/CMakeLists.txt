@@ -17,6 +17,8 @@ add_executable(engine_tests
     golden_rule_teammate_test.cc
     # 2v2 migration Task 3:
     duel_2v2_test.cc
+    # Lucky-Yams first-roll bonus:
+    yams_bonus_test.cc
 )
 target_link_libraries(engine_tests PRIVATE engine gtest_main)
 add_test(NAME engine_tests COMMAND engine_tests)

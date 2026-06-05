@@ -142,11 +142,12 @@ const API = {
         return res.json();
     },
 
-    async listGames({ checkpoint, variant, outcome, limit, offset } = {}) {
+    async listGames({ checkpoint, variant, outcome, flagged, limit, offset } = {}) {
         const params = new URLSearchParams();
         if (checkpoint) params.set('checkpoint', checkpoint);
         if (variant)    params.set('variant', variant);
         if (outcome)    params.set('outcome', outcome);
+        if (flagged)    params.set('flagged', '1');
         if (limit  != null) params.set('limit', limit);
         if (offset != null) params.set('offset', offset);
         const qs = params.toString();
@@ -172,6 +173,61 @@ const API = {
         });
         if (!res.ok) {
             let msg = 'eval failed';
+            try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
+            return { error: msg };
+        }
+        return res.json();
+    },
+
+    // Evaluate every possible next move from a replay position with the game's
+    // checkpoint. `position` is the board *before* the move, `player` the seat
+    // about to play, `dice` the dice rolled that turn (for the valid filter).
+    // Returns { moves: [{column,row,column_name,row_name,score,eval_value,
+    // valid_for_dice,requires_roll}], player } or { error }. requires_roll marks
+    // Turbo afterstates (placeable only with a roll left), shown for comparison.
+    async evalGameMoves({ checkpoint, player, dice, position }) {
+        const res = await fetch('/api/games/eval_moves', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpoint, player, dice, position })
+        });
+        if (!res.ok) {
+            let msg = 'eval failed';
+            try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
+            return { error: msg };
+        }
+        return res.json();
+    },
+
+    // Score one recorded turn's human decisions against the checkpoint. Returns
+    // { hold_deltas: [Δwin-prob...], place_delta, has_place,
+    //   roll_lucks: [-100..100 per roll, mean-zero] } or { error }.
+    async accuracyTurn({ checkpoint, player, position, initial_dice, holds, placement, score }) {
+        const res = await fetch('/api/games/accuracy_turn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpoint, player, position, initial_dice, holds, placement, score })
+        });
+        if (!res.ok) {
+            let msg = 'accuracy failed';
+            try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
+            return { error: msg };
+        }
+        return res.json();
+    },
+
+    // Score a whole recorded game in one request (one batched NN pass over every
+    // turn's afterstates). `turns` is an array shaped like accuracyTurn's args
+    // minus the checkpoint. Returns { turns: [{hold_deltas, place_delta,
+    // has_place, roll_lucks, player}, ...] } or { error }.
+    async accuracyGame({ checkpoint, turns }) {
+        const res = await fetch('/api/games/accuracy_game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpoint, turns })
+        });
+        if (!res.ok) {
+            let msg = 'accuracy failed';
             try { msg = (await res.json()).error || msg; } catch (e) { /* keep default */ }
             return { error: msg };
         }

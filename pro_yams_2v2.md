@@ -50,6 +50,13 @@ Scratching a cell means placing a score of 0 in it. Scratching is **not a choice
 
 You **cannot voluntarily choose to score 0** in a cell if your current dice yield a valid score greater than 0 that beats the competitive threshold. For example, you cannot choose to scratch a Full House cell if your final dice represent a valid Full House for that cell.
 
+### **The Lucky Yams (First-Roll Bonus)**
+
+If your **very first roll** of a turn is a Yams (5 dice of the same face), you may write the **maximum possible score** in any *one* cell you are currently allowed to fill — **independent of the dice faces**. The value written is that row's theoretical maximum (e.g. **100** in Yams, **30** in the 6s box, **50** in Full House, **54** in 4-of-a-Kind, **75** in Less-than-8), still subject to the Golden Rule and the SS/LS interlock (so a Small Sum is capped just below an already-filled Large Sum, etc.). In 2v2 the Golden Rule still includes your teammate's scores.
+
+* The bonus only applies on the **initial roll**. You keep the normal option to re-roll, but **re-rolling forfeits the bonus** (you then play out the turn under the usual rules).
+* This is the **default** rule. It can be disabled in configuration for AI training runs that prefer the simpler engine behaviour (where a first-roll Yams scores normally, like any other roll).
+
 ### **The Columns**
 
 At the start of the game, each of the 6 columns is randomly assigned a unique **Coefficient** (Multiplier) from the set: **8, 10, 12, 14, 16, 18**. This coefficient multiplies the final point difference won in that column, making high-coefficient columns the primary strategic targets.

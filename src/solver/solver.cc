@@ -134,6 +134,68 @@ SolverResult solver_resolve(const GameStateT<Traits>& state,
     const int rolls_left = state.rolls_left;
 
     // -----------------------------------------------------------------------
+    // "Lucky Yams" first-roll bonus: the player may place the maximum legal
+    // score in any legal cell. Re-rolling and dice-based placement are strictly
+    // dominated, so the decision reduces to picking the best cell at its
+    // wildcard max score. The afterstate for (cell, max_score) is already among
+    // buffers.requests (solver_get_requests enumerates every achievable score),
+    // so we just read the caller-filled EVs — no extra evaluation needed.
+    // -----------------------------------------------------------------------
+    if (yams_bonus_active<Traits>(state)) {
+        double place_evs[kMaxAfterstateRequests];
+        int    place_idx[kMaxAfterstateRequests];
+        int    place_count = 0;
+        double best_ev = -std::numeric_limits<double>::infinity();
+        int    best_req = -1;
+
+        for (int c = 0; c < buffers.num_legal_cells; ++c) {
+            int col = buffers.cell_cols[c];
+            int row = buffers.cell_rows[c];
+            int bonus = calculate_yams_bonus_score<Traits>(row, p, col, state.board, ctx);
+            int req_idx = (bonus > 0 && buffers.req_map[c][bonus] != -1)
+                          ? buffers.req_map[c][bonus]
+                          : buffers.scratch_map[c];
+            if (req_idx < 0) continue;
+
+            double ev = buffers.evs[req_idx];
+            place_evs[place_count] = ev;
+            place_idx[place_count] = req_idx;
+            ++place_count;
+            if (ev > best_ev) { best_ev = ev; best_req = req_idx; }
+        }
+
+        SolverResult result;
+        result.should_place      = true;
+        result.hold_mask         = 0;
+        // The turn resolves to an immediate placement, so the best afterstate
+        // value is the natural turn-start value estimate (used as the TD
+        // bootstrap in self-play) — far better than a meaningless pre-roll EV.
+        result.pre_roll_ev       = best_ev;
+        result.is_exploratory    = false;
+        result.expected_value    = best_ev;
+        result.placement         = buffers.requests[best_req].placement;
+        result.score             = buffers.requests[best_req].score;
+        result.chosen_request_idx = static_cast<int16_t>(best_req);
+
+        if (config.exploration_enabled && config.placement_temperature > 0.0 &&
+            place_count > 1) {
+            int sel = softmax_sample(place_evs, place_count,
+                                     config.placement_temperature, rng,
+                                     config.use_duel_margin_maximization);
+            int req_i = place_idx[sel];
+            result.placement = buffers.requests[req_i].placement;
+            result.score = buffers.requests[req_i].score;
+            result.chosen_request_idx = static_cast<int16_t>(req_i);
+
+            double max_ev = -1e9;
+            for (int i = 0; i < place_count; ++i)
+                if (place_evs[i] > max_ev) max_ev = place_evs[i];
+            if (place_evs[sel] < max_ev - 1e-6) result.is_exploratory = true;
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
     // Build V0, V1, V2 efficiently by computing expected values per held config
     // -----------------------------------------------------------------------
     if (!buffers.dp_computed) {

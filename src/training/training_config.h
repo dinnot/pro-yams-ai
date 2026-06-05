@@ -83,6 +83,12 @@ struct TrainingConfig {
     double pbrs_upper_reward = 0.1;
     double pbrs_clean_reward = 0.2;
 
+    // --- Game rules ---
+    // "Lucky Yams": a first-roll five-of-a-kind lets the player write the
+    // maximum legal score in any cell. Default on; disable for training runs
+    // that prefer the simpler rule the engine was originally built with.
+    bool yams_first_roll_bonus = true;
+
     // --- Developer / Debug ---
     bool debug_mode    = false;
     bool logs_on_start = false; // Log metrics and run eval before first training step

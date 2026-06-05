@@ -38,6 +38,7 @@ add_subdirectory(src/distil)
 add_subdirectory(src/eval)
 add_subdirectory(src/ui)
 add_subdirectory(src/config)
+add_subdirectory(src/tools)
 
 # ---------------------------------------------------------------------------
 # Main executable

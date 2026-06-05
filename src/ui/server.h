@@ -7,6 +7,8 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -17,6 +19,7 @@
 
 #include "engine/duel.h"
 #include "engine/game_flow.h"
+#include "engine/game_rules.h"
 #include "engine/game_traits.h"
 #include "engine/tensor.h"
 #include "eval/tournament.h"
@@ -68,6 +71,10 @@ private:
     void register_routes() {
         namespace fs = std::filesystem;
 
+        // Long-poll requests hold a worker thread open for up to kLongPollMs, so
+        // give the server a generous pool (the public play app has few players).
+        server_.new_task_queue = [] { return new httplib::ThreadPool(64); };
+
         server_.set_default_headers({
             {"Access-Control-Allow-Origin",  "*"},
             {"Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"},
@@ -83,6 +90,8 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_new_game(req, res); });
         server_.Get(R"(/api/game/(\d+))",
             [this](const httplib::Request& req, httplib::Response& res) { handle_get_game(req, res); });
+        server_.Get(R"(/api/game/(\d+)/longpoll)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_longpoll(req, res); });
         server_.Post(R"(/api/game/(\d+)/step)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_step(req, res); });
         server_.Post(R"(/api/game/(\d+)/bot_step)",
@@ -91,6 +100,22 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_play_all(req, res); });
         server_.Delete(R"(/api/game/(\d+))",
             [this](const httplib::Request& req, httplib::Response& res) { handle_delete_game(req, res); });
+        server_.Post(R"(/api/game/(\d+)/flag)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_flag(req, res); });
+        server_.Post(R"(/api/game/(\d+)/heartbeat)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_heartbeat(req, res); });
+        server_.Post(R"(/api/game/(\d+)/hold_preview)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_hold_preview(req, res); });
+        server_.Post(R"(/api/game/(\d+)/takeover)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_takeover(req, res); });
+
+        // Matchmaking (2v2 "play with a friend": two humans share one session).
+        server_.Post("/api/matchmake/join",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_matchmake_join(req, res); });
+        server_.Get(R"(/api/matchmake/(\d+))",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_matchmake_poll(req, res); });
+        server_.Post(R"(/api/matchmake/(\d+)/cancel)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_matchmake_cancel(req, res); });
 
         server_.Get(R"(/api/game/(\d+)/options)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_options(req, res); });
@@ -100,6 +125,8 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_place(req, res); });
         server_.Get(R"(/api/game/(\d+)/can_reroll)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_can_reroll(req, res); });
+        server_.Get(R"(/api/game/(\d+)/luck)",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_game_luck(req, res); });
         server_.Get(R"(/api/game/(\d+)/tensor)",
             [this](const httplib::Request& req, httplib::Response& res) { handle_tensor(req, res); });
 
@@ -126,6 +153,12 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) { handle_games_list(req, res); });
         server_.Post("/api/games/eval",
             [this](const httplib::Request& req, httplib::Response& res) { handle_games_eval(req, res); });
+        server_.Post("/api/games/eval_moves",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_eval_moves(req, res); });
+        server_.Post("/api/games/accuracy_turn",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_accuracy_turn(req, res); });
+        server_.Post("/api/games/accuracy_game",
+            [this](const httplib::Request& req, httplib::Response& res) { handle_games_accuracy_game(req, res); });
         server_.Get(R"(/api/games/([0-9a-fA-F\-]+))",
             [this](const httplib::Request& req, httplib::Response& res) { handle_game_record(req, res); });
 
@@ -262,6 +295,7 @@ private:
         json_response(res, {
             {"num_players",  Traits::kNumPlayers},
             {"game_variant", (Traits::kNumPlayers == 4) ? "2v2" : "1v1"},
+            {"yams_first_roll_bonus", game_rules().yams_first_roll_bonus},
         });
     }
 
@@ -299,37 +333,104 @@ private:
 
         // Record the game start (play server only). Human seats are those
         // configured as kHuman; coefficients come from the freshly dealt board.
-        if (recorder_) {
-            GameStartInfo info;
-            info.variant     = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
-            info.num_players = Traits::kNumPlayers;
-            for (int p = 0; p < Traits::kNumPlayers; ++p)
-                if (pts[p] == PlayerType::kHuman) info.human_seats.push_back(p);
-            for (int c = 0; c < kNumColumns; ++c)
-                info.coefficients.push_back(
-                    static_cast<int>(copy.state.board.coefficients[c]));
-            info.ip              = req.remote_addr;
-            info.x_forwarded_for = req.get_header_value("X-Forwarded-For");
-            info.user_agent      = req.get_header_value("User-Agent");
-            recorder_->start_game(id, info);
-        }
+        std::vector<int> human_seats;
+        for (int p = 0; p < Traits::kNumPlayers; ++p)
+            if (pts[p] == PlayerType::kHuman) human_seats.push_back(p);
+        record_start(id, copy, human_seats, req);
 
         json_response(res, {{"session_id", id},
                              {"game_state", game_state_to_json<Traits>(copy)}});
     }
 
+    // Record a game start with the recorder (play server only). Shared by the
+    // normal new-game path and matchmaking. No-op if no recorder is configured.
+    void record_start(int id, const Session& copy,
+                      const std::vector<int>& human_seats,
+                      const httplib::Request& req) {
+        if (!recorder_) return;
+        GameStartInfo info;
+        info.variant     = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
+        info.num_players = Traits::kNumPlayers;
+        info.human_seats = human_seats;
+        for (int c = 0; c < kNumColumns; ++c)
+            info.coefficients.push_back(
+                static_cast<int>(copy.state.board.coefficients[c]));
+        info.ip              = req.remote_addr;
+        info.x_forwarded_for = req.get_header_value("X-Forwarded-For");
+        info.user_agent      = req.get_header_value("User-Agent");
+        recorder_->start_game(id, info);
+    }
+
     void handle_get_game(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
         Session copy;
-        if (!sessions_.get_session_copy(id, copy)) {
+        uint64_t version = 0;
+        if (!sessions_.get_session_copy(id, copy, version)) {
             error_response(res, "session not found", 404); return;
         }
-        json_response(res, game_state_to_json<Traits>(copy));
+        nlohmann::json out = game_state_to_json<Traits>(copy);
+        out["version"] = version;
+        json_response(res, out);
+    }
+
+    // GET /api/game/:id/longpoll?since=N — block until the game state changes
+    // past version N (or ~kLongPollMs elapses), then return the full state plus
+    // its `version`. With no `since`, returns the current state immediately (for
+    // the initial fetch). Powers the shared-game live loop: the client re-issues
+    // with the version it last saw, so partner/bot moves arrive near-instantly
+    // without a fixed polling delay.
+    void handle_longpoll(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        // Refresh disconnect flags first; a flip self-bumps the version so a
+        // waiting client returns promptly when the grace period elapses.
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
+
+        Session copy;
+        uint64_t version = 0;
+        if (req.has_param("since")) {
+            uint64_t since = 0;
+            try { since = std::stoull(req.get_param_value("since")); }
+            catch (...) { since = 0; }
+            if (!sessions_.wait_for_change(id, since, kLongPollMs, copy, version)) {
+                error_response(res, "session not found", 404); return;
+            }
+        } else {
+            if (!sessions_.get_session_copy(id, copy, version)) {
+                error_response(res, "session not found", 404); return;
+            }
+        }
+        nlohmann::json out = game_state_to_json<Traits>(copy);
+        out["version"] = version;
+        json_response(res, out);
+    }
+
+    // GET /api/game/:id/luck — per-seat luck for the (finished) game, computed
+    // from the recorded move history with the server's play model. Returns
+    // { seat_luck: [v0, v1, ...] } where each entry is a mean-zero index in
+    // [-100,100] (null for a seat that took no turns).
+    void handle_game_luck(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        std::vector<double> seat_luck;
+        std::string err;
+        if (!sessions_.compute_game_luck(id, seat_luck, err)) {
+            error_response(res, err.empty() ? "could not compute luck" : err,
+                           err == "session not found" ? 404 : 400);
+            return;
+        }
+        nlohmann::json arr = nlohmann::json::array();
+        for (double v : seat_luck) {
+            if (std::isnan(v)) arr.push_back(nullptr);
+            else               arr.push_back(v);
+        }
+        json_response(res, {{"seat_luck", arr}});
     }
 
     void handle_step(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
         sessions_.advance_turn(id);
+        sessions_.notify_changed(id);
         Session copy;
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
@@ -341,6 +442,7 @@ private:
     void handle_bot_step(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
         sessions_.advance_turn_bot_override(id);
+        sessions_.notify_changed(id);
         Session copy;
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
@@ -351,13 +453,18 @@ private:
 
     void handle_play_all(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
         sessions_.play_to_completion(id);
+        sessions_.notify_changed(id);
         Session copy;
-        if (!sessions_.get_session_copy(id, copy)) {
+        uint64_t version = 0;
+        if (!sessions_.get_session_copy(id, copy, version)) {
             error_response(res, "session not found", 404); return;
         }
         record_if_finished(id, copy);
-        json_response(res, game_state_to_json<Traits>(copy));
+        nlohmann::json out = game_state_to_json<Traits>(copy);
+        out["version"] = version;
+        json_response(res, out);
     }
 
     void handle_delete_game(const httplib::Request& req, httplib::Response& res) {
@@ -367,6 +474,182 @@ private:
         // line has no matching finished.jsonl entry → drop rate).
         if (recorder_) recorder_->forget(id);
         json_response(res, {{"ok", true}});
+    }
+
+    // POST /api/game/:id/flag — the human flags this game for review (e.g. the
+    // AI played weird moves). Only meaningful on the play server, which owns a
+    // recorder; the admin UI has none and returns 503.
+    void handle_flag(const httplib::Request& req, httplib::Response& res) {
+        if (!recorder_) { error_response(res, "recording not enabled", 503); return; }
+        int id = parse_session_id(req);
+        std::string note = "ai_weird_moves";
+        if (!req.body.empty()) {
+            try {
+                nlohmann::json body = nlohmann::json::parse(req.body);
+                note = body.value("note", note);
+            } catch (...) { /* keep default note */ }
+        }
+        bool ok = recorder_->flag_game(id, note);
+        if (!ok) { error_response(res, "unknown game", 404); return; }
+        json_response(res, {{"ok", true}});
+    }
+
+    // POST /api/game/:id/heartbeat  body { seat } — a client controlling `seat`
+    // in a shared two-human game reports it is still alive. Also runs the
+    // disconnect→NN-takeover check so a stale partner is converted promptly.
+    void handle_heartbeat(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        int seat = -1;
+        if (!req.body.empty()) {
+            try {
+                nlohmann::json body = nlohmann::json::parse(req.body);
+                seat = body.value("seat", -1);
+            } catch (...) { /* keep seat = -1 */ }
+        }
+        sessions_.heartbeat(id, seat);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
+        json_response(res, {{"ok", true}});
+    }
+
+    // POST /api/game/:id/hold_preview  body { seat, mask } — the active player
+    // streams their tentative (uncommitted) hold selection so a shared-game
+    // teammate can watch the hold pattern form. Best-effort.
+    void handle_hold_preview(const httplib::Request& req, httplib::Response& res) {
+        int id = parse_session_id(req);
+        int     seat = -1;
+        uint8_t mask = 0;
+        if (!req.body.empty()) {
+            try {
+                nlohmann::json body = nlohmann::json::parse(req.body);
+                seat = body.value("seat", -1);
+                mask = static_cast<uint8_t>(body.value("mask", 0));
+            } catch (...) { /* ignore malformed */ }
+        }
+        if (sessions_.set_hold_preview(id, seat, mask))
+            sessions_.notify_changed(id);  // wake the spectating teammate's long-poll
+        json_response(res, {{"ok", true}});
+    }
+
+    // POST /api/game/:id/takeover  body { seat } — the surviving teammate chooses
+    // to hand a disconnected seat to the NN. Only succeeds if that seat is a
+    // human gone silent past the grace period; returns the updated game state.
+    void handle_takeover(const httplib::Request& req, httplib::Response& res) {
+        int id   = parse_session_id(req);
+        int seat = -1;
+        if (!req.body.empty()) {
+            try {
+                nlohmann::json body = nlohmann::json::parse(req.body);
+                seat = body.value("seat", -1);
+            } catch (...) { /* seat stays -1 */ }
+        }
+        if (!sessions_.takeover_seat(id, seat, kSharedTimeoutMs)) {
+            error_response(res, "cannot take over seat (not a disconnected human)", 400);
+            return;
+        }
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
+        sessions_.notify_changed(id);
+        Session copy;
+        if (!sessions_.get_session_copy(id, copy)) {
+            error_response(res, "session not found", 404); return;
+        }
+        json_response(res, game_state_to_json<Traits>(copy));
+    }
+
+    // ---- Matchmaking (2v2 "play with a friend") ----
+    // Two browsers are paired into one shared session, each owning a single
+    // human seat of the same (randomly chosen) team; the other team is NN.
+    // The first to arrive waits (polling its ticket); the second completes the
+    // match synchronously. State is in-memory and lost on restart — fine for a
+    // casual feature; stale waiters are pruned lazily on the next join.
+
+    void handle_matchmake_join(const httplib::Request& req, httplib::Response& res) {
+        if constexpr (Traits::kNumPlayers != 4) {
+            error_response(res, "matchmaking is only available in 2v2", 400);
+        } else {
+            std::lock_guard<std::mutex> lock(match_mutex_);
+            prune_matchmaking();
+
+            if (!waiting_.empty()) {
+                MatchTicket w = waiting_.front();
+                waiting_.erase(waiting_.begin());
+
+                // Coin-flip the human team: Team 0 = seats {0,2}, Team 1 = {1,3}.
+                int team = static_cast<int>(match_rng_() & 1ULL);
+                int hs0  = (team == 0) ? 0 : 1;   // first waiter's seat
+                int hs1  = (team == 0) ? 2 : 3;   // caller's seat
+                std::vector<int> human_seats = {hs0, hs1};
+
+                PlayerType pts[Traits::kNumPlayers];
+                for (int p = 0; p < Traits::kNumPlayers; ++p)
+                    pts[p] = PlayerType::kNNSolver;
+                pts[hs0] = PlayerType::kHuman;
+                pts[hs1] = PlayerType::kHuman;
+
+                uint64_t seed = match_rng_();
+                int id = sessions_.create_session(pts, Traits::kNumPlayers, seed, false);
+                sessions_.mark_shared(id, human_seats);
+
+                Session copy;
+                sessions_.get_session_copy(id, copy);
+                record_start(id, copy, human_seats, req);
+
+                w.matched_session = id;
+                w.seat            = hs0;
+                resolved_[w.id]   = w;
+
+                json_response(res, {{"status", "matched"},
+                                    {"session_id", id},
+                                    {"seat", hs1}});
+            } else {
+                MatchTicket t;
+                t.id         = next_ticket_id_++;
+                t.created_ms = Sessions::now_ms();
+                waiting_.push_back(t);
+                json_response(res, {{"status", "waiting"}, {"ticket", t.id}});
+            }
+        }
+    }
+
+    void handle_matchmake_poll(const httplib::Request& req, httplib::Response& res) {
+        int ticket = parse_session_id(req);
+        std::lock_guard<std::mutex> lock(match_mutex_);
+        prune_matchmaking();
+        auto it = resolved_.find(ticket);
+        if (it != resolved_.end()) {
+            json_response(res, {{"status", "matched"},
+                                {"session_id", it->second.matched_session},
+                                {"seat", it->second.seat}});
+            return;
+        }
+        for (const auto& w : waiting_) {
+            if (w.id == ticket) {
+                json_response(res, {{"status", "waiting"}, {"ticket", ticket}});
+                return;
+            }
+        }
+        json_response(res, {{"status", "expired"}});
+    }
+
+    void handle_matchmake_cancel(const httplib::Request& req, httplib::Response& res) {
+        int ticket = parse_session_id(req);
+        std::lock_guard<std::mutex> lock(match_mutex_);
+        for (auto it = waiting_.begin(); it != waiting_.end(); ++it) {
+            if (it->id == ticket) { waiting_.erase(it); break; }
+        }
+        json_response(res, {{"ok", true}});
+    }
+
+    // Drop waiting tickets and resolved entries older than the match TTL so an
+    // abandoned waiter never pairs with a fresh joiner. Caller holds match_mutex_.
+    void prune_matchmaking() {
+        int64_t cutoff = Sessions::now_ms() - kMatchTtlMs;
+        waiting_.erase(std::remove_if(waiting_.begin(), waiting_.end(),
+                          [&](const MatchTicket& t) { return t.created_ms < cutoff; }),
+                       waiting_.end());
+        for (auto it = resolved_.begin(); it != resolved_.end(); ) {
+            if (it->second.created_ms < cutoff) it = resolved_.erase(it);
+            else ++it;
+        }
     }
 
     void handle_options(const httplib::Request& req, httplib::Response& res) {
@@ -381,6 +664,7 @@ private:
 
     void handle_hold(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
         catch (...) { error_response(res, "invalid JSON body"); return; }
@@ -388,6 +672,7 @@ private:
         if (!sessions_.human_hold(id, mask)) {
             error_response(res, "cannot hold: invalid session or state"); return;
         }
+        sessions_.notify_changed(id);
         Session copy;
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
@@ -397,6 +682,7 @@ private:
 
     void handle_place(const httplib::Request& req, httplib::Response& res) {
         int id = parse_session_id(req);
+        sessions_.refresh_disconnects(id, kSharedTimeoutMs);
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
         catch (...) { error_response(res, "invalid JSON body"); return; }
@@ -408,6 +694,7 @@ private:
         if (!sessions_.human_place(id, column, row)) {
             error_response(res, "illegal placement"); return;
         }
+        sessions_.notify_changed(id);
         Session copy;
         if (!sessions_.get_session_copy(id, copy)) {
             error_response(res, "session not found", 404); return;
@@ -697,6 +984,19 @@ private:
         return out;
     }
 
+    // Set of uuids the player flagged for review (from flagged.jsonl). Used to
+    // annotate the games list and the per-game record.
+    std::set<std::string> read_flagged_uuids() const {
+        std::set<std::string> out;
+        if (games_dir_.empty()) return out;
+        namespace fs = std::filesystem;
+        for (const auto& f : read_jsonl((fs::path(games_dir_) / "flagged.jsonl").string())) {
+            std::string uuid = f.value("uuid", "");
+            if (!uuid.empty()) out.insert(uuid);
+        }
+        return out;
+    }
+
     // Is this finished-game entry a human win / loss / draw?
     static std::string human_result(const nlohmann::json& g) {
         double result = g.value("result", 0.5);
@@ -864,12 +1164,18 @@ private:
         const std::string f_ckpt   = req.has_param("checkpoint") ? req.get_param_value("checkpoint") : "";
         const std::string f_var    = req.has_param("variant")    ? req.get_param_value("variant")    : "";
         const std::string f_out    = req.has_param("outcome")    ? req.get_param_value("outcome")    : "";
+        const bool         f_flag  = req.has_param("flagged") &&
+                                     (req.get_param_value("flagged") == "1" ||
+                                      req.get_param_value("flagged") == "true");
+
+        const std::set<std::string> flagged = read_flagged_uuids();
 
         std::vector<const nlohmann::json*> rows;
         for (const auto& g : finished) {
             if (!f_ckpt.empty() && g.value("checkpoint", "") != f_ckpt) continue;
             if (!f_var.empty()  && g.value("variant", "")    != f_var)  continue;
             if (!f_out.empty()  && human_result(g)           != f_out)  continue;
+            if (f_flag && !flagged.count(g.value("uuid", "")))          continue;
             rows.push_back(&g);
         }
         // Newest first.
@@ -884,8 +1190,11 @@ private:
         if (limit  < 0) limit  = 0;
 
         nlohmann::json games = nlohmann::json::array();
-        for (long i = offset; i < total && i < offset + limit; ++i)
-            games.push_back(*rows[i]);
+        for (long i = offset; i < total && i < offset + limit; ++i) {
+            nlohmann::json row = *rows[i];
+            row["flagged"] = flagged.count(row.value("uuid", "")) > 0;
+            games.push_back(std::move(row));
+        }
 
         json_response(res, {{"total", total}, {"offset", offset},
                             {"limit", limit}, {"games", games}});
@@ -931,6 +1240,229 @@ private:
                             {"checkpoint", checkpoint}});
     }
 
+    // POST /api/games/eval_moves — evaluate every possible next move from a
+    // replay position with the game's checkpoint. Body:
+    //   { "checkpoint": "<path>", "player": <seat>,
+    //     "dice": [d0..d4],            // final dice that turn (for the valid filter)
+    //     "position": { variant, coefficients, current_player, boards } }
+    // The position is the board *before* the move; `player` is the seat about to
+    // play. Returns every (column,row,score) afterstate the solver enumerates
+    // (including the Turbo column) with the model's evaluation, each tagged
+    // `valid_for_dice` = whether that (row, score) is reachable with the supplied
+    // dice and is a legal final placement (the placement-step subset shown in
+    // debug mode), and `requires_roll` = whether it is a Turbo afterstate that
+    // can only be reached with a roll left. `dice` may be omitted (all invalid).
+    void handle_games_eval_moves(const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...) { error_response(res, "invalid JSON body"); return; }
+
+        std::string checkpoint = body.value("checkpoint", "");
+        if (checkpoint.empty()) { error_response(res, "missing checkpoint"); return; }
+        if (!body.contains("position") || !body["position"].is_object()) {
+            error_response(res, "missing position"); return;
+        }
+
+        BoardStateT<Traits> board;
+        std::string err;
+        if (!parse_position(body["position"], board, err)) {
+            error_response(res, err); return;
+        }
+
+        int player = body.value("player", -1);
+        if (player < 0) player = static_cast<int>(board.current_player);
+        if (player >= Traits::kNumPlayers) { error_response(res, "player out of range"); return; }
+
+        int8_t dice[kNumDice];
+        bool have_dice = false;
+        if (body.contains("dice") && body["dice"].is_array() &&
+            body["dice"].size() == kNumDice) {
+            have_dice = true;
+            for (int i = 0; i < kNumDice; ++i)
+                dice[i] = static_cast<int8_t>(body["dice"][i].get<int>());
+        }
+
+        std::vector<typename Sessions::MoveEval> moves;
+        if (!sessions_.evaluate_moves(checkpoint, board, player,
+                                      have_dice ? dice : nullptr, moves, err)) {
+            std::string brief = err.substr(0, err.find('\n'));
+            error_response(res, "could not evaluate moves: " + brief); return;
+        }
+
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& m : moves) {
+            arr.push_back({
+                {"column",         static_cast<int>(m.placement.column)},
+                {"row",            static_cast<int>(m.placement.row)},
+                {"column_name",    column_name(static_cast<int>(m.placement.column))},
+                {"row_name",       row_name(static_cast<int>(m.placement.row))},
+                {"score",          static_cast<int>(m.score)},
+                {"eval_value",     m.eval_value},
+                {"valid_for_dice", m.valid_for_dice},
+                {"requires_roll",  m.requires_roll},
+            });
+        }
+        json_response(res, {{"moves", arr}, {"player", player},
+                            {"checkpoint", checkpoint}});
+    }
+
+    // POST /api/games/accuracy_turn — score one recorded turn's human decisions
+    // against the checkpoint. Body:
+    //   { "checkpoint", "player", "position" (board before the turn),
+    //     "initial_dice": [d0..d4],
+    //     "holds": [ { "mask": m, "dice_after": [d0..d4] }, ... ],
+    //     "placement": { "column", "row" }, "score" }
+    // Returns { hold_deltas: [Δwin-prob...], place_delta, has_place,
+    // roll_lucks: [-100..100 per roll] } where each delta is the win-probability
+    // the player gave up vs the solver's best action at that decision point, and
+    // each roll_luck is a mean-zero index in [-100,100] = how the dice deviated
+    // from expectation, scaled by the roll's [worst,best] spread (0 = rolled as
+    // expected, + = luckier than expected, - = unluckier).
+    void handle_games_accuracy_turn(const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...) { error_response(res, "invalid JSON body"); return; }
+
+        std::string checkpoint = body.value("checkpoint", "");
+        if (checkpoint.empty()) { error_response(res, "missing checkpoint"); return; }
+        if (!body.contains("position") || !body["position"].is_object()) {
+            error_response(res, "missing position"); return;
+        }
+
+        BoardStateT<Traits> board;
+        std::string err;
+        if (!parse_position(body["position"], board, err)) {
+            error_response(res, err); return;
+        }
+
+        int player = body.value("player", -1);
+        if (player < 0) player = static_cast<int>(board.current_player);
+        if (player >= Traits::kNumPlayers) { error_response(res, "player out of range"); return; }
+
+        auto read_dice = [](const nlohmann::json& arr, int8_t out[kNumDice]) -> bool {
+            if (!arr.is_array() || arr.size() != static_cast<size_t>(kNumDice)) return false;
+            for (int i = 0; i < kNumDice; ++i) out[i] = static_cast<int8_t>(arr[i].get<int>());
+            return true;
+        };
+
+        int8_t initial[kNumDice];
+        if (!body.contains("initial_dice") || !read_dice(body["initial_dice"], initial)) {
+            error_response(res, "missing/invalid initial_dice"); return;
+        }
+
+        std::vector<std::array<int8_t, kNumDice>> reroll_dice;
+        std::vector<uint8_t> hold_masks;
+        if (body.contains("holds") && body["holds"].is_array()) {
+            for (const auto& h : body["holds"]) {
+                std::array<int8_t, kNumDice> da{};
+                if (!read_dice(h.value("dice_after", nlohmann::json::array()), da.data()))
+                    continue;  // skip malformed reroll step
+                reroll_dice.push_back(da);
+                hold_masks.push_back(static_cast<uint8_t>(h.value("mask", 0)));
+            }
+        }
+
+        Placement placement{
+            static_cast<int8_t>(body.contains("placement") ? body["placement"].value("column", 0) : 0),
+            static_cast<int8_t>(body.contains("placement") ? body["placement"].value("row", 0) : 0)};
+        int8_t place_score = static_cast<int8_t>(body.value("score", 0));
+
+        std::vector<double> hold_deltas;
+        std::vector<double> roll_lucks;
+        double place_delta = 0.0;
+        bool   has_place   = false;
+        if (!sessions_.evaluate_turn_accuracy(checkpoint, board, player, initial,
+                                              reroll_dice, hold_masks, placement,
+                                              place_score, hold_deltas, place_delta,
+                                              has_place, roll_lucks, err)) {
+            std::string brief = err.substr(0, err.find('\n'));
+            error_response(res, "could not evaluate accuracy: " + brief); return;
+        }
+
+        nlohmann::json hd = nlohmann::json::array();
+        for (double d : hold_deltas) hd.push_back(d);
+        nlohmann::json rl = nlohmann::json::array();
+        for (double d : roll_lucks) rl.push_back(d);
+        nlohmann::json out = {{"hold_deltas", hd}, {"has_place", has_place},
+                              {"roll_lucks", rl}, {"player", player}};
+        if (has_place) out["place_delta"] = place_delta;
+        json_response(res, out);
+    }
+
+    // POST /api/games/accuracy_game — score a whole recorded game in one request
+    // (one batched NN pass over every turn's afterstates). Body:
+    //   { "checkpoint", "turns": [ {player, position, initial_dice, holds,
+    //     placement, score}, ... ] }   (each turn shaped like accuracy_turn)
+    // Returns { turns: [ {hold_deltas, place_delta, has_place, roll_lucks,
+    // player}, ... ] } in the same order.
+    void handle_games_accuracy_game(const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...) { error_response(res, "invalid JSON body"); return; }
+
+        std::string checkpoint = body.value("checkpoint", "");
+        if (checkpoint.empty()) { error_response(res, "missing checkpoint"); return; }
+        if (!body.contains("turns") || !body["turns"].is_array()) {
+            error_response(res, "missing turns"); return;
+        }
+
+        auto read_dice = [](const nlohmann::json& arr, int8_t out[kNumDice]) -> bool {
+            if (!arr.is_array() || arr.size() != static_cast<size_t>(kNumDice)) return false;
+            for (int i = 0; i < kNumDice; ++i) out[i] = static_cast<int8_t>(arr[i].get<int>());
+            return true;
+        };
+
+        std::vector<typename Sessions::TurnEval> turns;
+        std::string err;
+        for (const auto& jt : body["turns"]) {
+            typename Sessions::TurnEval te;
+            if (!jt.contains("position") || !jt["position"].is_object() ||
+                !parse_position(jt["position"], te.board, err)) {
+                error_response(res, "bad turn position: " + err); return;
+            }
+            te.player = jt.value("player", static_cast<int>(te.board.current_player));
+            if (te.player < 0 || te.player >= Traits::kNumPlayers) {
+                error_response(res, "player out of range"); return;
+            }
+            if (!jt.contains("initial_dice") || !read_dice(jt["initial_dice"], te.initial_dice)) {
+                error_response(res, "missing/invalid initial_dice"); return;
+            }
+            if (jt.contains("holds") && jt["holds"].is_array()) {
+                for (const auto& h : jt["holds"]) {
+                    std::array<int8_t, kNumDice> da{};
+                    if (!read_dice(h.value("dice_after", nlohmann::json::array()), da.data()))
+                        continue;  // skip malformed reroll step
+                    te.reroll_dice.push_back(da);
+                    te.hold_masks.push_back(static_cast<uint8_t>(h.value("mask", 0)));
+                }
+            }
+            te.placement = Placement{
+                static_cast<int8_t>(jt.contains("placement") ? jt["placement"].value("column", 0) : 0),
+                static_cast<int8_t>(jt.contains("placement") ? jt["placement"].value("row", 0) : 0)};
+            te.place_score = static_cast<int8_t>(jt.value("score", 0));
+            turns.push_back(std::move(te));
+        }
+
+        std::vector<typename Sessions::TurnResult> results;
+        if (!sessions_.evaluate_game_accuracy(checkpoint, turns, results, err)) {
+            std::string brief = err.substr(0, err.find('\n'));
+            error_response(res, "could not evaluate game: " + brief); return;
+        }
+
+        nlohmann::json jturns = nlohmann::json::array();
+        for (const auto& tr : results) {
+            nlohmann::json hd = nlohmann::json::array();
+            for (double d : tr.hold_deltas) hd.push_back(d);
+            nlohmann::json rl = nlohmann::json::array();
+            for (double d : tr.roll_lucks) rl.push_back(d);
+            nlohmann::json jt = {{"hold_deltas", hd}, {"has_place", tr.has_place},
+                                 {"roll_lucks", rl}, {"player", tr.player}};
+            if (tr.has_place) jt["place_delta"] = tr.place_delta;
+            jturns.push_back(jt);
+        }
+        json_response(res, {{"turns", jturns}});
+    }
+
     void handle_game_record(const httplib::Request& req, httplib::Response& res) {
         if (games_dir_.empty()) { error_response(res, "no games directory configured", 404); return; }
         std::string uuid = req.matches[1].str();
@@ -947,9 +1479,43 @@ private:
         if (!f) { error_response(res, "game not found", 404); return; }
         std::ostringstream ss;
         ss << f.rdbuf();
+
+        // Merge the flag from flagged.jsonl in case the per-game file wasn't
+        // stamped (e.g. flagged by a different process before the file write).
+        if (read_flagged_uuids().count(uuid)) {
+            try {
+                nlohmann::json full = nlohmann::json::parse(ss.str());
+                full["flagged"] = true;
+                res.status = 200;
+                res.set_content(full.dump(), "application/json");
+                return;
+            } catch (...) { /* fall through to raw passthrough */ }
+        }
         res.status = 200;
         res.set_content(ss.str(), "application/json");
     }
+
+    // ---- Matchmaking / shared-session state ----
+    // A pending or completed "play with a friend" pairing.
+    struct MatchTicket {
+        int     id             = 0;
+        int64_t created_ms     = 0;
+        int     matched_session = -1;  // set once paired
+        int     seat            = -1;  // this ticket-holder's seat once paired
+    };
+    // Grace period before a silent human seat is handed to the NN. Generous so a
+    // player who briefly switches apps / backgrounds the tab (mobile timers get
+    // throttled) can return and keep playing; the 5s heartbeat keeps an active
+    // player well inside it.
+    static constexpr int64_t kSharedTimeoutMs = 120000;  // 2 min → NN takeover
+    static constexpr int64_t kMatchTtlMs      = 600000;  // stale waiter/resolved TTL
+    static constexpr int64_t kLongPollMs      = 25000;   // max hold for /longpoll
+
+    std::vector<MatchTicket>      waiting_;    // FIFO of unmatched joiners
+    std::map<int, MatchTicket>    resolved_;   // ticket id → match result (for poll)
+    int                           next_ticket_id_ = 1;
+    std::mt19937_64               match_rng_{std::random_device{}()};
+    std::mutex                    match_mutex_;
 
     httplib::Server server_;
     Sessions&       sessions_;

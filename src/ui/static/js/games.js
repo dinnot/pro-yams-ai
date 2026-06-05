@@ -13,7 +13,7 @@ const Games = {
     pageSize: 50,
     offset: 0,
     total: 0,
-    filters: { checkpoint: '', variant: '', outcome: '' },
+    filters: { checkpoint: '', variant: '', outcome: '', flagged: false },
 
     // Replay state
     replay: { record: null, states: null, turn: 0, numPlayers: 2 },
@@ -25,6 +25,7 @@ const Games = {
             Games.filters.checkpoint = byId('games-filter-checkpoint').value;
             Games.filters.variant    = byId('games-filter-variant').value;
             Games.filters.outcome    = byId('games-filter-outcome').value;
+            Games.filters.flagged    = byId('games-filter-flagged').checked;
             Games.offset = 0;
             Games.loadList();
         });
@@ -47,6 +48,14 @@ const Games = {
         byId('btn-replay-last').addEventListener('click', () => Games.gotoTurn(Games.replay.states.length - 1));
         byId('btn-replay-breakdown').addEventListener('click', () => Games.toggleBreakdown());
         byId('btn-replay-eval').addEventListener('click', () => Games.toggleEval());
+        byId('btn-replay-moves').addEventListener('click', () => Games.toggleMoves());
+        byId('btn-replay-accuracy').addEventListener('click', () => Games.evaluateAccuracy());
+        document.querySelectorAll('input[name="moves-filter"]').forEach(r => {
+            r.addEventListener('change', () => {
+                Games.replay.movesFilter = r.value;
+                if (Games.replay.showMoves) Games.renderReplayBody();
+            });
+        });
 
         // Lazy-load the first time the tab is opened.
         document.querySelector('.tab-btn[data-tab="games"]').addEventListener('click', () => {
@@ -155,6 +164,7 @@ const Games = {
             checkpoint: Games.filters.checkpoint,
             variant:    Games.filters.variant,
             outcome:    Games.filters.outcome,
+            flagged:    Games.filters.flagged,
             limit:      Games.pageSize,
             offset:     Games.offset,
         });
@@ -164,15 +174,17 @@ const Games = {
 
         let html = `<thead><tr>
             <th>Finished</th><th>Variant</th><th>Human seats</th>
-            <th>Checkpoint</th><th>Result</th><th>Margin</th><th>Duration</th><th></th>
+            <th>Checkpoint</th><th>Result</th><th>Margin</th><th>Duration</th><th></th><th></th>
           </tr></thead><tbody>`;
         if (games.length === 0) {
-            html += `<tr><td colspan="8" style="text-align:center; color:var(--muted);">No games.</td></tr>`;
+            html += `<tr><td colspan="9" style="text-align:center; color:var(--muted);">No games.</td></tr>`;
         }
         for (const g of games) {
             const hr = humanResult(g);
             const hm = humanMargin(g);
-            html += `<tr class="games-row" data-uuid="${escapeAttr(g.uuid)}">
+            const flag = g.flagged
+                ? `<span class="games-flag" title="Flagged: AI played weird moves">🚩</span>` : '';
+            html += `<tr class="games-row${g.flagged ? ' games-row-flagged' : ''}" data-uuid="${escapeAttr(g.uuid)}">
                 <td>${fmtTime(g.finish_ts_ms)}</td>
                 <td>${g.variant || ''}</td>
                 <td>${(g.human_seats || []).join(', ')}</td>
@@ -180,6 +192,7 @@ const Games = {
                 <td class="res-${hr}">${hr.toUpperCase()}</td>
                 <td class="${marginCls(hm)}">${fmtSignedNum(hm)}</td>
                 <td>${fmtDuration(g.duration_ms)}</td>
+                <td>${flag}</td>
                 <td><button class="games-view-btn">View</button></td>
               </tr>`;
         }
@@ -245,9 +258,17 @@ const Games = {
             showBreakdown: false,
             // NN eval (lazy, enabled via the "Load checkpoint" button):
             evalOn: false, evalCache: {}, evalErr: null,
+            // Per-move accuracy (win% given up on the move being shown), cached
+            // by turn. Populated lazily while the checkpoint eval is on, and in
+            // bulk by the "Evaluate human accuracy" button.
+            moveAccCache: {}, moveAccErr: null,
+            // Move-eval table (lazy, enabled via the "Move evals" button):
+            showMoves: false, movesFilter: 'valid', movesCache: {}, movesErr: null,
         };
         document.getElementById('games-replay-modal').style.display = 'block';
         Games.resetEvalButton();
+        Games.resetMovesButton();
+        Games.resetAccuracyButton();
         Games.renderReplayMeta();
         Games.renderReplayBody();
         Games.renderEvalLine();
@@ -263,8 +284,9 @@ const Games = {
         if (!states) return;
         Games.replay.turn = Math.max(0, Math.min(states.length - 1, turn));
         Games.replay.showBreakdown = false;  // navigating returns to the board view
+        if (Games.replay.showMoves) Games.evaluateMovesCurrent();
         Games.renderReplayBody();
-        if (Games.replay.evalOn) Games.evaluateCurrent();
+        if (Games.replay.evalOn) { Games.evaluateCurrent(); Games.evaluateMoveAccCurrent(); }
         Games.renderEvalLine();
     },
 
@@ -296,7 +318,7 @@ const Games = {
             btn.classList.toggle('active', Games.replay.evalOn);
             btn.textContent = Games.replay.evalOn ? '🎯 Checkpoint loaded' : '🎯 Load checkpoint';
         }
-        if (Games.replay.evalOn) Games.evaluateCurrent();
+        if (Games.replay.evalOn) { Games.evaluateCurrent(); Games.evaluateMoveAccCurrent(); }
         Games.renderEvalLine();
     },
 
@@ -359,6 +381,47 @@ const Games = {
         Games.renderEvalLine();
     },
 
+    // Args for /api/games/accuracy_turn for the move at history index `i`
+    // (the board before it is states[i]).
+    accuracyTurnArgs(i) {
+        const { history, record } = Games.replay;
+        const t = history[i];
+        return {
+            checkpoint: record.checkpoint,
+            player: t.player,
+            position: Games.buildEvalPosition(i),
+            initial_dice: t.initial_dice,
+            holds: (t.holds || []).map(h => ({ mask: h.mask, dice_after: h.dice_after })),
+            placement: { column: t.placement.column, row: t.placement.row },
+            score: t.score,
+        };
+    },
+
+    // Per-move accuracy for the move that produced the current state (the move
+    // history[turn-1]). Cached per turn; shares the cache the bulk "Evaluate
+    // human accuracy" button fills.
+    async evaluateMoveAccCurrent() {
+        const { turn, history, record } = Games.replay;
+        if (turn <= 0) return;
+        const cache = Games.replay.moveAccCache;
+        if (cache[turn] && !cache[turn].error) return;  // done or in flight
+
+        cache[turn] = { pending: true, player: history[turn - 1].player };
+        Games.replay.moveAccErr = null;
+        Games.renderEvalLine();
+
+        const r = await API.accuracyTurn(Games.accuracyTurnArgs(turn - 1));
+        if (!Games.replay.record || Games.replay.record.uuid !== record.uuid) return;
+        if (r.error) { delete cache[turn]; Games.replay.moveAccErr = r.error; }
+        else cache[turn] = {
+            player: r.player,
+            holdDeltas: r.hold_deltas || [],
+            placeDelta: r.has_place ? r.place_delta : null,
+            rollLucks: r.roll_lucks || [],
+        };
+        Games.renderEvalLine();
+    },
+
     renderEvalLine() {
         const el = document.getElementById('replay-eval-info');
         if (!el) return;
@@ -367,20 +430,291 @@ const Games = {
         if (evalErr) { el.innerHTML = `<span class="eval-err">eval failed: ${escapeHtml(evalErr)}</span>`; return; }
         if (turn <= 0) { el.innerHTML = `<span class="muted">step to a placed move to see its win-rate</span>`; return; }
         const e = evalCache[turn];
-        if (!e || e.pending) { el.innerHTML = `<span class="muted">evaluating…</span>`; return; }
-        el.innerHTML =
-            `<span class="eval-label">P${e.player} win-rate (checkpoint)</span> ` +
-            `<span class="eval-val">${pct(e.value)}</span>`;
+        let html = (!e || e.pending)
+            ? `<span class="muted">evaluating…</span>`
+            : `<span class="eval-label">P${e.player} win-rate (checkpoint)</span> ` +
+              `<span class="eval-val">${pct(e.value)}</span>`;
+        html += ' · ' + Games.moveAccText(turn);
+        el.innerHTML = html;
     },
 
-    // Dispatch the modal body to either the turn board or the score breakdown,
-    // and keep the toggle button's label in sync with the current view.
+    // Inline "win% lost on this move" + "turn luck" fragment for the eval line.
+    moveAccText(turn) {
+        const a = Games.replay.moveAccCache[turn];
+        if (!a || a.pending) return `<span class="muted">move eval…</span>`;
+        const pp = (x) => x == null ? '—' : (100 * x).toFixed(2) + 'pp';
+        const holds = (a.holdDeltas && a.holdDeltas.length)
+            ? a.holdDeltas.reduce((s, x) => s + x, 0) : null;
+        // Turn luck = mean of this turn's per-roll luck, remapped to 0..100%.
+        const lk = (a.rollLucks && a.rollLucks.length)
+            ? a.rollLucks.reduce((s, x) => s + x, 0) / a.rollLucks.length : null;
+        const luckPct = lk == null ? '—' : ((lk + 100) / 2).toFixed(1) + '%';
+        return `<span class="acc-label">lost</span> ` +
+            `holds <span class="acc-val">${pp(holds)}</span> · ` +
+            `placement <span class="acc-val">${pp(a.placeDelta)}</span> · ` +
+            `<span class="acc-label" title="Luck of this turn's dice (50% = as expected).">` +
+            `turn luck</span> <span class="acc-val">${luckPct}</span>`;
+    },
+
+    // ---------------- Move evals (all possible next moves) ----------------
+    // Like the eval line, but instead of a single win-rate it loads the
+    // checkpoint's evaluation of *every* legal next-move afterstate for the
+    // player about to move, shown as a table. The filter toggles between the
+    // placement-step subset valid for the rolled dice and all possibilities.
+    resetMovesButton() {
+        const btn = document.getElementById('btn-replay-moves');
+        if (!btn) return;
+        const hasCkpt = !!(Games.replay.record && Games.replay.record.checkpoint);
+        btn.disabled = !hasCkpt;
+        btn.classList.remove('active');
+        btn.textContent = hasCkpt ? '📋 Move evals' : '📋 No checkpoint';
+        const filt = document.getElementById('replay-moves-filter');
+        if (filt) filt.hidden = true;
+    },
+
+    toggleMoves() {
+        if (!Games.replay.states) return;
+        if (!Games.replay.record || !Games.replay.record.checkpoint) return;
+        Games.replay.showMoves = !Games.replay.showMoves;
+        if (Games.replay.showMoves) Games.replay.showBreakdown = false;
+        const btn = document.getElementById('btn-replay-moves');
+        if (btn) btn.classList.toggle('active', Games.replay.showMoves);
+        if (Games.replay.showMoves) Games.evaluateMovesCurrent();
+        Games.renderReplayBody();
+    },
+
+    // Final dice for the turn that produced state `turn` = the dice after the
+    // last reroll, or the initial roll if the player never rerolled.
+    turnFinalDice(turnRec) {
+        if (!turnRec) return null;
+        const holds = turnRec.holds || [];
+        if (holds.length) return holds[holds.length - 1].dice_after || turnRec.initial_dice;
+        return turnRec.initial_dice;
+    },
+
+    // Evaluate every possible next move from the board *before* the current
+    // step's placement, from the mover's perspective. Results cached per turn.
+    async evaluateMovesCurrent() {
+        const { turn, history, record } = Games.replay;
+        if (turn <= 0) return;
+        const cache = Games.replay.movesCache;
+        if (cache[turn] && !cache[turn].error) return;  // done or in flight
+
+        const moveRec = history[turn - 1];
+        const player  = moveRec.player;
+        const position = Games.buildEvalPosition(turn - 1);  // board before the move
+        const dice = Games.turnFinalDice(moveRec);
+        cache[turn] = { pending: true, player };
+        Games.replay.movesErr = null;
+        if (Games.replay.showMoves) Games.renderReplayBody();
+
+        const r = await API.evalGameMoves({
+            checkpoint: record.checkpoint, player, dice, position,
+        });
+
+        // The modal may have closed or navigated away while we awaited.
+        if (!Games.replay.record || Games.replay.record.uuid !== record.uuid) return;
+        if (r.error) {
+            delete cache[turn];
+            Games.replay.movesErr = r.error;
+        } else {
+            cache[turn] = { moves: r.moves || [], player: r.player };
+        }
+        if (Games.replay.showMoves && Games.replay.turn === turn) Games.renderReplayBody();
+    },
+
+    // Build the move-eval panel and append it below the already-rendered board
+    // (renderReplayTurn ran first). Never clears the body.
+    renderMoveEvals() {
+        const { turn, history, movesCache, movesErr, movesFilter } = Games.replay;
+        const body = document.getElementById('games-replay-body');
+        const panel = document.createElement('div');
+        panel.className = 'moves-panel';
+
+        if (turn <= 0) {
+            panel.innerHTML = `<div class="moves-msg muted">Step to a placed move to see its move evaluations.</div>`;
+            body.appendChild(panel);
+            return;
+        }
+        if (movesErr) {
+            panel.innerHTML = `<div class="moves-msg eval-err">eval failed: ${escapeHtml(movesErr)}</div>`;
+            body.appendChild(panel);
+            return;
+        }
+        const entry = movesCache[turn];
+        if (!entry || entry.pending) {
+            panel.innerHTML = `<div class="moves-msg muted">evaluating all moves…</div>`;
+            body.appendChild(panel);
+            return;
+        }
+
+        const moveRec = history[turn - 1];
+        const chosen = moveRec.placement;
+        const chosenScore = moveRec.score;
+        const validOnly = movesFilter !== 'all';
+
+        // Turbo afterstates (requires_roll) are never valid_for_dice, but we keep
+        // them visible even in the "valid after roll" view so the roll-vs-place-
+        // in-Turbo decision can be compared against the available placements.
+        let moves = entry.moves.slice();
+        if (validOnly) moves = moves.filter(m => m.valid_for_dice || m.requires_roll);
+        moves.sort((a, b) => b.eval_value - a.eval_value);
+
+        const dice = Games.turnFinalDice(moveRec) || [];
+        const diceHtml = dice.map(d => `<span class="replay-die">${d}</span>`).join('');
+
+        let html = `<div class="moves-head">` +
+            `<span class="moves-player">P${entry.player} move evals</span> · ` +
+            `<span class="muted">${validOnly ? 'valid after roll' : 'all possible'} — ${moves.length} moves</span>` +
+            `<div class="moves-dice">roll: ${diceHtml}</div></div>`;
+
+        html += `<table class="moves-table"><thead><tr>` +
+            `<th>#</th><th>Column</th><th>Row</th><th>Score</th><th>Eval</th>` +
+            (validOnly ? '' : '<th>Valid?</th>') + `<th></th></tr></thead><tbody>`;
+
+        if (moves.length === 0) {
+            html += `<tr><td colspan="${validOnly ? 6 : 7}" class="muted" style="text-align:center;">No moves.</td></tr>`;
+        }
+        moves.forEach((m, i) => {
+            const isChosen = m.column === chosen.column && m.row === chosen.row &&
+                             m.score === chosenScore;
+            const cls = [isChosen ? 'moves-chosen' : '',
+                         m.requires_roll ? 'moves-turbo' : ''].filter(Boolean).join(' ');
+            const colName = GAMES_COLUMN_NAMES[m.column] ?? m.column_name ?? m.column;
+            const colCell = m.requires_roll
+                ? `${colName} <span class="moves-roll-tag" title="Only placeable with a roll left">needs roll</span>`
+                : colName;
+            html += `<tr class="${cls}">` +
+                `<td>${i + 1}</td>` +
+                `<td>${colCell}</td>` +
+                `<td>${GAMES_ROW_NAMES[m.row] ?? m.row_name ?? m.row}</td>` +
+                `<td>${m.score === 0 ? 'scratch' : m.score}</td>` +
+                `<td>${Number(m.eval_value).toFixed(4)}</td>` +
+                (validOnly ? '' : `<td>${m.requires_roll ? '⟳' : (m.valid_for_dice ? '✓' : '')}</td>`) +
+                `<td>${isChosen ? '◀ played' : ''}</td>` +
+                `</tr>`;
+        });
+        html += `</tbody></table>`;
+        panel.innerHTML = html;
+        body.appendChild(panel);
+    },
+
+    // ---------------- Accuracy & luck ----------------
+    // Sweep every turn in the game once. For human turns, score each reroll and
+    // the final placement against the checkpoint's best action and report the
+    // average win-probability given up (holds vs placements). For all turns,
+    // compute per-turn luck (how the dice deviated from average) and report it
+    // split into human vs. computer seats.
+    resetAccuracyButton() {
+        const btn = document.getElementById('btn-replay-accuracy');
+        if (btn) {
+            const hasCkpt = !!(Games.replay.record && Games.replay.record.checkpoint);
+            btn.disabled = !hasCkpt;
+            btn.textContent = hasCkpt ? '📈 Evaluate accuracy & luck' : '📈 No checkpoint';
+        }
+        const info = document.getElementById('replay-accuracy-info');
+        if (info) info.innerHTML = '';
+    },
+
+    async evaluateAccuracy() {
+        const { record, history } = Games.replay;
+        if (!record || !record.checkpoint || !history) return;
+        const btn  = document.getElementById('btn-replay-accuracy');
+        const info = document.getElementById('replay-accuracy-info');
+        const humanSeats = record.human_seats ||
+                           (record.final_state && record.final_state.human_seats) || [];
+
+        // Luck applies to every seat, accuracy only to human seats. One batched
+        // request scores every turn (one NN pass server-side); we then split
+        // per-turn luck into human vs. computer and pool human accuracy deltas.
+        if (btn) btn.disabled = true;
+        const uuid = record.uuid;
+        if (info) info.innerHTML = `<span class="muted">evaluating ${history.length} turns…</span>`;
+
+        const turns = history.map((t, i) => {
+            const a = Games.accuracyTurnArgs(i);
+            return { player: a.player, position: a.position, initial_dice: a.initial_dice,
+                     holds: a.holds, placement: a.placement, score: a.score };
+        });
+        const resp = await API.accuracyGame({ checkpoint: record.checkpoint, turns });
+        // Bail if the modal moved on while awaiting.
+        if (!Games.replay.record || Games.replay.record.uuid !== uuid) return;
+        if (btn) btn.disabled = false;
+        if (resp.error) {
+            if (info) info.innerHTML = `<span class="eval-err">eval failed: ${escapeHtml(resp.error)}</span>`;
+            return;
+        }
+
+        const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+        const holdDeltas = [], placeDeltas = [];
+        const humanTurnLucks = [], compTurnLucks = [];
+        (resp.turns || []).forEach((r, i) => {
+            const isHuman = humanSeats.indexOf(history[i].player) >= 0;
+            const turnLuck = mean(r.roll_lucks || []);  // mean of that turn's rolls
+            if (turnLuck != null) (isHuman ? humanTurnLucks : compTurnLucks).push(turnLuck);
+            if (isHuman) {
+                (r.hold_deltas || []).forEach(d => holdDeltas.push(d));
+                if (r.has_place) placeDeltas.push(r.place_delta);
+            }
+            // Seed the per-move cache so stepping to this move is instant.
+            Games.replay.moveAccCache[i + 1] = {
+                player: r.player,
+                holdDeltas: r.hold_deltas || [],
+                placeDelta: r.has_place ? r.place_delta : null,
+                rollLucks: r.roll_lucks || [],
+            };
+        });
+
+        Games.renderAccuracy(holdDeltas, placeDeltas,
+                             mean(humanTurnLucks), mean(compTurnLucks), 0);
+        // Refresh the current turn view so its luck shows without a manual step.
+        Games.renderReplayBody();
+    },
+
+    renderAccuracy(holdDeltas, placeDeltas, humanLuck, compLuck, failed) {
+        const info = document.getElementById('replay-accuracy-info');
+        if (!info) return;
+        const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+        // Deltas are win-probability lost (0..1); show as percentage points.
+        const pp = (x) => x == null ? '—' : (100 * x).toFixed(2) + 'pp';
+        // Backend luck is a mean-zero -100..+100 index; display it remapped to a
+        // 0..100% scale where 50% = rolled as expected, 100% = luckiest possible.
+        const luck = (x) => x == null ? '—' : ((x + 100) / 2).toFixed(1) + '%';
+        const all = holdDeltas.concat(placeDeltas);
+        const overall = mean(all), holds = mean(holdDeltas), places = mean(placeDeltas);
+        const warn = failed ? ` <span class="eval-err">(${failed} turn(s) failed)</span>` : '';
+        const accLine = holdDeltas.length || placeDeltas.length
+            ? `<div><span class="acc-label">Avg win% lost vs. best</span> — ` +
+              `<span class="acc-val">overall ${pp(overall)}</span> · ` +
+              `holds ${pp(holds)} <span class="muted">(${holdDeltas.length})</span> · ` +
+              `placements ${pp(places)} <span class="muted">(${placeDeltas.length})</span>` +
+              `<span class="muted"> · lower is better</span></div>`
+            : `<div><span class="muted">No human turns to score for accuracy.</span></div>`;
+        info.innerHTML = accLine +
+            `<div title="How the dice deviated from expectation for each player, ` +
+            `scaled by each roll's full range. 50% = rolled as expected, ` +
+            `above 50% = luckier than expected, below 50% = unluckier.">` +
+            `<span class="acc-label">Luck</span> — ` +
+            `human <span class="acc-val">${luck(humanLuck)}</span> · ` +
+            `computer <span class="acc-val">${luck(compLuck)}</span>` +
+            `<span class="muted"> · 50% = as expected</span></div>${warn}`;
+    },
+
+    // Dispatch the modal body. The score breakdown replaces the board; the
+    // move-eval table is additive and renders *below* the board so the play
+    // tables stay visible while you read the evaluations.
     renderReplayBody() {
-        const showing = Games.replay.showBreakdown;
-        const btn = document.getElementById('btn-replay-breakdown');
-        if (btn) btn.textContent = showing ? '◀ Back to replay' : '📊 Score breakdown';
-        if (showing) Games.renderBreakdown();
-        else Games.renderReplayTurn();
+        const { showBreakdown, showMoves } = Games.replay;
+        const bbtn = document.getElementById('btn-replay-breakdown');
+        if (bbtn) bbtn.textContent = showBreakdown ? '◀ Back to replay' : '📊 Score breakdown';
+        const mbtn = document.getElementById('btn-replay-moves');
+        if (mbtn && !mbtn.disabled) mbtn.classList.toggle('active', showMoves);
+        const filt = document.getElementById('replay-moves-filter');
+        if (filt) filt.hidden = !(showMoves && !showBreakdown);
+
+        if (showBreakdown) { Games.renderBreakdown(); return; }
+        Games.renderReplayTurn();
+        if (showMoves) Games.renderMoveEvals();  // appended below the board
     },
 
     renderReplayMeta() {
@@ -389,7 +723,12 @@ const Games = {
         const hr = humanResult(r);
         const hm = humanMargin(r);
         const coeffs = (r.coefficients || fs.coefficients || []);
+        const flagLine = r.flagged
+            ? `<div class="games-flag-meta">🚩 Flagged by player — “AI played weird moves this game”` +
+              `${r.flag_note && r.flag_note !== 'ai_weird_moves' ? ' · ' + escapeHtml(r.flag_note) : ''}</div>`
+            : '';
         document.getElementById('games-replay-meta').innerHTML =
+            flagLine +
             `<div><strong>${escapeHtml(r.uuid)}</strong></div>` +
             `<div>${r.variant || ''} · checkpoint <strong>${escapeHtml(r.checkpoint || '—')}</strong> · ` +
             `human seats [${(r.human_seats || []).join(', ')}] · ` +
@@ -413,8 +752,16 @@ const Games = {
             const colName = GAMES_COLUMN_NAMES[justTurn.placement.column];
             const rowName = GAMES_ROW_NAMES[justTurn.placement.row];
             const sc = justTurn.score;
-            info.textContent = `Move ${turn}/${states.length - 1} · P${justTurn.player} → ` +
+            let line = `Move ${turn}/${states.length - 1} · P${justTurn.player} → ` +
                 `${rowName} in ${colName} = ${sc === 0 ? 'scratch' : sc}`;
+            // Append this turn's luck if it's been evaluated (e.g. via the
+            // "Evaluate accuracy & luck" button). 50% = rolled as expected.
+            const cached = Games.replay.moveAccCache[turn];
+            if (cached && cached.rollLucks && cached.rollLucks.length) {
+                const lk = cached.rollLucks.reduce((s, x) => s + x, 0) / cached.rollLucks.length;
+                line += ` · luck ${((lk + 100) / 2).toFixed(1)}%`;
+            }
+            info.textContent = line;
         } else {
             info.textContent = `Start (0/${states.length - 1})`;
         }

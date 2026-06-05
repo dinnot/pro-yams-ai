@@ -9,6 +9,27 @@
 </head>
 <body>
 
+<!-- Shown while the client has lost contact with the server and is retrying.
+     The authoritative game state lives on the server, so play resumes
+     automatically once the connection is back (e.g. after returning from
+     another app on mobile). -->
+<div id="reconnect-banner" class="reconnect-banner" hidden>
+  <span class="reconnect-spinner"></span><span>Reconnecting…</span>
+</div>
+
+<!-- Shown once when a human teammate leaves a shared game and the AI takes
+     over their seat. -->
+<div id="takeover-banner" class="takeover-banner" hidden>
+  <span>Your teammate left — the AI is now playing their seat.</span>
+</div>
+
+<!-- Shown while a teammate has gone silent past the grace period. The surviving
+     player decides whether to switch them to the AI (or keep waiting). -->
+<div id="disconnect-prompt" class="disconnect-prompt" hidden>
+  <span>Your teammate seems to have left.</span>
+  <button id="btn-takeover" class="btn-takeover">Play their seat as the AI</button>
+</div>
+
 <header id="header" title="Tap to start a new game">
   <h1>Pro Yams</h1>
   <span id="turn-info" class="turn-info"></span>
@@ -19,11 +40,20 @@
   <section id="splash" class="splash">
     <p class="splash-tagline">You vs. the neural net.</p>
     <div id="splash-buttons" class="splash-buttons">
-      <button id="btn-play"      class="btn-play">▶ Play</button>
-      <button id="btn-play-team" class="btn-play" hidden>▶ Play whole team</button>
-      <button id="btn-play-solo" class="btn-play" hidden>▶ Play with NN teammate</button>
+      <button id="btn-play"        class="btn-play">▶ Play</button>
+      <button id="btn-play-friend" class="btn-play" hidden>▶ Play with a friend</button>
+      <button id="btn-play-team"   class="btn-play" hidden>▶ Play whole team</button>
+      <button id="btn-play-solo"   class="btn-play" hidden>▶ Play with NN teammate</button>
     </div>
     <p class="splash-disclaimer">Games you play here are recorded for research and to improve the AI.</p>
+  </section>
+
+  <!-- Matchmaking wait screen ("Play with a friend") -->
+  <section id="matchmaking" class="splash" hidden>
+    <div class="mm-spinner"></div>
+    <p class="splash-tagline">Waiting for another player…</p>
+    <p class="splash-disclaimer">You'll be teamed up against the neural net as soon as someone else joins.</p>
+    <button id="btn-mm-cancel" class="btn-play btn-cancel">Cancel</button>
   </section>
 
   <!-- Game UI -->
@@ -34,8 +64,10 @@
     <div id="endgame" class="endgame" hidden>
       <div id="endgame-text" class="endgame-text"></div>
       <div id="endgame-margin" class="endgame-margin"></div>
+      <div id="endgame-luck" class="endgame-luck" title="How the dice deviated from expectation. 50% = average luck, higher = luckier."></div>
       <div id="endgame-breakdown" class="endgame-breakdown"></div>
       <button id="btn-again" class="btn-play">Play again</button>
+      <button id="btn-flag" class="btn-flag" title="Flag this game so we can review the AI's play">⚠ AI played weird moves this game</button>
     </div>
   </section>
 </main>

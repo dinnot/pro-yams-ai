@@ -7,6 +7,7 @@ add_library(engine STATIC
     placement.cc
     duel.cc
     board_init.cc
+    game_rules.cc
     rng.cc
     game_flow.cc    # Added in Task 03
     tensor.cc       # Added in Task 06

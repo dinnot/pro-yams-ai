@@ -17,6 +17,7 @@
 //
 //   <games_dir>/started.jsonl    one line appended when a game is created
 //   <games_dir>/finished.jsonl   one line appended when a game completes
+//   <games_dir>/flagged.jsonl    one line appended when a human flags a game
 //   <games_dir>/games/<uuid>.json full record (final state + move history)
 //
 // Multiple play-server processes (e.g. a 1v1 instance and a 2v2 instance on
@@ -70,6 +71,13 @@ public:
                      const nlohmann::json& final_state,
                      const GameOutcome& outcome);
 
+    // Flag a (typically just-finished) game for human review — e.g. the player
+    // felt the AI played weird moves. Appends a line to flagged.jsonl and sets
+    // "flagged": true (plus an optional "flag_note") on the per-game record so
+    // the admin viewer can surface it. Returns true if the session's uuid was
+    // known and the flag was recorded. Safe to call repeatedly (idempotent).
+    bool flag_game(int session_id, const std::string& note);
+
     // Drop in-memory state for a game that was abandoned/deleted before
     // finishing. The started.jsonl line remains, so it counts toward the drop
     // rate (started but never finished).
@@ -95,9 +103,14 @@ private:
     std::string games_subdir_;     // games_dir_/games
     std::string started_path_;
     std::string finished_path_;
+    std::string flagged_path_;
     std::string checkpoint_;
     int         port_;
 
     std::mutex                    mu_;
-    std::map<int, StartedMeta>    active_;  // session_id -> meta
+    std::map<int, StartedMeta>    active_;        // session_id -> meta
+    // session_id -> uuid, retained after finish so a flag arriving on the
+    // endgame screen can still locate the per-game record. Capped to a recent
+    // window so it never grows without bound over a long-lived process.
+    std::map<int, std::string>    session_uuid_;
 };

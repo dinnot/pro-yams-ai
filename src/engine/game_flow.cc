@@ -2,6 +2,7 @@
 
 #include "engine/board_init.h"
 #include "engine/duel.h"
+#include "engine/game_rules.h"
 #include "engine/game_traits.h"
 #include "engine/placement.h"
 #include "engine/scoring.h"
@@ -46,6 +47,13 @@ void perform_reroll(GameStateT<Traits>& gs, uint8_t hold_mask, RNG& rng) {
 }
 
 template <typename Traits>
+bool yams_bonus_active(const GameStateT<Traits>& gs) {
+    return game_rules().yams_first_roll_bonus &&
+           gs.rolls_left == 2 &&
+           is_five_of_a_kind(gs.dice);
+}
+
+template <typename Traits>
 bool can_reroll(const GameStateT<Traits>& gs, const GameContextT<Traits>& ctx) {
     if (gs.rolls_left <= 0) return false;
     if (gs.rolls_left == 1 &&
@@ -69,8 +77,12 @@ int perform_placement(GameStateT<Traits>& gs, GameContextT<Traits>& ctx,
                       int column, int row, RNG& rng) {
     int p = gs.board.current_player;
 
-    // The Engine acts as the absolute authority again!
-    int score = calculate_score<Traits>(row, gs.dice, p, column, gs.board, ctx);
+    // The Engine acts as the absolute authority again! On a first-roll Yams
+    // (rule enabled), the chosen cell scores its maximum legal value instead of
+    // the dice-derived score.
+    int score = yams_bonus_active<Traits>(gs)
+                    ? calculate_yams_bonus_score<Traits>(row, p, column, gs.board, ctx)
+                    : calculate_score<Traits>(row, gs.dice, p, column, gs.board, ctx);
 
     apply_placement<Traits>(p, column, row, score, gs.board, ctx);
     if (!is_terminal<Traits>(gs.board)) {
@@ -98,6 +110,8 @@ template void init_game<Yams1v1>(GameStateT<Yams1v1>&, GameContextT<Yams1v1>&, R
 template void init_game<Yams2v2>(GameStateT<Yams2v2>&, GameContextT<Yams2v2>&, RNG&);
 template void start_turn<Yams1v1>(GameStateT<Yams1v1>&, RNG&);
 template void start_turn<Yams2v2>(GameStateT<Yams2v2>&, RNG&);
+template bool yams_bonus_active<Yams1v1>(const GameStateT<Yams1v1>&);
+template bool yams_bonus_active<Yams2v2>(const GameStateT<Yams2v2>&);
 template void perform_reroll<Yams1v1>(GameStateT<Yams1v1>&, uint8_t, RNG&);
 template void perform_reroll<Yams2v2>(GameStateT<Yams2v2>&, uint8_t, RNG&);
 template bool can_reroll<Yams1v1>(const GameStateT<Yams1v1>&, const GameContextT<Yams1v1>&);

@@ -497,7 +497,11 @@ const Game = {
             document.getElementById('btn-play-all').disabled = true;
         } else if (gs.waiting_for_human) {
             const pIdx = gs.current_player;
-            Game.setStatus(`Player ${pIdx}'s turn (Human) — Roll ${3 - gs.rolls_left + 1}/3`);
+            if (gs.yams_bonus) {
+                Game.setStatus(`Player ${pIdx} — 🍀 Lucky YAMS! Place the max in any cell.`, 'win');
+            } else {
+                Game.setStatus(`Player ${pIdx}'s turn (Human) — Roll ${3 - gs.rolls_left + 1}/3`);
+            }
         } else {
             const pIdx = gs.current_player;
             const pType = gs.player_types ? gs.player_types[pIdx] : 'bot';

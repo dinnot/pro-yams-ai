@@ -72,6 +72,7 @@ protected:
     std::string dir_;
     std::string started()  { return (fs::path(dir_) / "started.jsonl").string(); }
     std::string finished() { return (fs::path(dir_) / "finished.jsonl").string(); }
+    std::string flagged()  { return (fs::path(dir_) / "flagged.jsonl").string(); }
     std::string game_file(const std::string& uuid) {
         return (fs::path(dir_) / "games" / (uuid + ".json")).string();
     }
@@ -145,6 +146,40 @@ TEST_F(GameRecorderTest, ForgottenGameIsNotRecorded) {
 
     EXPECT_EQ(count_lines(started()), 1);    // start still counts toward drops
     EXPECT_EQ(count_lines(finished()), 0);   // but it was never finished
+}
+
+TEST_F(GameRecorderTest, FlagGameStampsRecordAndIndex) {
+    GameRecorder rec(dir_, "ckpt", 8090);
+    std::string uuid = rec.start_game(1, make_start());
+    json final_state = {{"num_players", 2}, {"history", json::array()}};
+    rec.finish_game(1, final_state, make_outcome());
+
+    EXPECT_TRUE(rec.flag_game(1, "ai_weird_moves"));
+
+    // flagged.jsonl gets one line keyed by the game's uuid.
+    ASSERT_EQ(count_lines(flagged()), 1);
+    auto fl = read_lines(flagged());
+    EXPECT_EQ(fl[0]["uuid"], uuid);
+    EXPECT_EQ(fl[0]["note"], "ai_weird_moves");
+
+    // The per-game record is stamped so the viewer can show it directly.
+    std::ifstream gf(game_file(uuid));
+    json full; gf >> full;
+    EXPECT_EQ(full["flagged"], true);
+    EXPECT_EQ(full["flag_note"], "ai_weird_moves");
+}
+
+TEST_F(GameRecorderTest, FlagUnknownSessionFails) {
+    GameRecorder rec(dir_, "ckpt", 8090);
+    EXPECT_FALSE(rec.flag_game(999, "ai_weird_moves"));
+    EXPECT_EQ(count_lines(flagged()), 0);
+}
+
+TEST_F(GameRecorderTest, FlagAfterForgetFails) {
+    GameRecorder rec(dir_, "ckpt", 8090);
+    rec.start_game(3, make_start());
+    rec.forget(3);
+    EXPECT_FALSE(rec.flag_game(3, "ai_weird_moves"));
 }
 
 }  // namespace

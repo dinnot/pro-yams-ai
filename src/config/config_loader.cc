@@ -109,6 +109,7 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     maybe_assign(n, "pbrs_clean_reward", tc.pbrs_clean_reward);
     maybe_assign(n, "past_opponent_probability", tc.past_opponent_probability);
     maybe_assign(n, "logs_on_start",     tc.logs_on_start);
+    maybe_assign(n, "yams_first_roll_bonus", tc.yams_first_roll_bonus);
     if (n["td_mode"])   tc.td_mode = parse_td_mode(n["td_mode"].as<std::string>());
     // game_variant at the training level takes precedence; load it BEFORE the
     // model block so the model block can still override it if explicitly set.

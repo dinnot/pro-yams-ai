@@ -3,6 +3,7 @@
 #include "solver/solver.h"
 #include "engine/board_init.h"
 #include "engine/game_flow.h"
+#include "engine/game_rules.h"
 
 // Shared fixture
 class SolverResolveTest : public ::testing::Test {
@@ -235,4 +236,41 @@ TEST_F(SolverResolveTest, RollsLeft0_ProhibitsTurbo) {
     EXPECT_TRUE(result.should_place);
     EXPECT_NE(result.placement.column, kColTurbo);
     EXPECT_EQ(result.expected_value, 0.0); // Should match the best non-Turbo EV
+}
+
+// ---------------------------------------------------------------------------
+// "Lucky Yams" first-roll bonus: solver places the wildcard max in the cell
+// with the best EV, ignoring the dice faces.
+// ---------------------------------------------------------------------------
+TEST_F(SolverResolveTest, LuckyYams_PicksMaxScoringCell) {
+    set_game_rules(GameRules{/*yams_first_roll_bonus=*/true});
+
+    // First roll, five 3s → bonus active.
+    gs.rolls_left = 2;
+    for (int i = 0; i < kNumDice; ++i) gs.dice[i] = 3;
+    ASSERT_TRUE(yams_bonus_active(gs));
+
+    solver_get_requests(gs, ctx, tables, buffers);
+
+    // Find the (Free, Yams=100) afterstate and give it the single best EV.
+    int target = -1;
+    for (int i = 0; i < buffers.request_count; ++i) {
+        buffers.evs[i] = 0.0;
+        if (buffers.requests[i].placement.column == kColFree &&
+            buffers.requests[i].placement.row == kRowY &&
+            buffers.requests[i].score == 100) {
+            target = i;
+        }
+    }
+    ASSERT_GE(target, 0);
+    buffers.evs[target] = 50.0;
+
+    SolverResult result = solver_resolve_greedy(gs, ctx, tables, buffers);
+    EXPECT_TRUE(result.should_place);
+    EXPECT_EQ(result.placement.column, kColFree);
+    EXPECT_EQ(result.placement.row, kRowY);
+    EXPECT_EQ(result.score, 100);           // wildcard max, not the dice-derived 80
+    EXPECT_EQ(result.chosen_request_idx, target);
+
+    set_game_rules(GameRules{});  // restore default
 }

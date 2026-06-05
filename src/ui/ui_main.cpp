@@ -5,6 +5,7 @@
 
 #include <torch/torch.h>
 
+#include "engine/game_rules.h"
 #include "engine/game_traits.h"
 #include "eval/tournament.h"
 #include "model/model_config.h"
@@ -52,6 +53,11 @@ int main(int argc, char* argv[]) {
     std::string games_dir       = "./recorded_games";
     int         port            = 8080;
     std::string variant         = "1v1";
+    bool        yams_bonus       = true;
+
+    auto parse_bool = [](const std::string& v) {
+        return v == "1" || v == "true" || v == "True" || v == "yes" || v == "on";
+    };
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -63,7 +69,10 @@ int main(int argc, char* argv[]) {
         else if (arg == "--port"            && i + 1 < argc) port            = std::stoi(argv[++i]);
         else if (arg == "--variant"         && i + 1 < argc) variant         = argv[++i];
         else if (arg == "--game_variant"    && i + 1 < argc) variant         = argv[++i];
+        else if (arg == "--yams_bonus"      && i + 1 < argc) yams_bonus      = parse_bool(argv[++i]);
     }
+
+    set_game_rules({yams_bonus});
 
     if (checkpoints_dir.empty()) {
         if (!checkpoint_path.empty()) {

@@ -452,10 +452,39 @@ select, input[type="text"] {
 }
 .tensor-modal-controls label { display: flex; align-items: center; gap: 4px; }
 #btn-replay-eval.active { background: #2e7d32; color: #fff; }
+#btn-replay-moves.active { background: #2e7d32; color: #fff; }
 .replay-eval { font-size: 0.9rem; }
 .replay-eval .eval-label { color: #aaa; }
 .replay-eval .eval-val { color: #4caf50; font-weight: 700; font-size: 1.05rem; }
 .replay-eval .eval-err { color: #e94560; }
+.replay-accuracy { font-size: 0.9rem; }
+.replay-accuracy .acc-label { color: #aaa; }
+.replay-accuracy .acc-val { color: #4caf50; font-weight: 700; }
+.replay-accuracy .eval-err { color: #e94560; }
+
+/* Move-eval table (all possible next-move evaluations) */
+.replay-moves-filter { font-size: 0.85rem; display: inline-flex; gap: 12px; }
+.replay-moves-filter label { color: #ccc; }
+.moves-panel { margin-top: 16px; padding-top: 12px; border-top: 1px solid #2a2a3a; }
+.moves-msg { padding: 16px; text-align: center; }
+.moves-msg.eval-err { color: #e94560; }
+.moves-head { margin-bottom: 8px; font-size: 0.9rem; }
+.moves-head .moves-player { font-weight: 700; }
+.moves-head .moves-dice { margin-top: 4px; }
+.moves-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.moves-table th, .moves-table td {
+  padding: 3px 8px; text-align: left; border-bottom: 1px solid #2a2a3a;
+}
+.moves-table th { color: #aaa; font-weight: 600; }
+.moves-table tr.moves-chosen { background: rgba(76, 175, 80, 0.18); font-weight: 700; }
+.moves-table tr.moves-chosen td:last-child { color: #4caf50; }
+.moves-table tr.moves-turbo { background: rgba(255, 167, 38, 0.10); }
+.moves-table tr.moves-turbo.moves-chosen { background: rgba(76, 175, 80, 0.18); }
+.moves-roll-tag {
+  display: inline-block; margin-left: 6px; padding: 0 5px;
+  font-size: 0.72rem; font-weight: 600; color: #ffa726;
+  border: 1px solid rgba(255, 167, 38, 0.5); border-radius: 3px;
+}
 .tensor-modal-body {
   overflow: auto;
   padding: 8px 14px 14px;
@@ -754,6 +783,15 @@ select, input[type="text"] {
   color: #aaa;
 }
 .games-view-btn { font-size: 0.75rem; padding: 2px 8px; }
+.games-row-flagged { background: rgba(233, 69, 96, 0.10); }
+.games-row-flagged:hover { background: rgba(233, 69, 96, 0.20); }
+.games-flag { font-size: 0.95rem; }
+.games-filter-flag { display: inline-flex; align-items: center; gap: 4px; }
+.games-flag-meta {
+  margin-bottom: 6px; padding: 4px 8px; border-radius: 4px;
+  background: rgba(233, 69, 96, 0.15); color: #ffb3c0; font-weight: 600;
+  font-size: 0.85rem;
+}
 
 /* Replay */
 .res-win  { color: #4caf50; }

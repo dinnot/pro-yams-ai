@@ -311,6 +311,15 @@ void mc_play_turn(GameState& state, GameContext& ctx,
                 buffers.evs[i] = static_cast<double>(ptr[i]);
         }
 
+        // "Lucky Yams" first-roll bonus: max-anywhere dominates any rollout,
+        // so skip candidate selection and place the solver's chosen cell.
+        if (yams_bonus_active(state)) {
+            SolverResult result = solver_resolve(state, ctx, tables, buffers, greedy, rng);
+            perform_placement(state, ctx,
+                              result.placement.column, result.placement.row, rng);
+            return;
+        }
+
         // Build V0/V1 via the solver (needed for candidate selection).
         // We call solver_resolve to populate v0/v1 tables, then extract candidates.
         solver_resolve(state, ctx, tables, buffers, greedy, rng);

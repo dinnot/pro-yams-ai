@@ -37,6 +37,13 @@ First, understand the scoring categories available in every column.
   * **LS (Large Sum)**: Must be at least 20\. Must be strictly higher than the highest **SS** recorded by anyone. If you scratched (0) your SS in this column, you must scratch LS as well (cannot put any score \> 0 in there). If you scratch SS after putting a score in LS, LS will become scratched as well.  
 * **Scratching (Scoring 0\)**: Scratching a cell means placing a score of 0 in it. Importantly, scratching is **not a choice** or a special placement type. It simply means you placed your final dice in a cell where the computed score evaluates to 0 (either because your dice do not match the cell's criteria, or because your score fails to meet the Competitive Scoring threshold). You **cannot voluntarily choose to score 0** in a cell if your current dice yield a valid score greater than 0 that beats the competitive threshold. For example, you cannot choose to scratch a Full House cell if your final dice represent a valid Full House for that cell. Similarly, you cannot choose to score 0 in a "6s" cell if you have rolled two 6s and no one has recorded a score higher than 12 in that box.
 
+#### **The Lucky Yams (First-Roll Bonus)**
+
+If your **very first roll** of a turn is a Yams (5 dice of the same face), you may write the **maximum possible score** in any *one* cell you are currently allowed to fill — **independent of the dice faces**. The value written is that row's theoretical maximum (e.g. **100** in Yams, **30** in the 6s box, **50** in Full House, **54** in 4-of-a-Kind, **75** in Less-than-8), still subject to the Golden Rule and the SS/LS interlock (so a Small Sum is capped just below an already-filled Large Sum, etc.).
+
+* The bonus only applies on the **initial roll**. You keep the normal option to re-roll, but **re-rolling forfeits the bonus** (you then play out the turn under the usual rules).
+* This is the **default** rule. It can be disabled in configuration for AI training runs that prefer the simpler engine behaviour (where a first-roll Yams scores normally, like any other roll).
+
 ### **The Columns**
 
 Each column determines **how** you are allowed to fill the rows above.

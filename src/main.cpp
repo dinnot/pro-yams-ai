@@ -13,6 +13,7 @@
 #include "config/config_validator.h"
 #include "distil/distil_loop.h"
 #include "distil/distil_resume.h"
+#include "engine/game_rules.h"
 #include "engine/game_traits.h"
 #include "eval/evaluator.h"
 #include "model/model_config.h"
@@ -117,6 +118,9 @@ static int mode_train(const AppConfig& cfg) {
     std::cout << "Building solver tables...\n";
     PrecomputedTables tables;
     init_precomputed_tables(tables);
+    set_game_rules({cfg.training.yams_first_roll_bonus});
+    std::cout << "Lucky-Yams first-roll bonus: "
+              << (cfg.training.yams_first_roll_bonus ? "ON" : "OFF") << "\n";
 
     if (!cfg.training.log_dir.empty()) {
         std::filesystem::create_directories(cfg.training.log_dir);
@@ -180,6 +184,7 @@ static int mode_eval(AppConfig cfg) {
 
     PrecomputedTables tables;
     init_precomputed_tables(tables);
+    set_game_rules({cfg.training.yams_first_roll_bonus});
 
     // Pull the variant + input_size out of the checkpoint and overwrite the
     // cfg's model section so ModelTrainer is constructed with matching shape.

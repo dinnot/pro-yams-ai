@@ -7,6 +7,53 @@
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
+// build_holds_json — serialize a turn's reroll steps (committed or in-progress)
+// as [{ mask, dice_after, held_flags }]. held_flags marks which dice of the
+// post-roll set were carried over from the pre-roll dice (greedy match by
+// value), matching the reveal the frontend animates. Shared by the history
+// loop and the live (in-progress) turn.
+// ---------------------------------------------------------------------------
+static json build_holds_json(
+        const int8_t* initial_dice,
+        const std::vector<uint8_t>& hold_masks,
+        const std::vector<std::array<int8_t, kNumDice>>& dice_after_hold) {
+    json holds = json::array();
+    for (size_t hi = 0; hi < hold_masks.size(); ++hi) {
+        json h;
+        uint8_t mask = hold_masks[hi];
+        h["mask"] = static_cast<int>(mask);
+        json da = json::array();
+        json hf = json::array();
+        if (hi < dice_after_hold.size()) {
+            const int8_t* prev_dice = (hi == 0) ? initial_dice
+                                                : dice_after_hold[hi - 1].data();
+            int8_t held_values[kNumDice];
+            int held_count = 0;
+            for (int i = 0; i < kNumDice; ++i)
+                if ((mask >> i) & 1) held_values[held_count++] = prev_dice[i];
+
+            bool mapped[kNumDice] = {false};
+            for (int i = 0; i < kNumDice; ++i) {
+                da.push_back(static_cast<int>(dice_after_hold[hi][i]));
+                bool is_held = false;
+                for (int j = 0; j < held_count; ++j) {
+                    if (!mapped[j] && held_values[j] == dice_after_hold[hi][i]) {
+                        mapped[j] = true;
+                        is_held = true;
+                        break;
+                    }
+                }
+                hf.push_back(is_held);
+            }
+        }
+        h["dice_after"] = da;
+        h["held_flags"] = hf;
+        holds.push_back(h);
+    }
+    return holds;
+}
+
+// ---------------------------------------------------------------------------
 // game_state_to_json<Traits>
 // ---------------------------------------------------------------------------
 
@@ -23,10 +70,29 @@ json game_state_to_json(const GameSessionT<Traits>& session) {
     j["current_player"]    = static_cast<int>(bs.current_player);
     j["rolls_left"]        = static_cast<int>(gs.rolls_left);
     j["waiting_for_human"] = session.waiting_for_human;
+    // "Lucky Yams" bonus active for the current dice (first-roll five-of-a-kind
+    // with the rule enabled). The frontend shows a banner and the per-cell
+    // option scores are already the wildcard maxima.
+    j["yams_bonus"]        = yams_bonus_active<Traits>(gs);
 
     // Variant metadata so the frontend can pick the right layout.
     j["game_variant"]      = (Traits::kNumPlayers == 4) ? "2v2" : "1v1";
     j["num_players"]       = Traits::kNumPlayers;
+
+    // Shared-multiplayer disconnect notice: seats where a human teammate timed
+    // out and the AI took over. Empty for normal (single-client) games. Lets the
+    // surviving player's UI show a "teammate left" banner.
+    json takeover = json::array();
+    for (int p = 0; p < Traits::kNumPlayers; ++p)
+        if (session.seat_nn_takeover[p]) takeover.push_back(p);
+    j["nn_takeover_seats"] = takeover;
+
+    // Human seats that have gone silent past the grace period — candidates the
+    // surviving teammate may choose to switch to the AI (never automatic).
+    json disconnected = json::array();
+    for (int p = 0; p < Traits::kNumPlayers; ++p)
+        if (session.seat_disconnected[p]) disconnected.push_back(p);
+    j["disconnected_seats"] = disconnected;
 
     json dice = json::array();
     for (int i = 0; i < kNumDice; ++i)
@@ -61,43 +127,8 @@ json game_state_to_json(const GameSessionT<Traits>& session) {
             init.push_back(static_cast<int>(turn.initial_dice[i]));
         t["initial_dice"] = init;
 
-        json holds = json::array();
-        for (size_t hi = 0; hi < turn.hold_masks.size(); ++hi) {
-            json h;
-            uint8_t mask = turn.hold_masks[hi];
-            h["mask"] = static_cast<int>(mask);
-            json da = json::array();
-            json hf = json::array();
-            if (hi < turn.dice_after_hold.size()) {
-                const int8_t* prev_dice = (hi == 0) ? turn.initial_dice : turn.dice_after_hold[hi - 1].data();
-
-                int8_t held_values[kNumDice];
-                int held_count = 0;
-                for (int i = 0; i < kNumDice; ++i) {
-                    if ((mask >> i) & 1) {
-                        held_values[held_count++] = prev_dice[i];
-                    }
-                }
-
-                bool mapped[kNumDice] = {false};
-                for (int i = 0; i < kNumDice; ++i) {
-                    da.push_back(static_cast<int>(turn.dice_after_hold[hi][i]));
-                    bool is_held = false;
-                    for (int j = 0; j < held_count; ++j) {
-                        if (!mapped[j] && held_values[j] == turn.dice_after_hold[hi][i]) {
-                            mapped[j] = true;
-                            is_held = true;
-                            break;
-                        }
-                    }
-                    hf.push_back(is_held);
-                }
-            }
-            h["dice_after"]  = da;
-            h["held_flags"]  = hf;
-            holds.push_back(h);
-        }
-        t["holds"] = holds;
+        t["holds"] = build_holds_json(turn.initial_dice, turn.hold_masks,
+                                      turn.dice_after_hold);
 
         t["placement"] = {
             {"column",      static_cast<int>(turn.placement.column)},
@@ -150,6 +181,28 @@ json game_state_to_json(const GameSessionT<Traits>& session) {
         hist.push_back(t);
     }
     j["history"] = hist;
+
+    // In-progress turn (live streaming for shared two-human games). While the
+    // server waits on a human, this exposes the partial turn — the initial roll,
+    // any committed rerolls, and the tentative (uncommitted) hold preview — so a
+    // teammate can watch the turn unfold instead of seeing it all at once when
+    // it finally lands in history. The top-level `dice`/`rolls_left` already
+    // give the current dice; this adds the per-step holds and the preview mask.
+    if (session.waiting_for_human) {
+        const auto& ct = session.current_turn;
+        json lt;
+        lt["player"] = ct.player;
+        json init = json::array();
+        for (int i = 0; i < kNumDice; ++i)
+            init.push_back(static_cast<int>(ct.initial_dice[i]));
+        lt["initial_dice"] = init;
+        lt["holds"]        = build_holds_json(ct.initial_dice, ct.hold_masks,
+                                              ct.dice_after_hold);
+        lt["preview_mask"] =
+            (session.live_hold_player == static_cast<int>(bs.current_player))
+                ? static_cast<int>(session.live_hold_mask) : 0;
+        j["live_turn"] = lt;
+    }
 
     if (session.has_current_board_nn)
         j["current_board_nn_value"] = session.current_board_nn_value;
