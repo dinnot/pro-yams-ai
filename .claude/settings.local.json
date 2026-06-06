@@ -438,7 +438,14 @@
       "Bash(cmake --build build --target pro_yams_ui -j4)",
       "Bash(cmake --build build --target pro_yams_play -j4)",
       "Bash(sed -n '1,40p' src/engine/placement.h)",
-      "Bash(sed -n '1,50p' src/engine/board_init.h)"
+      "Bash(sed -n '1,50p' src/engine/board_init.h)",
+      "Bash(cmake --build build -j24)",
+      "Bash(sed -n '20,32p' tests/eval/eval_game_test.cc)",
+      "Bash(sed -n '27,42p' tests/self_play/integration_test.cc)",
+      "Bash(sed -n '21,40p' tests/self_play/coordinator_test.cc)",
+      "Bash(sed -n '44,52p' config/mlp-256/seed.yaml)",
+      "Bash(sed -n '44,52p' config/mlp-512/seed.yaml)",
+      "Bash(./tests/distil/distil_tests --gtest_filter=\"*PrefixOfLatest*:*EvaluateMatchesDirect*\")"
     ]
   }
 }

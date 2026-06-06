@@ -150,9 +150,13 @@ void distil_worker_thread(GameQueueT<Traits>& available,
                 // Decoupling avoids the E[tanh(X)] ≠ tanh(E[X]) bias that
                 // averaging squashed margins introduces into expectimax.
                 double targets[kMaxAfterstateRequests];
+                // tensor_scratch holds the STUDENT (latest) tensor at stride kT.
+                // An NN teacher on an older append-only version reads the first
+                // input_size <= kT columns of each row (a byte-exact prefix);
+                // a heuristic teacher ignores the tensor entirely.
                 teacher.evaluate(game->state.board, game->ctx,
                                  game->solver_buffers.requests, n,
-                                 tensor_scratch.data(),
+                                 tensor_scratch.data(), kT,
                                  targets,
                                  game->solver_buffers.evs);
 

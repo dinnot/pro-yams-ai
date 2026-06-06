@@ -10,6 +10,7 @@
 #include "distil/distil_loop.h"
 #include "distil/distil_resume.h"
 #include "engine/game_traits.h"
+#include "engine/tensor.h"   // kTensorVersionLatest
 #include "solver/precomputed_tables.h"
 #include "test_tables.h"
 
@@ -55,6 +56,8 @@ static DistilConfig make_small_cfg(const std::string& ckpt_dir,
     cfg.student_model.hidden_width      = 16;
     cfg.student_model.output_activation = "tanh";
     cfg.student_model.architecture      = "mlp";
+    cfg.student_model.tensor_version    = kTensorVersionLatest;
+    cfg.student_model.input_size        = Yams1v1::kTensorSize;
     return cfg;
 }
 

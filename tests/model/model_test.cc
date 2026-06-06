@@ -15,34 +15,34 @@ TEST(ModelTest, DefaultConfig_Construction) {
 }
 
 TEST(ModelTest, ParameterCount_DefaultConfig) {
-    // Default: input_size=986, 3 hidden layers of width 256, architecture=mlp
-    // Projection: 986*256 + 256                              = 252,672
+    // Default: input_size=1010 (latest 1v1), 3 hidden layers of width 256, mlp
+    // Projection: 1010*256 + 256                             = 258,816
     // Hidden 1: 256*256+256                                  =  65,792
     // Hidden 2: 256*256+256                                  =  65,792
     // Output:  256*1 + 1                                     =     257
-    // Total:                                                 = 384,513
+    // Total:                                                 = 390,657
     ModelConfig cfg;
     ProYamsNet net(cfg);
     int64_t param_count = 0;
     for (const auto& p : net.parameters()) {
         param_count += p.numel();
     }
-    EXPECT_EQ(param_count, 384513LL);
+    EXPECT_EQ(param_count, 390657LL);
 }
 
 TEST(ModelTest, CustomConfig_ParameterCount) {
-    // 2 hidden layers of width 128, architecture=mlp, input_size=986
+    // 2 hidden layers of width 128, architecture=mlp, input_size=1010 (latest 1v1)
     ModelConfig cfg;
     cfg.hidden_layers = 2;
     cfg.hidden_width  = 128;
-    // Projection: 986*128 + 128                             = 126,336
+    // Projection: 1010*128 + 128                            = 129,408
     // Hidden 1: 128*128+128                                 =  16,512
     // Output:  128*1 + 1                                    =     129
-    // Total:                                                = 142,977
+    // Total:                                                = 146,049
     ProYamsNet net(cfg);
     int64_t param_count = 0;
     for (const auto& p : net.parameters()) param_count += p.numel();
-    EXPECT_EQ(param_count, 142977LL);
+    EXPECT_EQ(param_count, 146049LL);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ TEST(ModelTest, ConfigAccessor) {
     ProYamsNet net(cfg);
     EXPECT_EQ(net.config().hidden_layers, 4);
     EXPECT_EQ(net.config().hidden_width,  512);
-    EXPECT_EQ(net.config().input_size,    986);
+    EXPECT_EQ(net.config().input_size,    Yams1v1::kTensorSize);
 }
 
 // ---------------------------------------------------------------------------

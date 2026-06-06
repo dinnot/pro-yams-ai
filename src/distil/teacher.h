@@ -41,11 +41,18 @@ public:
     ///     value, so the action is consistent with the prediction.
     ///
     /// @param tensors May be nullptr when needs_tensor_input() == false
-    ///                (heuristic teachers do not consume tensors).
+    ///                (heuristic teachers do not consume tensors). When present,
+    ///                rows are laid out contiguously at `tensor_stride` floats
+    ///                each — the student's (latest) tensor width.
+    /// @param tensor_stride Per-row stride of `tensors` (= the student's
+    ///                kTensorSize). A teacher trained on an older, append-only
+    ///                tensor version reads the first input_size <= tensor_stride
+    ///                columns of each row (the layout it was trained on is a
+    ///                byte-exact prefix of the student's).
     virtual void evaluate(const BoardStateT<Traits>& board,
                           const GameContextT<Traits>& ctx,
                           const AfterstateRequest* requests, int n,
-                          const float* tensors,
+                          const float* tensors, int tensor_stride,
                           double* targets,
                           double* solver_evs) = 0;
 

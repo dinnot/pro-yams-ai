@@ -4,6 +4,7 @@
 
 #include "distil/distil_config.h"
 #include "engine/game_traits.h"
+#include "engine/tensor.h"   // kTensorVersion*, tensor_size_for_version
 #include "model/model_config.h"
 #include "self_play/game_instance.h"  // GameInstance::kMaxAfterstates
 
@@ -24,14 +25,24 @@ static void validate_model_common(const ModelConfig& m, ValidationResult& r,
     if (m.architecture != "mlp" && m.architecture != "resnet")
         fail("architecture must be \"mlp\" or \"resnet\"");
 
-    if (m.game_variant == kGameVariant1v1 && m.input_size != Yams1v1::kTensorSize) {
-        fail("input_size must equal " + std::to_string(Yams1v1::kTensorSize) +
-             " for game_variant=1v1");
-    } else if (m.game_variant == kGameVariant2v2 && m.input_size != Yams2v2::kTensorSize) {
-        fail("input_size must equal " + std::to_string(Yams2v2::kTensorSize) +
-             " for game_variant=2v2");
-    } else if (m.game_variant != kGameVariant1v1 && m.game_variant != kGameVariant2v2) {
+    if (m.game_variant != kGameVariant1v1 && m.game_variant != kGameVariant2v2) {
         fail("game_variant must be 1v1 or 2v2");
+    } else if (m.tensor_version < kTensorVersionV1 ||
+               m.tensor_version > kTensorVersionLatest) {
+        fail("tensor_version must be in [" + std::to_string(kTensorVersionV1) +
+             ", " + std::to_string(kTensorVersionLatest) + "]");
+    } else {
+        // input_size is fully determined by (game_variant, tensor_version).
+        const int expected = (m.game_variant == kGameVariant2v2)
+            ? tensor_size_for_version<Yams2v2>(m.tensor_version)
+            : tensor_size_for_version<Yams1v1>(m.tensor_version);
+        if (m.input_size != expected) {
+            fail("input_size must equal " + std::to_string(expected) +
+                 " for game_variant=" +
+                 (m.game_variant == kGameVariant2v2 ? std::string("2v2")
+                                                    : std::string("1v1")) +
+                 " tensor_version=" + std::to_string(m.tensor_version));
+        }
     }
 }
 

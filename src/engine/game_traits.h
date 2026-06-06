@@ -33,7 +33,18 @@ struct Yams1v1 {
     //   Group D (global aggregates):          =  14
     //   Group E: kNumPlayers * 6 * 18         = 216
     //   Group F: kNumPlayers * 6 * 15         = 180
-    static constexpr int kTensorSize = 986;
+    //
+    // Tensor versioning is append-only: a newer version keeps every V_{n-1}
+    // feature at its original offset and appends new groups at the end, so the
+    // older tensor is a byte-exact prefix of the newer one. kTensorSizeV1 is the
+    // frozen original layout; kTensorSize is always the LATEST layout (what
+    // self-play, the model, and the sample buffers use). A teacher trained on an
+    // older version reads the first tensor_size_for_version(version) columns.
+    static constexpr int kTensorSizeV1 = 986;
+    // Group G (V2): SS/LS interlock / poison-risk features, per-player × col × 2,
+    // appended after Group F. Placeholder zeros until the features land.
+    static constexpr int kGroupGSize   = 2 * kNumPlayers * 6;          // 24
+    static constexpr int kTensorSize   = kTensorSizeV1 + kGroupGSize;  // 1010
     static constexpr int kNumPairings = 1;
 
     // Canonical pairings — index into canonical[ci] = (active + ci) % kNumPlayers.
@@ -62,7 +73,11 @@ struct Yams2v2 {
 
     // Tensor (NN observation) shape — 2× per-player groups, 4× per-pairing.
     //   Group A:   624,  B.1:  48,  B.2: 336,  C: 312,  D: 14,  E: 432,  F: 360
-    static constexpr int kTensorSize = 2126;
+    // See Yams1v1 above for the append-only versioning contract.
+    static constexpr int kTensorSizeV1 = 2126;
+    // Group G (V2): SS/LS interlock / poison-risk, per-player × col × 2.
+    static constexpr int kGroupGSize   = 2 * kNumPlayers * 6;          // 48
+    static constexpr int kTensorSize   = kTensorSizeV1 + kGroupGSize;  // 2174
     static constexpr int kNumPairings = 4;
 
     // Canonical view (relative to active player): canonical[0]=Active,
@@ -90,3 +105,24 @@ static_assert(Yams2v2::are_teammates(1, 3) && Yams2v2::are_teammates(3, 1),
 static_assert(!Yams2v2::are_teammates(0, 1) && !Yams2v2::are_teammates(0, 3) &&
               !Yams2v2::are_teammates(1, 2) && !Yams2v2::are_teammates(2, 3),
               "Yams2v2: cross-team pairs are not teammates");
+
+// ---------------------------------------------------------------------------
+// Tensor versioning (append-only). A newer version keeps every older feature
+// at its original offset and appends new groups at the end, so the older layout
+// is a byte-exact prefix of the newer one. generate_tensor always emits the
+// LATEST layout (Traits::kTensorSize); a consumer trained on an older version
+// reads the first tensor_size_for_version(version) columns of each row. This is
+// what lets a distillation teacher on version N supervise a student on version
+// M >= N without a second tensor generation.
+// ---------------------------------------------------------------------------
+constexpr int kTensorVersionV1     = 1;   // original 986/2126 layout
+constexpr int kTensorVersionV2     = 2;   // + Group G (SS/LS interlock features)
+constexpr int kTensorVersionLatest = kTensorVersionV2;
+
+/// Number of leading columns occupied by `version`'s layout for this variant.
+/// Versions at/above the latest map to the full current size.
+template <typename Traits>
+constexpr int tensor_size_for_version(int version) {
+    return (version <= kTensorVersionV1) ? Traits::kTensorSizeV1
+                                         : Traits::kTensorSize;
+}

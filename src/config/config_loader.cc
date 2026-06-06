@@ -7,6 +7,7 @@
 
 #include "distil/distil_config.h"
 #include "engine/game_traits.h"
+#include "engine/tensor.h"   // kTensorVersionLatest, tensor_size_for_version
 #include "model/model_config.h"
 #include "self_play/training_data.h"  // TDMode
 
@@ -33,12 +34,13 @@ static int parse_game_variant(const std::string& s) {
                              "' (expected: 1v1, 2v2)");
 }
 
-// Pick the default tensor size for a given variant. Used as a fallback when
-// the YAML / CLI doesn't override `input_size` explicitly.
-static int default_input_size_for(int game_variant) {
+// The model's input_size is fully determined by (game_variant, tensor_version):
+// it must equal the number of columns that version's tensor layout occupies.
+// We therefore derive it rather than trusting a hand-written `input_size:`.
+static int tensor_size_for(int game_variant, int tensor_version) {
     return (game_variant == kGameVariant2v2)
-        ? Yams2v2::kTensorSize
-        : Yams1v1::kTensorSize;
+        ? tensor_size_for_version<Yams2v2>(tensor_version)
+        : tensor_size_for_version<Yams1v1>(tensor_version);
 }
 
 namespace {
@@ -61,6 +63,7 @@ void load_self_play_config(const YAML::Node& n, SelfPlayConfig& sp) {
 
 void load_model_config(const YAML::Node& n, ModelConfig& m) {
     maybe_assign(n, "input_size",         m.input_size);
+    maybe_assign(n, "tensor_version",     m.tensor_version);
     maybe_assign(n, "hidden_layers",      m.hidden_layers);
     maybe_assign(n, "hidden_width",       m.hidden_width);
     maybe_assign(n, "learning_rate",      m.learning_rate);
@@ -116,16 +119,15 @@ void load_training_config(const YAML::Node& n, TrainingConfig& tc) {
     if (n["game_variant"]) {
         tc.model.game_variant = parse_game_variant(n["game_variant"].as<std::string>());
     }
+    // Fresh training runs default to the latest tensor layout; the model block's
+    // `tensor_version:` (loaded next) overrides this if pinned.
+    tc.model.tensor_version = kTensorVersionLatest;
     if (n["self_play"]) load_self_play_config(n["self_play"], tc.self_play);
     if (n["model"])     load_model_config(n["model"], tc.model);
-    // If the user didn't set input_size explicitly, derive it from the variant.
-    // We detect "not explicitly set" by checking whether the loaded value still
-    // matches the default-for-1v1 — a heuristic, but harmless: when a user
-    // explicitly writes input_size: 986 for a 1v1 run, the result is identical.
-    if (tc.model.game_variant == kGameVariant2v2 &&
-        tc.model.input_size == Yams1v1::kTensorSize) {
-        tc.model.input_size = Yams2v2::kTensorSize;
-    }
+    // input_size is fully determined by (game_variant, tensor_version) — derive
+    // it so a stale hand-written `input_size:` can't drift out of sync.
+    tc.model.input_size = tensor_size_for(tc.model.game_variant,
+                                          tc.model.tensor_version);
 }
 
 // ---------------------------------------------------------------------------
@@ -171,14 +173,16 @@ void load_distil_config(const YAML::Node& n, DistilConfig& dc) {
         dc.student_model.game_variant =
             parse_game_variant(n["game_variant"].as<std::string>());
     }
+    // The student is a fresh model → default to the latest tensor layout (so it
+    // gains Group G). A `tensor_version:` in the student block can pin it lower
+    // (e.g. to distil into a same-version student). The teacher's version comes
+    // from its own checkpoint and may be older — see distil_loop / validator.
+    dc.student_model.tensor_version = kTensorVersionLatest;
     if (n["self_play"]) load_self_play_config(n["self_play"], dc.self_play);
     if (n["student"])   load_model_config(n["student"], dc.student_model);
 
-    // Default-promote input_size for 2v2 if the user only set game_variant.
-    if (dc.student_model.game_variant == kGameVariant2v2 &&
-        dc.student_model.input_size == Yams1v1::kTensorSize) {
-        dc.student_model.input_size = Yams2v2::kTensorSize;
-    }
+    dc.student_model.input_size = tensor_size_for(dc.student_model.game_variant,
+                                                  dc.student_model.tensor_version);
 }
 
 }  // namespace
@@ -260,12 +264,9 @@ void apply_cli_overrides(AppConfig& config, int argc, char* argv[]) {
         else if (arg == "--game_variant" && i + 1 < argc) {
             int gv = parse_game_variant(argv[++i]);
             m_target.game_variant = gv;
-            // Snap input_size to variant default unless the user pinned a custom one.
-            if (gv == kGameVariant2v2 && m_target.input_size == Yams1v1::kTensorSize) {
-                m_target.input_size = Yams2v2::kTensorSize;
-            } else if (gv == kGameVariant1v1 && m_target.input_size == Yams2v2::kTensorSize) {
-                m_target.input_size = Yams1v1::kTensorSize;
-            }
+            // input_size is derived from (variant, tensor_version) — re-derive
+            // it now that the variant changed.
+            m_target.input_size = tensor_size_for(gv, m_target.tensor_version);
         }
         // --- Distil-only flags ---
         else if (arg == "--teacher_kind" && i + 1 < argc) {

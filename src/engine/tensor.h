@@ -25,6 +25,10 @@
 /// migration once no caller depends on the bare name.
 constexpr int kTensorSize = Yams1v1::kTensorSize;
 
+// Tensor versioning constants (kTensorVersion*, tensor_size_for_version) live
+// in engine/game_traits.h, next to the per-variant kTensorSize / kTensorSizeV1
+// they describe. They are available transitively via the includes above.
+
 /// Maximum possible score per row (used for normalisation denominators).
 /// Indexed by row (0–12): 1s, 2s, 3s, 4s, 5s, 6s, SS, LS, FH, K, STR, U8, Y
 constexpr int kMaxScorePerRow[kNumRows] = {

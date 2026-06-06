@@ -11,6 +11,7 @@
 #include "distil/distil_config.h"
 #include "distil/distil_loop.h"
 #include "engine/game_traits.h"
+#include "engine/tensor.h"   // kTensorVersionLatest
 #include "solver/precomputed_tables.h"
 #include "test_tables.h"
 
@@ -56,7 +57,10 @@ static DistilConfig make_small_distil_config(const std::string& ckpt_dir,
     cfg.student_model.hidden_width      = 32;
     cfg.student_model.output_activation = "tanh";
     cfg.student_model.architecture      = "mlp";
-    // game_variant + input_size default to Yams1v1 — overridden in 2v2 test.
+    // Fresh student on the latest tensor layout. game_variant + input_size
+    // default to Yams1v1 (latest size) — overridden in the 2v2 test below.
+    cfg.student_model.tensor_version    = kTensorVersionLatest;
+    cfg.student_model.input_size        = Yams1v1::kTensorSize;
 
     return cfg;
 }
@@ -163,8 +167,9 @@ TEST(DistilLoopTest, RunsAFewSteps_2v2) {
     std::filesystem::remove(log_path);
 
     DistilConfig cfg = make_small_distil_config(ckpt_dir, log_path);
-    cfg.student_model.game_variant = kGameVariant2v2;
-    cfg.student_model.input_size   = Yams2v2::kTensorSize;
+    cfg.student_model.game_variant   = kGameVariant2v2;
+    cfg.student_model.tensor_version = kTensorVersionLatest;
+    cfg.student_model.input_size     = Yams2v2::kTensorSize;
     cfg.max_steps                  = 8;
 
     DistilLoop2v2 loop(cfg, *g_tables,

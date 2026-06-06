@@ -184,13 +184,39 @@ TEST_F(TensorRotationTest, RotationBy3_BitEqual) {
 // ---------------------------------------------------------------------------
 // Tensor size traits — make sure the layout sums match the declared sizes.
 // ---------------------------------------------------------------------------
-TEST(TensorTraits, Yams1v1_TensorSize_Is_986) {
-    EXPECT_EQ(Yams1v1::kTensorSize, 986);
+TEST(TensorTraits, Yams1v1_TensorSizes) {
+    // V1 layout (frozen) is the prefix; Group G is appended for V2.
+    EXPECT_EQ(Yams1v1::kTensorSizeV1, 986);
+    EXPECT_EQ(Yams1v1::kGroupGSize, 24);          // 2 * 2 players * 6 cols
+    EXPECT_EQ(Yams1v1::kTensorSize, 986 + 24);    // latest = 1010
     EXPECT_EQ(Yams1v1::kNumPairings, 1);
+    EXPECT_EQ(tensor_size_for_version<Yams1v1>(kTensorVersionV1), 986);
+    EXPECT_EQ(tensor_size_for_version<Yams1v1>(kTensorVersionLatest), 1010);
 }
 
-TEST(TensorTraits, Yams2v2_TensorSize_Is_2126) {
-    // 2v2 = 624 (A) + 48 (B.1) + 336 (B.2) + 312 (C) + 14 (D) + 432 (E) + 360 (F)
-    EXPECT_EQ(Yams2v2::kTensorSize, 2126);
+TEST(TensorTraits, Yams2v2_TensorSizes) {
+    // V1: 624 (A) + 48 (B.1) + 336 (B.2) + 312 (C) + 14 (D) + 432 (E) + 360 (F)
+    EXPECT_EQ(Yams2v2::kTensorSizeV1, 2126);
+    EXPECT_EQ(Yams2v2::kGroupGSize, 48);          // 2 * 4 players * 6 cols
+    EXPECT_EQ(Yams2v2::kTensorSize, 2126 + 48);   // latest = 2174
     EXPECT_EQ(Yams2v2::kNumPairings, 4);
+    EXPECT_EQ(tensor_size_for_version<Yams2v2>(kTensorVersionV1), 2126);
+    EXPECT_EQ(tensor_size_for_version<Yams2v2>(kTensorVersionLatest), 2174);
+}
+
+// Group G is appended after Group F, so the V1 layout is a byte-exact prefix
+// of the V2 tensor. Phase 1: Group G is placeholder zeros. (When the real
+// SS/LS interlock features land, replace the zero-check with their expected
+// values — the prefix [0, kTensorSizeV1) stays pinned by the content tests in
+// tensor_test.cc, which only assert offsets inside the V1 region.)
+TEST_F(TensorRotationTest, GroupGIsAppendedZeros_Phase1) {
+    BoardState2v2 board;
+    GameContext2v2 ctx;
+    make_populated_2v2(board, ctx, /*seed=*/7);
+
+    std::vector<float> out(Yams2v2::kTensorSize, -1.0f);
+    generate_tensor<Yams2v2>(board, ctx, /*player=*/0, tables, out.data());
+    for (int i = Yams2v2::kTensorSizeV1; i < Yams2v2::kTensorSize; ++i) {
+        EXPECT_EQ(out[i], 0.0f) << "Group G slot " << i << " should be zero in Phase 1";
+    }
 }

@@ -46,7 +46,8 @@ training:
     num_coordinators: 3
 
   model:
-    input_size: 986
+    # input_size is derived from (game_variant, tensor_version) by the loader;
+    # an explicit value here is ignored. Fresh runs use the latest tensor layout.
     hidden_layers: 3
     hidden_width: 256
     learning_rate: 0.00045

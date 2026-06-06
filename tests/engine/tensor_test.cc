@@ -50,11 +50,15 @@ int TensorTest::seed_ = 5000;
 // ---------------------------------------------------------------------------
 // Layout sanity
 // ---------------------------------------------------------------------------
-TEST_F(TensorTest, TensorSize_IsExactly986) {
-    EXPECT_EQ(kTensorSize, 986);
+TEST_F(TensorTest, V1LayoutOffsetsSumToV1Size) {
+    // The A..F groups below are the frozen V1 layout (986). They are now the
+    // PREFIX of the latest tensor; Group G is appended after them.
+    EXPECT_EQ(Yams1v1::kTensorSizeV1, 986);
     EXPECT_EQ(kGroupAStart + kGroupASize + kGroupBSize + kGroupCSize
                 + kGroupDSize + kGroupESize + kGroupFSize,
-              kTensorSize);
+              Yams1v1::kTensorSizeV1);
+    // Latest adds Group G.
+    EXPECT_EQ(kTensorSize, Yams1v1::kTensorSizeV1 + Yams1v1::kGroupGSize);
 }
 
 // ---------------------------------------------------------------------------

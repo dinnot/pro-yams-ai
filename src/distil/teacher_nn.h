@@ -20,7 +20,9 @@
 // Constraints validated at construction:
 //
 //   - teacher's `game_variant` == Traits' variant
-//   - teacher's `input_size`   == Traits::kTensorSize
+//   - teacher's `tensor_version` is an append-only ancestor of this build's
+//     latest layout (input_size <= Traits::kTensorSize), so the teacher reads
+//     the first input_size columns of each student row (a byte-exact prefix).
 //   - teacher's `output_activation` matches the run's target shape
 //     (use_duel_margin_maximization=true ⇒ "tanh"; false ⇒ "sigmoid")
 //
@@ -39,7 +41,7 @@ public:
     void evaluate(const BoardStateT<Traits>& board,
                   const GameContextT<Traits>& ctx,
                   const AfterstateRequest* requests, int n,
-                  const float* tensors,
+                  const float* tensors, int tensor_stride,
                   double* targets,
                   double* solver_evs) override;
 
@@ -48,10 +50,14 @@ public:
     // --- Accessors used by the eval helpers (run_evaluation_vs etc.). ---
     ProYamsNet&   model()  { return *teacher_model_; }
     torch::Device device() const { return device_; }
+    int  input_size()    const { return input_size_; }
+    int  tensor_version() const { return tensor_version_; }
 
 private:
     torch::Device                    device_;
     std::unique_ptr<ModelTrainer>    loader_;        // owns parameter storage
     std::shared_ptr<ProYamsNet>      teacher_model_;
     std::unique_ptr<InferenceEngine> inference_;
+    int                              input_size_    = 0;  // teacher's tensor width
+    int                              tensor_version_ = 1;
 };

@@ -222,6 +222,10 @@ void ModelTrainer::save_checkpoint(const std::string& path,
     // silently loaded into a 2v2 process.
     model_archive.write("game_variant",
                          torch::tensor(static_cast<int64_t>(config_.game_variant)));
+    // tensor_version: which append-only tensor layout this model consumes.
+    // Absent in pre-Group-G checkpoints → readers default to 1.
+    model_archive.write("tensor_version",
+                         torch::tensor(static_cast<int64_t>(config_.tensor_version)));
     {
         const auto& arch = config_.architecture;
         auto t = torch::from_blob(const_cast<char*>(arch.data()),
@@ -321,6 +325,7 @@ void ModelTrainer::load_checkpoint(const std::string& path,
     int ckpt_hidden_layers = static_cast<int>(read_int64("hidden_layers", config_.hidden_layers));
     int ckpt_hidden_width  = static_cast<int>(read_int64("hidden_width",  config_.hidden_width));
     int ckpt_game_variant  = static_cast<int>(read_int64("game_variant",  kGameVariant1v1));
+    int ckpt_tensor_version = static_cast<int>(read_int64("tensor_version", 1));
 
     // Fail fast on game-variant mismatch — a 1v1 checkpoint silently loaded
     // into a 2v2 process (or vice versa) would crash on the first forward pass
@@ -331,6 +336,16 @@ void ModelTrainer::load_checkpoint(const std::string& path,
             ") does not match runtime game_variant (" +
             std::to_string(config_.game_variant) +
             "). 1=Yams1v1, 2=Yams2v2.");
+    }
+    // Same for the tensor layout version: resuming training requires the model
+    // to consume the same features it was trained on. (Append-only versions also
+    // differ in input_size, so the weight load would fail anyway — this just
+    // produces a clearer error.)
+    if (ckpt_tensor_version != config_.tensor_version) {
+        throw std::runtime_error(
+            "Checkpoint tensor_version (" + std::to_string(ckpt_tensor_version) +
+            ") does not match runtime tensor_version (" +
+            std::to_string(config_.tensor_version) + ").");
     }
 
     if (ckpt_hidden_layers != config_.hidden_layers || ckpt_hidden_width != config_.hidden_width) {
@@ -393,6 +408,8 @@ ModelConfig ModelTrainer::config_from_checkpoint(const std::string& path) {
     cfg.input_size    = static_cast<int>(read_int64("input_size",    cfg.input_size));
     // game_variant: older checkpoints predate the tag — default to 1v1.
     cfg.game_variant  = static_cast<int>(read_int64("game_variant",  kGameVariant1v1));
+    // tensor_version: older checkpoints predate Group G — default to version 1.
+    cfg.tensor_version = static_cast<int>(read_int64("tensor_version", 1));
 
     // Old checkpoints pre-date the resnet refactor — assume mlp.
     // New checkpoints save "architecture" explicitly.

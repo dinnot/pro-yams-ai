@@ -1,10 +1,13 @@
 #include "distil/teacher_nn.h"
 
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include "engine/game_traits.h"
+#include "engine/tensor.h"   // kTensorVersionLatest, tensor_size_for_version
 
 namespace {
 
@@ -36,12 +39,28 @@ NNTeacher<Traits>::NNTeacher(const std::string& checkpoint_stem,
             ") does not match run's variant (" +
             std::to_string(expected_variant<Traits>()) + "): " + checkpoint_stem);
     }
-    if (teacher_cfg.input_size != Traits::kTensorSize) {
+    // Append-only versioning: the teacher may consume an OLDER tensor layout
+    // than the student (its features are a byte-exact prefix of the student's).
+    // Require (a) the checkpoint is self-consistent and (b) its layout is an
+    // ancestor of this build's latest, so a prefix read is well-defined.
+    input_size_     = teacher_cfg.input_size;
+    tensor_version_ = teacher_cfg.tensor_version;
+    const int expected_for_version = tensor_size_for_version<Traits>(tensor_version_);
+    if (input_size_ != expected_for_version) {
         throw std::runtime_error(
-            "NNTeacher: checkpoint input_size (" +
-            std::to_string(teacher_cfg.input_size) +
-            ") does not match Traits::kTensorSize (" +
-            std::to_string(Traits::kTensorSize) + "): " + checkpoint_stem);
+            "NNTeacher: checkpoint input_size (" + std::to_string(input_size_) +
+            ") is inconsistent with its tensor_version (" +
+            std::to_string(tensor_version_) + ", expected " +
+            std::to_string(expected_for_version) + "): " + checkpoint_stem);
+    }
+    if (tensor_version_ > kTensorVersionLatest ||
+        input_size_ > Traits::kTensorSize) {
+        throw std::runtime_error(
+            "NNTeacher: checkpoint tensor_version (" +
+            std::to_string(tensor_version_) +
+            ") is newer than this build's latest (" +
+            std::to_string(kTensorVersionLatest) +
+            ") — cannot prefix-read a future layout: " + checkpoint_stem);
     }
 
     // Step 3: validate output activation matches the target shape so the
@@ -78,7 +97,7 @@ void NNTeacher<Traits>::evaluate(
     const BoardStateT<Traits>& /*board*/,
     const GameContextT<Traits>& /*ctx*/,
     const AfterstateRequest* /*requests*/, int n,
-    const float* tensors,
+    const float* tensors, int tensor_stride,
     double* targets,
     double* solver_evs) {
     if (n <= 0) return;
@@ -90,7 +109,26 @@ void NNTeacher<Traits>::evaluate(
     // selects actions to maximise expected predicted value, which is
     // self-consistent. So solver_evs and targets get the same numbers.
     double* dst = targets ? targets : solver_evs;
-    inference_->batch_inference(tensors, n, dst);
+
+    // The worker hands us the student's (latest) tensor at `tensor_stride`
+    // floats/row. When the teacher consumes an older, narrower layout we copy
+    // each row's leading `input_size_` columns into a contiguous packed buffer
+    // (append-only versioning makes that prefix exactly the teacher's layout).
+    // The buffer is thread_local because multiple workers call evaluate()
+    // concurrently before serialising inside batch_inference.
+    if (tensor_stride == input_size_) {
+        inference_->batch_inference(tensors, n, dst);
+    } else {
+        thread_local std::vector<float> packed;
+        const size_t need = static_cast<size_t>(n) * input_size_;
+        if (packed.size() < need) packed.resize(need);
+        for (int i = 0; i < n; ++i) {
+            std::memcpy(packed.data() + static_cast<size_t>(i) * input_size_,
+                        tensors + static_cast<size_t>(i) * tensor_stride,
+                        static_cast<size_t>(input_size_) * sizeof(float));
+        }
+        inference_->batch_inference(packed.data(), n, dst);
+    }
     if (targets && solver_evs && targets != solver_evs) {
         for (int i = 0; i < n; ++i) solver_evs[i] = targets[i];
     } else if (!targets && solver_evs) {

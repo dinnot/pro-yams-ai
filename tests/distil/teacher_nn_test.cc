@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -32,15 +33,20 @@ static std::string write_tiny_teacher_ckpt(const std::string& stem,
                                            int game_variant = kGameVariant1v1,
                                            const std::string& act = "tanh",
                                            int hidden_layers = 1,
-                                           int hidden_width  = 16) {
+                                           int hidden_width  = 16,
+                                           int tensor_version = kTensorVersionLatest) {
     std::filesystem::remove(stem + ".model");
     std::filesystem::remove(stem + ".optimizer");
 
     ModelConfig cfg;
     cfg.game_variant      = game_variant;
+    // input_size must agree with tensor_version, else NNTeacher rejects the
+    // checkpoint as inconsistent. Deriving keeps an older-version teacher
+    // (e.g. V1, 986) self-consistent.
+    cfg.tensor_version    = tensor_version;
     cfg.input_size        = (game_variant == kGameVariant1v1)
-                            ? Yams1v1::kTensorSize
-                            : Yams2v2::kTensorSize;
+                            ? tensor_size_for_version<Yams1v1>(tensor_version)
+                            : tensor_size_for_version<Yams2v2>(tensor_version);
     cfg.hidden_layers     = hidden_layers;
     cfg.hidden_width      = hidden_width;
     cfg.output_activation = act;
@@ -121,7 +127,7 @@ TEST(NNTeacherTest, EvaluateMatchesDirectInference) {
     std::vector<double> targets_teacher(n, 0.0);
     std::vector<double> solver_evs_teacher(n, 0.0);
     teacher.evaluate(gs.board, ctx, buffers.requests, n,
-                     tensors.data(),
+                     tensors.data(), /*tensor_stride=*/kT,
                      targets_teacher.data(), solver_evs_teacher.data());
 
     // Direct path through a fresh engine wrapping the teacher's model.
@@ -137,6 +143,66 @@ TEST(NNTeacherTest, EvaluateMatchesDirectInference) {
         EXPECT_NEAR(targets_teacher[i],    evs_direct[i], 1e-9) << "i=" << i;
         EXPECT_NEAR(solver_evs_teacher[i], evs_direct[i], 1e-9) << "i=" << i;
     }
+
+    std::filesystem::remove(stem + ".model");
+    std::filesystem::remove(stem + ".optimizer");
+}
+
+// ---------------------------------------------------------------------------
+// Cross-version distillation: a V1 teacher (input_size 986) supervising a
+// student on the latest layout reads the leading 986 columns of each (wider)
+// student row — the append-only prefix. This is the path that makes "distil an
+// old model into a new-tensor student" work without a second tensor generation.
+// ---------------------------------------------------------------------------
+TEST(NNTeacherTest, EvaluateReadsV1PrefixOfLatestTensor) {
+    ensure_tables();
+    // Skip trivially if there is no version gap to exercise (V1 == latest).
+    if (Yams1v1::kTensorSizeV1 == Yams1v1::kTensorSize) GTEST_SKIP();
+
+    const std::string stem = "/tmp/distil_nn_test_v1_prefix_ckpt";
+    write_tiny_teacher_ckpt(stem, kGameVariant1v1, "tanh",
+                            /*hidden_layers=*/1, /*hidden_width=*/16,
+                            /*tensor_version=*/kTensorVersionV1);
+
+    NNTeacher<Yams1v1> teacher(stem, torch::kCPU, /*use_margin=*/true);
+    ASSERT_EQ(teacher.tensor_version(), kTensorVersionV1);
+    ASSERT_EQ(teacher.input_size(), Yams1v1::kTensorSizeV1);
+
+    GameState gs; GameContext ctx; SolverBuffers buffers{};
+    RNG rng(321);
+    init_game<Yams1v1>(gs, ctx, rng);
+    solver_get_requests<Yams1v1>(gs, ctx, *g_tables, buffers);
+    ASSERT_GT(buffers.request_count, 0);
+
+    const int n  = buffers.request_count;
+    const int kT = Yams1v1::kTensorSize;          // latest (student) width
+    const int v1 = Yams1v1::kTensorSizeV1;        // teacher width
+    std::vector<float> student(static_cast<size_t>(n) * kT);
+    generate_tensor_batch<Yams1v1>(
+        gs.board, ctx, gs.board.current_player,
+        buffers.requests, n, *g_tables, student.data());
+
+    // Teacher reads the prefix internally (stride kT, width v1).
+    std::vector<double> evs_teacher(n, 0.0);
+    teacher.evaluate(gs.board, ctx, buffers.requests, n,
+                     student.data(), /*tensor_stride=*/kT,
+                     evs_teacher.data(), nullptr);
+
+    // Reference: pack the leading v1 columns of each row ourselves, infer.
+    std::vector<float> packed(static_cast<size_t>(n) * v1);
+    for (int i = 0; i < n; ++i) {
+        std::memcpy(packed.data() + static_cast<size_t>(i) * v1,
+                    student.data() + static_cast<size_t>(i) * kT,
+                    static_cast<size_t>(v1) * sizeof(float));
+    }
+    InferenceEngine direct(
+        std::shared_ptr<ProYamsNet>(&teacher.model(), [](ProYamsNet*){}),
+        torch::kCPU);
+    std::vector<double> evs_direct(n, 0.0);
+    direct.batch_inference(packed.data(), n, evs_direct.data());
+
+    for (int i = 0; i < n; ++i)
+        EXPECT_NEAR(evs_teacher[i], evs_direct[i], 1e-9) << "i=" << i;
 
     std::filesystem::remove(stem + ".model");
     std::filesystem::remove(stem + ".optimizer");
@@ -203,6 +269,10 @@ TEST(NNTeacherTest, DistilLoopRunsWithNNTeacher) {
     cfg.student_model.hidden_width      = 16;
     cfg.student_model.output_activation = "tanh";
     cfg.student_model.architecture      = "mlp";
+    // Fresh student on the latest tensor layout (the loader derives these; this
+    // test builds DistilConfig directly so it must set them explicitly).
+    cfg.student_model.tensor_version    = kTensorVersionLatest;
+    cfg.student_model.input_size        = Yams1v1::kTensorSize;
 
     DistilLoop loop(cfg, *g_tables, torch::kCPU, torch::kCPU);
     loop.run();

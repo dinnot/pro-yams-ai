@@ -503,6 +503,17 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
         }
     }
 
+    // Group G (tensor V2) — SS/LS interlock / poison-risk features, appended
+    // last so the V1 layout above is a byte-exact prefix (the distillation
+    // teacher reads only that prefix). Phase 1: placeholder zeros; the real
+    // per-player × per-column features land in a follow-up.
+    static_assert(Traits::kTensorSize ==
+                  Traits::kTensorSizeV1 + Traits::kGroupGSize,
+                  "Group G size must account for the full V2 tensor tail");
+    for (int i = 0; i < Traits::kGroupGSize; ++i) {
+        out[idx++] = 0.0f;
+    }
+
     assert(idx == Traits::kTensorSize);
 }
 

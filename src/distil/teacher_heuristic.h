@@ -27,7 +27,7 @@ public:
     void evaluate(const BoardStateT<Traits>& board,
                   const GameContextT<Traits>& ctx,
                   const AfterstateRequest* requests, int n,
-                  const float* tensors,
+                  const float* tensors, int tensor_stride,
                   double* targets,
                   double* solver_evs) override;
 
