@@ -121,6 +121,11 @@ const Play = {
     _pendingStartMode: null,
     _retryTimer: null,
 
+    // Screen Wake Lock — keep mobile screens from sleeping mid-game. The OS
+    // releases the lock whenever the tab is hidden, so we re-acquire it on the
+    // visibilitychange handler below. Held only while a game view is showing.
+    _wakeLock: null,
+
     isHuman(p) { return this.humanSeats.indexOf(p) >= 0; },
     isHumanTeam(p) { return teamOf(p, this.numPlayers) === this.humanTeam; },
 
@@ -152,7 +157,10 @@ const Play = {
         // timers and abort in-flight fetches for backgrounded tabs, so these
         // events are the reliable signal that it's worth retrying.
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') Play.onReconnectOpportunity();
+            if (document.visibilityState === 'visible') {
+                Play.onReconnectOpportunity();
+                Play.requestWakeLock();   // OS dropped it while backgrounded
+            }
         });
         window.addEventListener('online', () => Play.onReconnectOpportunity());
         window.addEventListener('focus',  () => Play.onReconnectOpportunity());
@@ -191,6 +199,7 @@ const Play = {
         this.lastVersion = null;
         this._animateFromStart = false;
         if (this._holdPreviewTimer) { clearTimeout(this._holdPreviewTimer); this._holdPreviewTimer = null; }
+        this.releaseWakeLock();
         document.getElementById('matchmaking').hidden = true;
         document.getElementById('disconnect-prompt').hidden = true;
         document.getElementById('takeover-banner').hidden = true;
@@ -257,6 +266,7 @@ const Play = {
         document.getElementById('game').hidden = false;
         document.getElementById('footer').hidden = false;
         document.getElementById('sheet').hidden = false;
+        this.requestWakeLock();
 
         // Remember the mode so recovery can retry game creation if the very
         // first request fails (no session to re-sync to yet).
@@ -434,6 +444,7 @@ const Play = {
         document.getElementById('game').hidden       = false;
         document.getElementById('footer').hidden     = false;
         document.getElementById('sheet').hidden      = false;
+        this.requestWakeLock();
 
         let data;
         try { data = await API.getGame(id); }
@@ -871,6 +882,27 @@ const Play = {
     showReconnecting(on) {
         const el = document.getElementById('reconnect-banner');
         if (el) el.hidden = !on;
+    },
+
+    // Acquire a screen wake lock so the device doesn't dim/lock mid-game (a
+    // turn can be long, especially while watching a teammate). No-op if the API
+    // is unavailable, the tab is hidden, or no game view is showing.
+    async requestWakeLock() {
+        if (!('wakeLock' in navigator)) return;
+        if (document.visibilityState !== 'visible') return;
+        const gameEl = document.getElementById('game');
+        if (!gameEl || gameEl.hidden) return;
+        if (this._wakeLock) return;
+        try {
+            this._wakeLock = await navigator.wakeLock.request('screen');
+            // Clear our handle if it's released (by the OS or us) so a later
+            // visibilitychange re-acquires rather than thinking it's still held.
+            this._wakeLock.addEventListener('release', () => { this._wakeLock = null; });
+        } catch (_) { this._wakeLock = null; }
+    },
+
+    releaseWakeLock() {
+        if (this._wakeLock) { this._wakeLock.release().catch(() => {}); this._wakeLock = null; }
     },
 
     // An operation failed (network error, timeout, or server 5xx). Latch a
@@ -1813,6 +1845,7 @@ const Play = {
         document.getElementById('sheet').hidden = true;
         document.getElementById('footer').hidden = true;
         document.getElementById('endgame').hidden = false;
+        this.releaseWakeLock();   // game's done — let the screen sleep again
     },
 
     // Fetch and display per-seat luck for the finished game (server replays the

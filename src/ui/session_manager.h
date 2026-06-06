@@ -343,9 +343,39 @@ public:
         if (!can_reroll<Traits>(s->state, s->ctx)) return false;
 
         s->current_turn.hold_masks.push_back(hold_mask);
+
+        // Capture the pre-roll dice so we can compute which dice carried over.
+        int8_t before[kNumDice];
+        std::memcpy(before, s->state.dice, sizeof(before));
+
         perform_reroll<Traits>(s->state, hold_mask, s->rng);
-        s->live_hold_player = -1;  // committed — drop the tentative preview
+
+        // Keep the live preview alive on the carried-over dice rather than
+        // clearing it. The active player's own client remaps its hold selection
+        // to the dice it kept (remapHoldMask); mirroring that here means a
+        // spectating teammate sees those dice stay selected through the reroll
+        // instead of flickering off (preview_mask=0) and back on when the next
+        // hold preview arrives. Greedy value-match, matching build_holds_json's
+        // held_flags so the reveal and the post-roll preview agree.
+        int8_t held_values[kNumDice];
+        int held_count = 0;
+        for (int i = 0; i < kNumDice; ++i)
+            if ((hold_mask >> i) & 1) held_values[held_count++] = before[i];
+        bool mapped[kNumDice] = {false};
+        uint8_t carried = 0;
+        for (int i = 0; i < kNumDice; ++i) {
+            for (int j = 0; j < held_count; ++j) {
+                if (!mapped[j] && held_values[j] == s->state.dice[i]) {
+                    mapped[j] = true;
+                    carried |= static_cast<uint8_t>(1u << i);
+                    break;
+                }
+            }
+        }
+        s->live_hold_player = static_cast<int>(s->state.board.current_player);
+        s->live_hold_mask   = carried;
         s->live_rolling     = false;  // result landed — stop the optimistic spin
+
         std::array<int8_t, kNumDice> after;
         std::memcpy(after.data(), s->state.dice, sizeof(s->state.dice));
         s->current_turn.dice_after_hold.push_back(after);
