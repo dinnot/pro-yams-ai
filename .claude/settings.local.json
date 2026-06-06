@@ -445,7 +445,8 @@
       "Bash(sed -n '21,40p' tests/self_play/coordinator_test.cc)",
       "Bash(sed -n '44,52p' config/mlp-256/seed.yaml)",
       "Bash(sed -n '44,52p' config/mlp-512/seed.yaml)",
-      "Bash(./tests/distil/distil_tests --gtest_filter=\"*PrefixOfLatest*:*EvaluateMatchesDirect*\")"
+      "Bash(cmake --build /home/sorin/pro_yams_ai/build -j24)",
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter=\"*GroupG*:*Rotation*:*TensorSizes*\")"
     ]
   }
 }

@@ -12,13 +12,16 @@
 // into a flat float array.  No libtorch dependency — produces raw floats that
 // the model library wraps into torch::Tensor.
 //
-// Layout (986 features):
+// Layout (1v1 sizes shown; V1 prefix = 986, latest = 1010):
 //   Group A (312): per-player × per-column × per-row cell values (2 per cell)
 //   Group B (108): per-player × per-column derived + my-perspective duel features
 //   Group C (156): per-player × per-column × per-row 1-turn non-scratch probability
 //   Group D  (14): global aggregates and phase flags
 //   Group E (216): per-player × per-column × {T_min,T_mid,T_max} upper P/EV
 //   Group F (180): per-player × per-column × {T_min,T_mid,T_max} mid/low P/EV + P_clean
+//   --- end of V1 prefix (kTensorSizeV1) ---
+//   Group G  (24): per-player × per-column × {SS/LS poison: defensive, offensive}
+//                  (tensor V2; appended so V1 stays a byte-exact prefix)
 // ---------------------------------------------------------------------------
 
 /// 1v1 backward-compat alias — equals Yams1v1::kTensorSize. Remove at end of

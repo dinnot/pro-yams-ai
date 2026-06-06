@@ -204,19 +204,47 @@ TEST(TensorTraits, Yams2v2_TensorSizes) {
     EXPECT_EQ(tensor_size_for_version<Yams2v2>(kTensorVersionLatest), 2174);
 }
 
-// Group G is appended after Group F, so the V1 layout is a byte-exact prefix
-// of the V2 tensor. Phase 1: Group G is placeholder zeros. (When the real
-// SS/LS interlock features land, replace the zero-check with their expected
-// values — the prefix [0, kTensorSizeV1) stays pinned by the content tests in
-// tensor_test.cc, which only assert offsets inside the V1 region.)
-TEST_F(TensorRotationTest, GroupGIsAppendedZeros_Phase1) {
+// Group G (V2) SS/LS interlock poison features. Built on an otherwise-empty
+// board so only the placed cells drive the signal. Layout: per-player (canonical
+// order) × per-column × {G0 defensive, G1 offensive}, appended after the V1
+// prefix at kTensorSizeV1.
+TEST_F(TensorRotationTest, GroupG_PoisonFeatures) {
+    // Offset of feature k in {0=G0, 1=G1} for canonical player ci, column col.
+    auto g_off = [](int ci, int col, int k) {
+        return Yams2v2::kTensorSizeV1 + ((ci * kNumColumns) + col) * 2 + k;
+    };
+    constexpr int kCol = kColFree;   // any-order column → placements are legal
+
     BoardState2v2 board;
     GameContext2v2 ctx;
-    make_populated_2v2(board, ctx, /*seed=*/7);
+    RNG rng(1);
+    init_board<Yams2v2>(board, rng);
+    init_context<Yams2v2>(ctx, board);
 
-    std::vector<float> out(Yams2v2::kTensorSize, -1.0f);
+    // P0 commits a beatable LS=25 with SS still open → poisonable.
+    apply_placement<Yams2v2>(0, kCol, kRowLS, 25, board, ctx);
+    // P1 commits the maximum LS=30 with SS open → NOT poisonable (safe boundary).
+    apply_placement<Yams2v2>(1, kCol, kRowLS, 30, board, ctx);
+
+    std::vector<float> out(Yams2v2::kTensorSize);
     generate_tensor<Yams2v2>(board, ctx, /*player=*/0, tables, out.data());
-    for (int i = Yams2v2::kTensorSizeV1; i < Yams2v2::kTensorSize; ++i) {
-        EXPECT_EQ(out[i], 0.0f) << "Group G slot " << i << " should be zero in Phase 1";
-    }
+
+    // Canonical order for active=0 is [P0, P1, P2, P3] = [ci0, ci1, ci2, ci3].
+    // P0 (ci0): committed LS=25, SS open, opponents P1/P3 can place SS>=25
+    //   → G0 = (30-25)/10 = 0.5; no opponent to poison → G1 = 0.
+    EXPECT_FLOAT_EQ(out[g_off(0, kCol, 0)], 0.5f);
+    EXPECT_FLOAT_EQ(out[g_off(0, kCol, 1)], 0.0f);
+    // P1 (ci1): committed LS=30 → poison window 0 → G0 = 0. Its SS is open and
+    //   opponent P0 sits on a committed LS=25 it can reach (max SS 29) → G1 = 0.5.
+    EXPECT_FLOAT_EQ(out[g_off(1, kCol, 0)], 0.0f);
+    EXPECT_FLOAT_EQ(out[g_off(1, kCol, 1)], 0.5f);
+    // P3 (ci3): empty sheet, but open SS → can poison P0's LS=25 → G1 = 0.5.
+    EXPECT_FLOAT_EQ(out[g_off(3, kCol, 1)], 0.5f);
+    // P2 (ci2): teammate of P0, nothing committed, opponents P1(LS=30 unreachable)
+    //   /P3(empty) → no exposure, no leverage.
+    EXPECT_FLOAT_EQ(out[g_off(2, kCol, 0)], 0.0f);
+    EXPECT_FLOAT_EQ(out[g_off(2, kCol, 1)], 0.0f);
+    // A column with no placements is all-zero in Group G.
+    EXPECT_FLOAT_EQ(out[g_off(0, kColDown, 0)], 0.0f);
+    EXPECT_FLOAT_EQ(out[g_off(0, kColDown, 1)], 0.0f);
 }

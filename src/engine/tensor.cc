@@ -151,6 +151,24 @@ static void copy_tensor_context_fields(const GameContextT<Traits>& src,
                 sizeof(dst.lower_has_scratch));
 }
 
+// Maximum POSITIVE Small-Sum value a player could still legally place in this
+// column, used for SS/LS interlock-poison reasoning (Group G). Ignores the
+// golden-rule floor (the caller compares against the poison threshold directly).
+// Returns -1 if the player cannot place any positive SS here: SS already
+// resolved, LS forced its scratch, or a low filled LS caps SS out of existence.
+template <typename Traits>
+static int max_placeable_ss(int q, int col, const BoardStateT<Traits>& board,
+                            const GameContextT<Traits>& ctx) {
+    if (board.cells[q][col][kRowSS] != kCellEmpty) return -1;  // already resolved
+    if (ctx.ls_scratched[q][col])                  return -1;  // forced scratch
+    const int ls = board.cells[q][col][kRowLS];
+    if (ls == kCellEmpty) return 29;     // LS open → SS up to 29
+    if (ls <= 0)          return -1;     // LS scratched (defensive; ls_scratched covers)
+    if (ls <= 20)         return -1;     // SS must be < LS and >= 20 → impossible
+    if (ls <= 29)         return ls - 1; // SS strictly below a filled LS
+    return 29;                           // LS >= 30 → SS up to 29
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -323,6 +341,7 @@ static inline void make_canonical_order(int active, int (&canonical)[Traits::kNu
 
 template <typename Traits>
 static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
+                                 const GameContextT<Traits>& ctx,
                                  const PCData pc[Traits::kNumPlayers][6], float* out) {
     int canonical[Traits::kNumPlayers];
     make_canonical_order<Traits>(player, canonical);
@@ -503,15 +522,68 @@ static void write_tensor_from_pc(const BoardStateT<Traits>& board, int player,
         }
     }
 
-    // Group G (tensor V2) — SS/LS interlock / poison-risk features, appended
-    // last so the V1 layout above is a byte-exact prefix (the distillation
-    // teacher reads only that prefix). Phase 1: placeholder zeros; the real
-    // per-player × per-column features land in a follow-up.
+    // Group G (tensor V2) — SS/LS interlock poison features, per-player × column
+    // (canonical order), 2 per cell. Appended last so the V1 layout above stays
+    // a byte-exact prefix (the distillation teacher reads only that prefix).
+    //
+    //   G0 — DEFENSIVE exposure: this player has a committed positive LS (value
+    //        L) with its SS still open and no lower scratch yet, and an OPPONENT
+    //        could still place an SS >= L. That SS raises the shared golden_max
+    //        floor to/above L, forcing this player's SS to scratch → mutual
+    //        destruction (LS -> 0) + clean-bonus loss. Magnitude (30 - L)/10 is
+    //        the poison window: L=20 -> 1.0 (wide), L=29 -> 0.1, L=30 -> safe.
+    //   G1 — OFFENSIVE leverage: this player has an open SS it could push to >=
+    //        an opponent's committed-low LS, poisoning that opponent's column.
+    //        Magnitude is the best (30 - L_opp)/10 over poisonable opponents.
+    //
+    // Both restrict to true opponents via are_teammates (so 1v1 collapses to the
+    // single opponent) and read only board cells + team structure, preserving
+    // the canonical-view rotational invariance.
     static_assert(Traits::kTensorSize ==
                   Traits::kTensorSizeV1 + Traits::kGroupGSize,
                   "Group G size must account for the full V2 tensor tail");
-    for (int i = 0; i < Traits::kGroupGSize; ++i) {
-        out[idx++] = 0.0f;
+    static_assert(Traits::kGroupGSize == 2 * Traits::kNumPlayers * kNumColumns,
+                  "Group G is 2 features per (player, column)");
+    for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
+        const int p = canonical[ci];
+        for (int col = 0; col < kNumColumns; ++col) {
+            float g0 = 0.0f, g1 = 0.0f;
+
+            // G0 — my committed LS is poisonable while my SS is still open.
+            const int ls_p = board.cells[p][col][kRowLS];
+            const bool my_ss_open = (board.cells[p][col][kRowSS] == kCellEmpty);
+            if (ls_p != kCellEmpty && ls_p > 0 && my_ss_open &&
+                !ctx.lower_has_scratch[p][col]) {
+                const float window = (30 - std::max(20, ls_p)) / 10.0f;
+                if (window > 0.0f) {
+                    for (int q = 0; q < Traits::kNumPlayers; ++q) {
+                        if (q == p || Traits::are_teammates(p, q)) continue;
+                        if (max_placeable_ss<Traits>(q, col, board, ctx) >= ls_p) {
+                            g0 = window;  // a capable opponent exists
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // G1 — I can push an open SS to/above an opponent's committed-low LS.
+            const int my_max_ss = max_placeable_ss<Traits>(p, col, board, ctx);
+            if (my_max_ss > 0) {
+                for (int q = 0; q < Traits::kNumPlayers; ++q) {
+                    if (q == p || Traits::are_teammates(p, q)) continue;
+                    const int ls_q = board.cells[q][col][kRowLS];
+                    const bool opp_ss_open =
+                        (board.cells[q][col][kRowSS] == kCellEmpty);
+                    if (ls_q != kCellEmpty && ls_q > 0 && opp_ss_open &&
+                        !ctx.lower_has_scratch[q][col] && my_max_ss >= ls_q) {
+                        g1 = std::max(g1, (30 - std::max(20, ls_q)) / 10.0f);
+                    }
+                }
+            }
+
+            out[idx++] = g0;
+            out[idx++] = g1;
+        }
     }
 
     assert(idx == Traits::kTensorSize);
@@ -537,7 +609,7 @@ void generate_tensor(const BoardStateT<Traits>& board,
         }
     }
 
-    write_tensor_from_pc<Traits>(board, player, pc, out);
+    write_tensor_from_pc<Traits>(board, player, ctx, pc, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -601,7 +673,7 @@ void generate_tensor_batch(const BoardStateT<Traits>& board,
                                     filled[ci], tables, base_pc[ci][col]);
         }
 
-        write_tensor_from_pc<Traits>(board_clone, player, base_pc,
+        write_tensor_from_pc<Traits>(board_clone, player, ctx_clone, base_pc,
                                      out + static_cast<ptrdiff_t>(i) * Traits::kTensorSize);
 
         for (int ci = 0; ci < Traits::kNumPlayers; ++ci) {
