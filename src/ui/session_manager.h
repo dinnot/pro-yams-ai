@@ -665,8 +665,7 @@ public:
         generate_tensor<Traits>(b, ctx, player, tables_, tensor.data());
 
         torch::NoGradGuard no_grad;
-        auto input = torch::from_blob(tensor.data(), {1, Traits::kTensorSize},
-                                      torch::kFloat32).to(device_);
+        auto input  = make_nn_input(*model, tensor.data(), 1, device_);
         auto output = model->forward(input).to(torch::kCPU).contiguous();
         float val = output.template data_ptr<float>()[0];
         if (model->config().output_activation != "sigmoid")
@@ -743,9 +742,8 @@ public:
         std::vector<float> evs(buffers->request_count);
         {
             torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(
-                tbuf.data(), {buffers->request_count, Traits::kTensorSize},
-                torch::kFloat32).to(device_);
+            auto input = make_nn_input(*model, tbuf.data(),
+                                       buffers->request_count, device_);
             auto output = model->forward(input).to(torch::kCPU).contiguous();
             const float* ptr = output.template data_ptr<float>();
             for (int i = 0; i < buffers->request_count; ++i) evs[i] = ptr[i];
@@ -830,9 +828,8 @@ public:
                                       buffers->request_count, tables_, tbuf.data());
         {
             torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(
-                tbuf.data(), {buffers->request_count, Traits::kTensorSize},
-                torch::kFloat32).to(device_);
+            auto input = make_nn_input(*model, tbuf.data(),
+                                       buffers->request_count, device_);
             auto output = model->forward(input).to(torch::kCPU).contiguous();
             const float* ptr = output.template data_ptr<float>();
             for (int i = 0; i < buffers->request_count; ++i)
@@ -1096,8 +1093,7 @@ public:
         std::vector<float> all_evs(static_cast<size_t>(total), 0.0f);
         if (total > 0) {
             torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(tensors.data(),
-                {total, Traits::kTensorSize}, torch::kFloat32).to(device_);
+            auto input  = make_nn_input(model, tensors.data(), total, device_);
             auto output = model.forward(input).to(torch::kCPU).contiguous();
             std::memcpy(all_evs.data(), output.template data_ptr<float>(),
                         sizeof(float) * static_cast<size_t>(total));
@@ -1217,8 +1213,7 @@ public:
         out_nn_value = 0.0f;
         if (nn_model_) {
             torch::NoGradGuard no_grad;
-            auto input  = torch::from_blob(out_tensor.data(), {1, Traits::kTensorSize},
-                                            torch::kFloat32).to(device_);
+            auto input  = make_nn_input(*nn_model_, out_tensor.data(), 1, device_);
             auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
             float val = output.template data_ptr<float>()[0];
             if (nn_model_->config().output_activation != "sigmoid") {
@@ -1231,6 +1226,27 @@ public:
     }
 
 private:
+    // Build a model input tensor from `count` afterstate rows laid out
+    // contiguously as count × Traits::kTensorSize floats in `rows`.
+    //
+    // The tensor layout is append-only (see game_traits.h): an older tensor
+    // version is a byte-exact prefix of the newer one. A model trained on an
+    // older version therefore consumes only the first config().input_size
+    // columns of each row. Slicing to that prefix here is what lets a
+    // pre-Group-G checkpoint (input_size == kTensorSizeV1) keep running against
+    // the current V2 engine (kTensorSize) instead of throwing a dimension
+    // mismatch inside forward(). For a current-version model input_size ==
+    // kTensorSize and the slice is a no-op.
+    static torch::Tensor make_nn_input(const ProYamsNet& model, float* rows,
+                                       int count, torch::Device device) {
+        const int in = model.config().input_size;
+        auto input = torch::from_blob(rows, {count, Traits::kTensorSize},
+                                      torch::kFloat32);
+        if (in < Traits::kTensorSize)
+            input = input.slice(/*dim=*/1, /*start=*/0, /*end=*/in).contiguous();
+        return input.to(device);
+    }
+
     std::shared_ptr<Entry> get_entry(int id) const {
         std::lock_guard<std::mutex> lock(map_mutex_);
         auto it = sessions_.find(id);
@@ -1267,8 +1283,7 @@ private:
         generate_tensor<Traits>(session.state.board, session.ctx,
                                 record.player, tables_, buf.data());
         torch::NoGradGuard no_grad;
-        auto input  = torch::from_blob(buf.data(), {1, Traits::kTensorSize},
-                                        torch::kFloat32).to(device_);
+        auto input  = make_nn_input(*nn_model_, buf.data(), 1, device_);
         auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
         float val = output.template data_ptr<float>()[0];
         if (nn_model_->config().output_activation != "sigmoid") {
@@ -1432,10 +1447,8 @@ private:
 
         {
             torch::NoGradGuard no_grad;
-            auto input = torch::from_blob(
-                session.tensor_buffer.data(),
-                {session.buffers.request_count, Traits::kTensorSize},
-                torch::kFloat32).to(device_);
+            auto input = make_nn_input(*nn_model_, session.tensor_buffer.data(),
+                                       session.buffers.request_count, device_);
             auto output = nn_model_->forward(input).to(torch::kCPU).contiguous();
             const float* ptr = output.template data_ptr<float>();
             for (int i = 0; i < session.buffers.request_count; ++i)

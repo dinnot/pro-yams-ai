@@ -446,7 +446,10 @@
       "Bash(sed -n '44,52p' config/mlp-256/seed.yaml)",
       "Bash(sed -n '44,52p' config/mlp-512/seed.yaml)",
       "Bash(cmake --build /home/sorin/pro_yams_ai/build -j24)",
-      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests --gtest_filter=\"*GroupG*:*Rotation*:*TensorSizes*\")"
+      "Bash(/home/sorin/pro_yams_ai/build/tests/engine/tensor_tests:*)",
+      "Bash(./build/src/ui/pro_yams_play --static_dir ./src/ui/play_static --port 8096 --variant 2v2 --checkpoint ./checkpoints/2v2/mlp-512/selfplay3/checkpoint_step_450000)",
+      "Bash(echo \"started pid $!\")",
+      "Bash(kill 569377)"
     ]
   }
 }
